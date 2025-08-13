@@ -7,27 +7,27 @@ To enable this slash command in Claude Code, copy this file to either:
 - `./.claude/commands/orchestrate.md` (for project-specific use)
 
 ## Usage
-- `/orchestrate start` - Begin orchestration for current task
-- `/orchestrate next` - Continue to next agent
+- `/orchestrate` - Start fresh workflow (default, same as start)
+- `/orchestrate start` - Start fresh workflow (clean outputs + begin)
+- `/orchestrate next` - Continue from current state
 - `/orchestrate status` - Show current progress  
-- `/orchestrate clean` - Reset for fresh start
+- `/orchestrate clean` - Clean outputs only
 
 ## Instructions
 Execute the orchestration command with the specified action:
 
 ```bash
-# Check for environment setup script
+# Source environment and run orchestrator in same bash instance
 if [ -f ".orchestrator.env" ]; then
-    source .orchestrator.env
+    source .orchestrator.env && python orchestrate_claude.py $ARGUMENTS
 elif [ -f "load_env.sh" ]; then
-    source load_env.sh
+    source load_env.sh && python orchestrate_claude.py $ARGUMENTS
+else
+    python orchestrate_claude.py $ARGUMENTS
 fi
-
-# Run orchestrator
-python orchestrate_claude.py $ARGUMENTS
 ```
 
-If no arguments provided, defaults to 'next' to continue the workflow.
+If no arguments provided, defaults to 'start' to begin fresh workflow.
 
 ## Configuration
 To configure environment loading, create `.orchestrator.env` in your project root with any required environment setup commands.

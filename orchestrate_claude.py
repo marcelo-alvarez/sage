@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Claude-Driven Orchestrator with Automatic Response Detection
+Claude-Driven Orchestrator with Human-in-the-Loop Gates
 Designed to be run BY Claude Code to orchestrate itself through agents
 """
 
@@ -117,10 +117,10 @@ FINAL STEP: Run /clear to reset context, then run: source load_env.sh && python 
             if "## Suggested Success Criteria" in line:
                 in_criteria = True
                 continue
-            elif in_criteria and line.strip().startswith('##'):
+            elif in_criteria and line.strip().startswith('##') and not line.strip().startswith('###'):
                 break
-            elif in_criteria and line.strip():
-                criteria_section.append(line.strip())
+            elif in_criteria:
+                criteria_section.append(line)
         
         criteria_text = '\n'.join(criteria_section) if criteria_section else "No criteria found in exploration.md"
         
@@ -130,19 +130,21 @@ The Explorer has suggested the following success criteria:
 
 {criteria_text}
 
-PLEASE REVIEW AND RESPOND:
+**WORKFLOW GATE: Human Review Required**
+
+Please review the success criteria above and choose one of the following options:
 1. **APPROVED** - Accept criteria and continue to Planner
 2. **MODIFY: [your changes]** - Update criteria and continue  
 3. **RETRY EXPLORER** - Restart from Explorer phase
 
-I will now detect your response and process it automatically.
+CLAUDE: After the USER responds above, substitute their response in this command:
+source load_env.sh && python -c "
+from orchestrate_claude import ClaudeDrivenOrchestrator
+orch = ClaudeDrivenOrchestrator()
+orch.process_gate_response('APPROVED', 'criteria')
+"
 
-When you respond, I will:
-- Parse your response (APPROVED/MODIFY/RETRY EXPLORER)
-- Save the appropriate criteria to success-criteria.md
-- Continue to the next phase automatically
-
-Waiting for your response..."""
+Then run: source load_env.sh && python orchestrate_claude.py next"""
         
         return "criteria_gate", instructions
         
@@ -283,40 +285,29 @@ The Verifier has completed with the following results:
 
 Full verification details in .agent-outputs/verification.md
 
-PLEASE REVIEW AND RESPOND:
+**WORKFLOW GATE: Human Review Required**
+
+Please review the verification results above and choose one of the following options:
 1. **APPROVED** - Mark task complete and finish
 2. **RETRY EXPLORER** - Restart entire workflow from Explorer
 3. **RETRY PLANNER** - Restart from Planner (keep criteria)
 4. **RETRY CODER** - Restart from Coder (keep plan)
 5. **RETRY VERIFIER** - Restart just Verifier (keep changes)
 
-I will now detect your response and process it automatically.
+CLAUDE: After the USER responds above, detect their response and call:
+orchestrator.process_gate_response(user_response, 'completion')
 
-When you respond, I will:
-- Parse your response (APPROVED/RETRY [PHASE])
-- Either mark task complete or clean and restart from specified phase
-- Continue the workflow automatically
-
-Waiting for your response..."""
+Then run: source load_env.sh && python orchestrate_claude.py next"""
         
         return "completion_gate", instructions
         
-    def detect_and_process_response(self, gate_type: str) -> bool:
-        """Detect human response in conversation and process it automatically"""
+    def process_gate_response(self, response: str, gate_type: str):
+        """Process user response at a gate"""
         
-        # This method will be called by Claude after showing the gate prompt
-        # Claude should provide the human response as context
-        
-        # For criteria gate
         if gate_type == "criteria":
-            # Claude should detect "APPROVED", "MODIFY: ...", or "RETRY EXPLORER" in conversation
-            # and call the appropriate processing
-            pass
-            
+            return self.process_criteria_approval(response)
         elif gate_type == "completion":
-            # Claude should detect "APPROVED" or "RETRY [PHASE]" in conversation
-            # and call the appropriate processing
-            pass
+            return self.process_completion_approval(response)
             
         return False
         
@@ -338,10 +329,10 @@ Waiting for your response..."""
                     if "## Suggested Success Criteria" in line:
                         in_criteria = True
                         continue
-                    elif in_criteria and line.strip().startswith('##'):
+                    elif in_criteria and line.strip().startswith('##') and not line.strip().startswith('###'):
                         break
-                    elif in_criteria and line.strip():
-                        criteria_section.append(line.strip())
+                    elif in_criteria:
+                        criteria_section.append(line)
                 
                 criteria_text = '\n'.join(criteria_section)
                 criteria_file = self.outputs_dir / "success-criteria.md"
@@ -540,11 +531,36 @@ def main():
     orchestrator = ClaudeDrivenOrchestrator()
     
     if len(sys.argv) < 2:
-        command = "next"  # Default to next when no arguments provided
+        command = "start"  # Default to start when no arguments provided
     else:
         command = sys.argv[1]
     
-    if command == "next":
+    print(f"DEBUG: Command received: '{command}', Args: {sys.argv}")
+    
+    if command == "start":
+        # Start fresh: clean outputs then begin
+        orchestrator.clean_outputs()
+        agent, instructions = orchestrator.get_next_agent()
+        print(f"\n{'='*60}")
+        print(f"STARTING FRESH - AGENT: {agent.upper()}")
+        print(f"{'='*60}")
+        print(instructions)
+        print(f"{'='*60}")
+        
+        # Special handling for gates - tell Claude to wait for user response
+        if agent == "criteria_gate":
+            print("\n⚠️  CRITERIA GATE: Please respond with one of the options above.")
+            print("Claude: After the user responds, detect their response and call:")
+            print("orchestrator.process_gate_response(user_response, 'criteria')")
+            print("Then continue with: python orchestrate_claude.py next")
+            
+        elif agent == "completion_gate":
+            print("\n⚠️  COMPLETION GATE: Please respond with one of the options above.")
+            print("Claude: After the user responds, detect their response and call:")
+            print("orchestrator.process_gate_response(user_response, 'completion')")
+            print("Then continue with: python orchestrate_claude.py next")
+    
+    elif command == "next":
         agent, instructions = orchestrator.get_next_agent()
         print(f"\n{'='*60}")
         print(f"AGENT: {agent.upper()}")
@@ -552,22 +568,18 @@ def main():
         print(instructions)
         print(f"{'='*60}")
         
-        # Special handling for gates - Claude should detect and process responses
+        # Special handling for gates - tell Claude to wait for user response
         if agent == "criteria_gate":
-            print("\nAfter you respond with APPROVED/MODIFY/RETRY EXPLORER:")
-            print("I will automatically detect your response and:")
-            print("1. Parse your approval/modification/retry request")
-            print("2. Save the appropriate criteria to success-criteria.md")
-            print("3. Continue to the next phase")
-            print("\nNo additional commands needed - just respond with your decision.")
+            print("\n⚠️  CRITERIA GATE: Please respond with one of the options above.")
+            print("Claude: After the user responds, detect their response and call:")
+            print("orchestrator.process_gate_response(user_response, 'criteria')")
+            print("Then continue with: python orchestrate_claude.py next")
             
         elif agent == "completion_gate":
-            print("\nAfter you respond with APPROVED/RETRY [PHASE]:")
-            print("I will automatically detect your response and:")
-            print("1. Parse your approval/retry request")
-            print("2. Either mark complete or restart from specified phase")
-            print("3. Continue the workflow")
-            print("\nNo additional commands needed - just respond with your decision.")
+            print("\n⚠️  COMPLETION GATE: Please respond with one of the options above.")
+            print("Claude: After the user responds, detect their response and call:")
+            print("orchestrator.process_gate_response(user_response, 'completion')")
+            print("Then continue with: python orchestrate_claude.py next")
         
     elif command == "status":
         orchestrator.status()
@@ -581,8 +593,10 @@ def main():
     elif command == "fail":
         orchestrator.mark_complete(success=False)
         
+        
     else:
         print(f"Unknown command: {command}")
+        print("Available commands: start, next, status, clean, complete, fail")
 
 
 if __name__ == "__main__":

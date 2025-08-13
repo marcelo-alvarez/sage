@@ -115,11 +115,20 @@ Each agent:
 
 ## Commands
 
-- `python orchestrate_claude.py status` - Show current progress
-- `python orchestrate_claude.py next` - Get next agent instructions
-- `python orchestrate_claude.py complete` - Mark task complete
-- `python orchestrate_claude.py fail` - Mark task failed
-- `python orchestrate_claude.py clean` - Clean outputs for fresh start
+| Command | Description | When to Use |
+|---------|-------------|-------------|
+| `python orchestrate_claude.py` (no args) | Start fresh workflow | Begin new task |
+| `python orchestrate_claude.py start` | Start fresh workflow | Same as no args |
+| `python orchestrate_claude.py next` | Continue from current state | Resume workflow |
+| `python orchestrate_claude.py status` | Show current progress | Check what's done |
+| `python orchestrate_claude.py clean` | Clean outputs only | Reset without starting |
+| `python orchestrate_claude.py complete` | Mark task complete | Force completion |
+| `python orchestrate_claude.py fail` | Mark task failed | Force failure |
+
+**Key Differences:**
+- **`start`** (default): Always begins fresh by cleaning outputs first, then starts Explorer
+- **`next`**: Continues from wherever you left off (Explorer → Criteria Gate → Planner → Coder → Verifier → Completion Gate)
+- **`clean`**: Just resets outputs without starting the workflow
 
 ## License
 
