@@ -256,16 +256,37 @@ class ClaudeDrivenOrchestrator:
         filepath = self.outputs_dir / filename
         filepath.write_text(content)
         self._display_file_contents(filepath, description)
+        
+    def _write_and_execute_command(self, command, description=""):
+        """Write a command to file and instruct Claude to execute it"""
+        command_file = self.outputs_dir / "next-command.txt"
+        command_file.write_text(command)
+        
+        print("INSTRUCTION TO CLAUDE:")
+        print("Read the file .agent-outputs/next-command.txt")
+        print("Then type and execute the command it contains.")
+        if description:
+            print("Purpose: " + description)
+        print("Do not analyze or explain. Just execute the command from the file.")
 
     def _build_agent_instructions(self, agent_name, primary_objective, work_section, completion_phrase):
         """Build standardized agent instructions with primary objective framing"""
-        return "PRIMARY OBJECTIVE: " + primary_objective + "\n\n" + \
-               "WORK TO COMPLETE FIRST:\n\n" + \
-               "FIRST: Run /clear to reset context\n\n" + \
-               work_section + "\n\n" + \
-               "When complete, say \"" + completion_phrase + "\"\n\n" + \
-               "FINAL STEP: After completing all verification work above, use /orchestrate next\n\n" + \
-               "REMEMBER: Complete all verification work FIRST, then advance the workflow."
+        
+        # Write the initial /clear command
+        self._write_and_execute_command("/clear", "Reset context for " + agent_name + " agent")
+        
+        # Write the main work instructions to a file
+        work_instructions = "You are now the " + agent_name.upper() + " agent.\n\n" + \
+                           work_section + "\n\n" + \
+                           "When complete, say \"" + completion_phrase + "\"\n\n" + \
+                           "Then execute: /orchestrate next"
+        
+        work_file = self.outputs_dir / (agent_name + "-instructions.md")
+        work_file.write_text(work_instructions)
+        
+        return "AGENT ACTIVATED: " + agent_name.upper() + "\n\n" + \
+               "After executing /clear, read .agent-outputs/" + agent_name + "-instructions.md\n" + \
+               "and follow those instructions exactly."
 
     def _build_gate_instructions(self, gate_name, content, options):
         """Build standardized gate instructions with improved visibility"""
