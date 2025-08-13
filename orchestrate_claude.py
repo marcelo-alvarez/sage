@@ -147,7 +147,7 @@ class AgentDefinitions:
     """Centralized agent role definitions using external prompts"""
     
     @staticmethod
-    def get_work_agent_role(agent_type: str, **kwargs) -> dict:
+    def get_work_agent_role(agent_type, **kwargs):
         """Generic method for work agents (explorer, planner, coder, verifier)"""
         prompt = AGENT_PROMPTS[agent_type]
         
@@ -158,7 +158,7 @@ class AgentDefinitions:
         
         return {
             "name": agent_type.upper(),
-            "status": f"🔄 {agent_type.upper()}",
+            "status": "🔄 " + agent_type.upper(),
             "completion_phrase": prompt["completion_phrase"],
             "primary_objective": prompt["primary_objective"],
             "work_section": work_section,
@@ -166,11 +166,11 @@ class AgentDefinitions:
         }
     
     @staticmethod
-    def get_gate_role(gate_type: str, content: str) -> dict:
+    def get_gate_role(gate_type, content):
         """Generic method for gate agents"""
         return {
-            "name": f"{gate_type.upper()}_GATE",
-            "status": f"🚪 {gate_type.upper()} GATE",
+            "name": gate_type.upper() + "_GATE",
+            "status": "🚪 " + gate_type.upper() + " GATE",
             "content": content,
             "options": GATE_OPTIONS[gate_type],
             "auto_continue": False
@@ -183,7 +183,7 @@ class AgentFactory:
     def __init__(self, orchestrator):
         self.orchestrator = orchestrator
         
-    def create_agent(self, agent_type: str, **kwargs) -> Tuple[str, str]:
+    def create_agent(self, agent_type, **kwargs):
         """Create agent instructions based on type"""
         
         if agent_type in ["explorer", "planner", "coder", "verifier"]:
@@ -191,18 +191,17 @@ class AgentFactory:
             
         elif agent_type == "criteria_gate":
             criteria_text = kwargs.get("criteria_text", "")
-            content = f"""Success criteria suggested (see .agent-outputs/exploration.md for details):
-{criteria_text[:200]}{'...' if len(criteria_text) > 200 else ''}"""
+            content = "Success criteria suggested (see .agent-outputs/exploration.md for details):\n" + \
+                     (criteria_text[:200] + ('...' if len(criteria_text) > 200 else ''))
             role = AgentDefinitions.get_gate_role("criteria", content)
             
         elif agent_type == "completion_gate":
             status_line = kwargs.get("status_line", "")
-            content = f"""Verification: {status_line}
-(Full details in .agent-outputs/verification.md)"""
+            content = "Verification: " + status_line + "\n(Full details in .agent-outputs/verification.md)"
             role = AgentDefinitions.get_gate_role("completion", content)
             
         else:
-            return "error", f"Unknown agent type: {agent_type}"
+            return "error", "Unknown agent type: " + agent_type
         
         # Update task status
         self.orchestrator._update_task_status(
@@ -245,72 +244,63 @@ class ClaudeDrivenOrchestrator:
         self.agents_dir.mkdir(exist_ok=True)
         self.outputs_dir.mkdir(exist_ok=True)
 
-    def _echo_visible_message(self, message: str):
-        """Print message that will be immediately visible to Claude without truncation"""
-        print("\n" + "=" * 80)
-        print(message)
-        print("=" * 80)
+    def _display_file_contents(self, filepath, description="file"):
+        """Helper method to display file contents without truncation"""
+        print("INSTRUCTION TO CLAUDE:")
+        print("Read the file " + str(filepath))
+        print("Then type out its complete contents verbatim as your response text.")
+        print("Do not use any tools. Just type the " + description + " contents as your reply.")
+        
+    def _write_and_display(self, content, filename, description="status"):
+        """Write content to file and instruct Claude to display it"""
+        filepath = self.outputs_dir / filename
+        filepath.write_text(content)
+        self._display_file_contents(filepath, description)
 
-    def _build_agent_instructions(self, agent_name: str, primary_objective: str, work_section: str, completion_phrase: str) -> str:
+    def _build_agent_instructions(self, agent_name, primary_objective, work_section, completion_phrase):
         """Build standardized agent instructions with primary objective framing"""
-        return f"""PRIMARY OBJECTIVE: {primary_objective}
+        return "PRIMARY OBJECTIVE: " + primary_objective + "\n\n" + \
+               "WORK TO COMPLETE FIRST:\n\n" + \
+               "FIRST: Run /clear to reset context\n\n" + \
+               work_section + "\n\n" + \
+               "When complete, say \"" + completion_phrase + "\"\n\n" + \
+               "FINAL STEP: After completing all verification work above, use /orchestrate next\n\n" + \
+               "REMEMBER: Complete all verification work FIRST, then advance the workflow."
 
-WORK TO COMPLETE FIRST:
-
-FIRST: Run /clear to reset context
-
-{work_section}
-
-When complete, say "{completion_phrase}"
-
-FINAL STEP: After completing all verification work above, use /orchestrate next
-
-REMEMBER: Complete all verification work FIRST, then advance the workflow."""
-
-    def _build_gate_instructions(self, gate_name: str, content: str, options: list) -> str:
+    def _build_gate_instructions(self, gate_name, content, options):
         """Build standardized gate instructions with improved visibility"""
-        options_text = '\n'.join(f"• {option}" for option in options)
+        options_text = '\n'.join('• ' + option for option in options)
         
-        # Echo the gate info immediately for visibility
-        self._echo_visible_message(f"""{gate_name.upper()} GATE: Human Review Required
-
-{content}
-
-AVAILABLE OPTIONS:
-{options_text}
-
-WORKFLOW PAUSED - Choose an option above""")
+        # Write gate info to file for display
+        gate_content = gate_name.upper() + " GATE: Human Review Required\n\n" + \
+                      content + "\n\n" + \
+                      "AVAILABLE OPTIONS:\n" + options_text + "\n\n" + \
+                      "WORKFLOW PAUSED - Choose an option above\n"
         
-        return f"""{gate_name.upper()} GATE: Human Review Required
+        gate_filename = "current-" + gate_name.lower() + "-gate.md"
+        self._write_and_display(gate_content, gate_filename, "gate options")
+        
+        return gate_name.upper() + " GATE: Human Review Required\n\n" + \
+               "STOP: I must wait for the human to choose one of the options displayed above. " + \
+               "I will not provide commentary, analysis, or summaries. The human will select an option."
 
-{content}
-
-OPTIONS:
-{options_text}
-
-Paused - choose option above
-
-Show the full output of last bash tool call
-
-STOP: My instructions end here. I must wait for the human to choose one of the options above. I will not provide commentary, analysis, or summaries. The human will select an option."""
-
-    def _retry_from_phase(self, phase_name: str, display_name: str = None):
+    def _retry_from_phase(self, phase_name, display_name=None):
         """Generic retry method for any phase"""
         if not display_name:
             display_name = phase_name.title()
             
         self._clean_from_phase(phase_name)
-        print(f"Restarting from {display_name} phase")
+        print("Restarting from " + display_name + " phase")
         
         # Continue to next agent
         agent, instructions = self.get_next_agent()
-        print(f"\n{'='*60}")
-        print(f"RESTARTING FROM {agent.upper()}")
-        print(f"{'='*60}")
+        print("\n" + "="*60)
+        print("RESTARTING FROM " + agent.upper())
+        print("="*60)
         print(instructions)
-        print(f"{'='*60}")
+        print("="*60)
         
-    def get_next_agent(self) -> Tuple[str, str]:
+    def get_next_agent(self):
         """Get the next agent to run and its instructions"""
         
         # Check what outputs exist to determine next phase
@@ -337,14 +327,14 @@ STOP: My instructions end here. I must wait for the human to choose one of the o
         else:
             return "complete", "All agents have completed successfully. Task marked complete."
             
-    def _prepare_explorer(self) -> Tuple[str, str]:
+    def _prepare_explorer(self):
         """Prepare explorer agent instructions"""
         task = self._get_current_task()
         if not task:
             return "error", "No task found in tasks-checklist.md"
         return self.agent_factory.create_agent("explorer", task=task)
         
-    def _prepare_criteria_gate(self) -> Tuple[str, str]:
+    def _prepare_criteria_gate(self):
         """Prepare criteria approval gate"""
         exploration_file = self.outputs_dir / "exploration.md"
         if not exploration_file.exists():
@@ -369,19 +359,19 @@ STOP: My instructions end here. I must wait for the human to choose one of the o
         criteria_text = '\n'.join(criteria_section) if criteria_section else "No criteria found in exploration.md"
         return self.agent_factory.create_agent("criteria_gate", criteria_text=criteria_text)
         
-    def _prepare_planner(self) -> Tuple[str, str]:
+    def _prepare_planner(self):
         """Prepare planner agent instructions"""
         return self.agent_factory.create_agent("planner")
         
-    def _prepare_coder(self) -> Tuple[str, str]:
+    def _prepare_coder(self):
         """Prepare coder agent instructions"""
         return self.agent_factory.create_agent("coder")
         
-    def _prepare_verifier(self) -> Tuple[str, str]:
+    def _prepare_verifier(self):
         """Prepare verifier agent instructions"""
         return self.agent_factory.create_agent("verifier")
         
-    def _prepare_completion_gate(self) -> Tuple[str, str]:
+    def _prepare_completion_gate(self):
         """Prepare completion approval gate"""
         verification_file = self.outputs_dir / "verification.md"
         if not verification_file.exists():
@@ -421,17 +411,17 @@ STOP: My instructions end here. I must wait for the human to choose one of the o
             
             criteria_text = '\n'.join(criteria_section)
             criteria_file = self.outputs_dir / "success-criteria.md"
-            criteria_file.write_text(f"# Approved Success Criteria\n\n{criteria_text}\n")
+            criteria_file.write_text("# Approved Success Criteria\n\n" + criteria_text + "\n")
             
             print("Success criteria approved and saved")
             
             # Continue to next agent
             agent, instructions = self.get_next_agent()
-            print(f"\n{'='*60}")
-            print(f"CRITERIA APPROVED - CONTINUING TO {agent.upper()}")
-            print(f"{'='*60}")
+            print("\n" + "="*60)
+            print("CRITERIA APPROVED - CONTINUING TO " + agent.upper())
+            print("="*60)
             print(instructions)
-            print(f"{'='*60}")
+            print("="*60)
             
     def modify_criteria(self, modification_request=None):
         """Set up criteria modification task for Claude and continue workflow"""
@@ -448,37 +438,30 @@ STOP: My instructions end here. I must wait for the human to choose one of the o
             
         # Save the modification request for Claude to process
         modification_file = self.outputs_dir / "criteria-modification-request.md"
-        modification_file.write_text(f"# Criteria Modification Request\n\n{modification_request}\n")
+        modification_file.write_text("# Criteria Modification Request\n\n" + modification_request + "\n")
         
         # Set up a special "criteria modifier" agent task
         task = self._get_current_task()
         self._update_task_status(task, "MODIFYING CRITERIA")
         
-        instructions = f"""FIRST: Run /clear to reset context
-
-CRITERIA MODIFICATION TASK:
-
-1. Read .agent-outputs/exploration.md to see the original suggested criteria
-2. Read .agent-outputs/criteria-modification-request.md for the modification request
-3. Apply the requested modifications to create updated success criteria
-4. Write the final modified criteria to .agent-outputs/success-criteria.md
-
-MODIFICATION REQUEST: {modification_request}
-
-Output format for success-criteria.md:
-# Approved Success Criteria
-
-[Your modified criteria here - apply the modification request to the original suggestions]
-
-When complete, say "CRITERIA MODIFICATION COMPLETE"
-
-FINAL STEP: Run /clear to reset context, then run: /orchestrate next"""
+        instructions = "FIRST: Run /clear to reset context\n\n" + \
+                      "CRITERIA MODIFICATION TASK:\n\n" + \
+                      "1. Read .agent-outputs/exploration.md to see the original suggested criteria\n" + \
+                      "2. Read .agent-outputs/criteria-modification-request.md for the modification request\n" + \
+                      "3. Apply the requested modifications to create updated success criteria\n" + \
+                      "4. Write the final modified criteria to .agent-outputs/success-criteria.md\n\n" + \
+                      "MODIFICATION REQUEST: " + modification_request + "\n\n" + \
+                      "Output format for success-criteria.md:\n" + \
+                      "# Approved Success Criteria\n\n" + \
+                      "[Your modified criteria here - apply the modification request to the original suggestions]\n\n" + \
+                      "When complete, say \"CRITERIA MODIFICATION COMPLETE\"\n\n" + \
+                      "FINAL STEP: Run /clear to reset context, then run: /orchestrate next"
         
-        print(f"\n{'='*60}")
-        print(f"CRITERIA MODIFICATION TASK READY")
-        print(f"{'='*60}")
+        print("\n" + "="*60)
+        print("CRITERIA MODIFICATION TASK READY")
+        print("="*60)
         print(instructions)
-        print(f"{'='*60}")
+        print("="*60)
         
         return "criteria_modifier", instructions
         
@@ -493,16 +476,17 @@ FINAL STEP: Run /clear to reset context, then run: /orchestrate next"""
             self._update_task_status(task, "COMPLETE")
             self._update_checklist(task, completed=True)
             approval_file = self.outputs_dir / "completion-approved.md"
-            approval_file.write_text(f"# Task Completion Approved\n\nTask: {task}\nApproved at: {datetime.now().isoformat()}\n")
+            approval_file.write_text("# Task Completion Approved\n\nTask: " + task + 
+                                    "\nApproved at: " + datetime.now().isoformat() + "\n")
             
-            print(f"\n{'='*60}")
+            print("\n" + "="*60)
             print("TASK COMPLETED SUCCESSFULLY!")
-            print(f"{'='*60}")
-            print(f"Task marked complete: {task}")
+            print("="*60)
+            print("Task marked complete: " + task)
             print("Updated tasks.md and tasks-checklist.md")
             print("Check .agent-outputs/verification.md for final results")
             print("Run /orchestrate clean to prepare for next task")
-            print(f"{'='*60}")
+            print("="*60)
             
     def retry_from_planner(self):
         """Restart from Planner phase (keep criteria)"""
@@ -518,7 +502,7 @@ FINAL STEP: Run /clear to reset context, then run: /orchestrate next"""
         
     # UTILITY METHODS
     
-    def _clean_from_phase(self, phase: str):
+    def _clean_from_phase(self, phase):
         """Clean outputs from specified phase onwards"""
         
         phase_files = {
@@ -536,9 +520,9 @@ FINAL STEP: Run /clear to reset context, then run: /orchestrate next"""
                 
         task = self._get_current_task()
         if task:
-            self._update_task_status(task, f"RETRY FROM {phase.upper()}")
+            self._update_task_status(task, "RETRY FROM " + phase.upper())
         
-    def mark_complete(self, success: bool = True):
+    def mark_complete(self, success=True):
         """Mark current task as complete or failed"""
         
         task = self._get_current_task()
@@ -548,10 +532,10 @@ FINAL STEP: Run /clear to reset context, then run: /orchestrate next"""
         if success:
             self._update_task_status(task, "COMPLETE")
             self._update_checklist(task, completed=True)
-            print(f"\nTask marked complete: {task}")
+            print("\nTask marked complete: " + task)
         else:
             self._update_task_status(task, "NEEDS REVIEW")
-            print(f"\nTask needs review: {task}")
+            print("\nTask needs review: " + task)
             
     def clean_outputs(self):
         """Clean output directory for fresh run"""
@@ -574,13 +558,12 @@ FINAL STEP: Run /clear to reset context, then run: /orchestrate next"""
                 filepath.unlink()
                 cleaned_count += 1
                 
-        print(f"Cleaned {cleaned_count} orchestrator files from .agent-outputs/")
+        print("Cleaned " + str(cleaned_count) + " orchestrator files from .agent-outputs/")
         
     def status(self):
-        """Show current orchestration status by writing to file and calling showstatus"""
+        """Show current orchestration status by writing to file and commanding display"""
         
-        status_info = "Orchestration Status:\n"
-        status_info += "-" * 50 + "\n"
+        status_info = "# Orchestration Status\n\n"
         
         files = [
             ("exploration.md", "Explorer"),
@@ -595,22 +578,18 @@ FINAL STEP: Run /clear to reset context, then run: /orchestrate next"""
             filepath = self.outputs_dir / filename
             if filepath.exists():
                 size = filepath.stat().st_size
-                status_info += f"✓ {agent:<15} complete ({size} bytes)\n"
+                status_info += "✓ " + agent.ljust(15) + " complete (" + str(size) + " bytes)\n"
             else:
-                status_info += f"⏳ {agent:<15} pending\n"
+                status_info += "⏳ " + agent.ljust(15) + " pending\n"
                 
         current_task = self._get_current_task()
         if current_task:
-            status_info += f"\nCurrent task: {current_task[:60]}"
+            status_info += "\nCurrent task: " + current_task[:60] + "\n"
             
-        # Write status to file
-        status_file = self.outputs_dir / "current-status.md"
-        status_file.write_text(f"# Current Orchestration Status\n\n{status_info}\n")
-        
-        print("Status written to .agent-outputs/current-status.md")
-        print("/orchestrate showstatus")
+        # Write and display status
+        self._write_and_display(status_info, "current-status.md", "status")
             
-    def _get_current_task(self) -> Optional[str]:
+    def _get_current_task(self):
         """Extract next uncompleted task from tasks-checklist.md"""
         
         if self.checklist_file.exists():
@@ -626,14 +605,14 @@ FINAL STEP: Run /clear to reset context, then run: /orchestrate next"""
                         return task
         return None
         
-    def _update_task_status(self, task: str, status: str):
+    def _update_task_status(self, task, status):
         """Update task status in tasks.md"""
         
         if not task:
             return
             
         if not self.tasks_file.exists():
-            self.tasks_file.write_text(f"# Tasks\n\n- [ ] {task} - {status}\n")
+            self.tasks_file.write_text("# Tasks\n\n- [ ] " + task + " - " + status + "\n")
             return
             
         content = self.tasks_file.read_text()
@@ -643,21 +622,21 @@ FINAL STEP: Run /clear to reset context, then run: /orchestrate next"""
         for i, line in enumerate(lines):
             if task[:30] in line:
                 if '- [ ]' in line:
-                    lines[i] = f"- [ ] {task} - {status}"
+                    lines[i] = "- [ ] " + task + " - " + status
                 elif '- [x]' in line:
                     if status == "COMPLETE":
-                        lines[i] = f"- [x] {task} - {status}"
+                        lines[i] = "- [x] " + task + " - " + status
                     else:
-                        lines[i] = f"- [ ] {task} - {status}"
+                        lines[i] = "- [ ] " + task + " - " + status
                 task_updated = True
                 break
                 
         if not task_updated:
-            lines.append(f"- [ ] {task} - {status}")
+            lines.append("- [ ] " + task + " - " + status)
             
         self.tasks_file.write_text('\n'.join(lines))
         
-    def _update_checklist(self, task: str, completed: bool):
+    def _update_checklist(self, task, completed):
         """Update task in checklist file"""
         
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -672,17 +651,17 @@ FINAL STEP: Run /clear to reset context, then run: /orchestrate next"""
         for i, line in enumerate(lines):
             if task[:50] in line and '- [ ]' in line:
                 if completed:
-                    lines[i] = f"- [x] {task} (Completed: {timestamp})"
+                    lines[i] = "- [x] " + task + " (Completed: " + timestamp + ")"
                 else:
-                    lines[i] = f"- [ ] {task} (Attempted: {timestamp})"
+                    lines[i] = "- [ ] " + task + " (Attempted: " + timestamp + ")"
                 task_found = True
                 break
         
         if not task_found:
             if completed:
-                new_line = f"- [x] {task} (Completed: {timestamp})"
+                new_line = "- [x] " + task + " (Completed: " + timestamp + ")"
             else:
-                new_line = f"- [ ] {task} (Attempted: {timestamp})"
+                new_line = "- [ ] " + task + " (Attempted: " + timestamp + ")"
             lines.append(new_line)
         
         self.checklist_file.write_text('\n'.join(lines))
@@ -703,46 +682,22 @@ def main():
         # Start fresh: clean outputs then begin
         orchestrator.clean_outputs()
         agent, instructions = orchestrator.get_next_agent()
-        print(f"\n{'='*60}")
-        print(f"STARTING FRESH - AGENT: {agent.upper()}")
-        print(f"{'='*60}")
+        print("\n" + "="*60)
+        print("STARTING FRESH - AGENT: " + agent.upper())
+        print("="*60)
         print(instructions)
-        print(f"{'='*60}")
+        print("="*60)
         
     elif command == "next":
         agent, instructions = orchestrator.get_next_agent()
-        print(f"\n{'='*60}")
-        print(f"AGENT: {agent.upper()}")
-        print(f"{'='*60}")
+        print("\n" + "="*60)
+        print("AGENT: " + agent.upper())
+        print("="*60)
         print(instructions)
-        print(f"{'='*60}")
+        print("="*60)
         
     elif command == "status":
         orchestrator.status()
-        
-    elif command == "showstatus":
-        status_file = orchestrator.outputs_dir / "current-status.md"
-        if status_file.exists():
-            content = status_file.read_text()
-            print(content)
-        else:
-            print("No status file found. Run /orchestrate status first.")
-            
-    elif command == "showcriteria":
-        criteria_file = orchestrator.outputs_dir / "current-criteria-gate.md"
-        if criteria_file.exists():
-            content = criteria_file.read_text()
-            print(content)
-        else:
-            print("No criteria gate file found. No criteria gate currently active.")
-            
-    elif command == "showcompletion":
-        completion_file = orchestrator.outputs_dir / "current-completion-gate.md"
-        if completion_file.exists():
-            content = completion_file.read_text()
-            print(content)
-        else:
-            print("No completion gate file found. No completion gate currently active.")
         
     elif command == "clean":
         orchestrator.clean_outputs()
@@ -781,7 +736,7 @@ def main():
         orchestrator.retry_from_verifier()
         
     else:
-        print(f"Unknown command: {command}")
+        print("Unknown command: " + command)
         print("\nAvailable commands:")
         print("  Workflow: start, next, status, clean, complete, fail")
         print("  Gates: approve-criteria, modify-criteria, retry-explorer")
