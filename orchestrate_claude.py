@@ -41,7 +41,7 @@ Output format for exploration.md:
 - [Objective criterion 1 - e.g., specific files must exist]
 - [Objective criterion 2 - e.g., no hanging processes]
 - [Objective criterion 3 - e.g., specific output generated]""",
-        "primary_objective": "After completing exploration work, run /clear then /orchestrate next to advance the workflow",
+        "primary_objective": "After completing exploration work, run /clear then use the slash command /orchestrate next to advance the workflow",
         "completion_phrase": "EXPLORER COMPLETE"
     },
     
@@ -67,7 +67,7 @@ Output format for plan.md:
 ## Steps
 ## Files to Modify
 ## Success Criteria""",
-        "primary_objective": "After completing the plan, run /clear then /orchestrate next to advance the workflow",
+        "primary_objective": "After completing the plan, run /clear then use the slash command /orchestrate next to advance the workflow",
         "completion_phrase": "PLANNER COMPLETE"
     },
     
@@ -91,7 +91,7 @@ Output format for changes.md:
 ## Files Modified
 ## Changes Made
 ## Tests Updated""",
-        "primary_objective": "After completing implementation, run /clear then /orchestrate next to advance the workflow",
+        "primary_objective": "After completing implementation, run /clear then use the slash command /orchestrate next to advance the workflow",
         "completion_phrase": "CODER COMPLETE"
     },
     
@@ -121,7 +121,7 @@ Output format for verification.md:
 - Claim 1: PASS/FAIL with evidence
 - Claim 2: PASS/FAIL with evidence
 ## Overall Status: SUCCESS/FAILURE""",
-        "primary_objective": "After completing verification, run /clear then /orchestrate next to advance the workflow",
+        "primary_objective": "After completing verification, run /clear then use the slash command /orchestrate next to advance the workflow",
         "completion_phrase": "VERIFIER COMPLETE"
     }
 }
@@ -263,9 +263,9 @@ FIRST: Run /clear to reset context
 
 When complete, say "{completion_phrase}"
 
-FINAL STEP: Run /orchestrate next
+FINAL STEP: After completing all verification work above, use /orchestrate next
 
-REMEMBER: You are not finished until you execute the final step above. Your main job is workflow advancement after completing the work."""
+REMEMBER: Complete all verification work FIRST, then advance the workflow."""
 
     def _build_gate_instructions(self, gate_name: str, content: str, options: list) -> str:
         """Build standardized gate instructions with improved visibility"""
@@ -289,6 +289,8 @@ OPTIONS:
 {options_text}
 
 Paused - choose option above
+
+Show the full output of last bash tool call
 
 STOP: My instructions end here. I must wait for the human to choose one of the options above. I will not provide commentary, analysis, or summaries. The human will select an option."""
 
@@ -575,10 +577,10 @@ FINAL STEP: Run /clear to reset context, then run: /orchestrate next"""
         print(f"Cleaned {cleaned_count} orchestrator files from .agent-outputs/")
         
     def status(self):
-        """Show current orchestration status"""
+        """Show current orchestration status by writing to file and calling showstatus"""
         
-        print("\nOrchestration Status:")
-        print("-" * 50)
+        status_info = "Orchestration Status:\n"
+        status_info += "-" * 50 + "\n"
         
         files = [
             ("exploration.md", "Explorer"),
@@ -593,13 +595,20 @@ FINAL STEP: Run /clear to reset context, then run: /orchestrate next"""
             filepath = self.outputs_dir / filename
             if filepath.exists():
                 size = filepath.stat().st_size
-                print(f"✓ {agent:<15} complete ({size} bytes)")
+                status_info += f"✓ {agent:<15} complete ({size} bytes)\n"
             else:
-                print(f"⏳ {agent:<15} pending")
+                status_info += f"⏳ {agent:<15} pending\n"
                 
         current_task = self._get_current_task()
         if current_task:
-            print(f"\nCurrent task: {current_task[:60]}")
+            status_info += f"\nCurrent task: {current_task[:60]}"
+            
+        # Write status to file
+        status_file = self.outputs_dir / "current-status.md"
+        status_file.write_text(f"# Current Orchestration Status\n\n{status_info}\n")
+        
+        print("Status written to .agent-outputs/current-status.md")
+        print("/orchestrate showstatus")
             
     def _get_current_task(self) -> Optional[str]:
         """Extract next uncompleted task from tasks-checklist.md"""
@@ -710,6 +719,30 @@ def main():
         
     elif command == "status":
         orchestrator.status()
+        
+    elif command == "showstatus":
+        status_file = orchestrator.outputs_dir / "current-status.md"
+        if status_file.exists():
+            content = status_file.read_text()
+            print(content)
+        else:
+            print("No status file found. Run /orchestrate status first.")
+            
+    elif command == "showcriteria":
+        criteria_file = orchestrator.outputs_dir / "current-criteria-gate.md"
+        if criteria_file.exists():
+            content = criteria_file.read_text()
+            print(content)
+        else:
+            print("No criteria gate file found. No criteria gate currently active.")
+            
+    elif command == "showcompletion":
+        completion_file = orchestrator.outputs_dir / "current-completion-gate.md"
+        if completion_file.exists():
+            content = completion_file.read_text()
+            print(content)
+        else:
+            print("No completion gate file found. No completion gate currently active.")
         
     elif command == "clean":
         orchestrator.clean_outputs()
