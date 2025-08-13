@@ -7,16 +7,29 @@ To enable this slash command in Claude Code, copy this file to either:
 - `./.claude/commands/orchestrate.md` (for project-specific use)
 
 ## Instructions
-Execute the orchestration command with the specified arguments:
+Execute the orchestration command with enhanced visibility:
 
 ```bash
-# Source environment and run orchestrator in same bash instance
+# Source environment and run orchestrator with immediate output visibility
 if [ -f ".orchestrator.env" ]; then
-    source .orchestrator.env && python orchestrate_claude.py $ARGUMENTS
+    source .orchestrator.env
 elif [ -f "load_env.sh" ]; then
-    source load_env.sh && python orchestrate_claude.py $ARGUMENTS
-else
-    python orchestrate_claude.py $ARGUMENTS
+    source load_env.sh
+fi
+
+# Run orchestrator and immediately show results
+echo "Running orchestrator command: $ARGUMENTS"
+echo "================================================"
+result=$(python orchestrate_claude.py $ARGUMENTS)
+echo "$result"
+echo "================================================"
+
+# If this is a gate command, ensure options are visible
+if [[ "$result" == *"GATE"* && "$result" == *"OPTIONS:"* ]]; then
+    echo ""
+    echo "GATE DETECTED - OPTIONS AVAILABLE ABOVE"
+    echo "Choose one of the /orchestrate commands listed above"
+    echo ""
 fi
 ```
 

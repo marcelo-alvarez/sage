@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Claude-Driven Orchestrator with Human-in-the-Loop Gates via Slash Commands
-Designed to be run BY Claude Code to orchestrate itself through agents
+Enhanced Claude-Driven Orchestrator with Better Gate Visibility
+Addresses Claude Code's output truncation by using echo commands
 """
 
 import json
@@ -244,7 +244,13 @@ class ClaudeDrivenOrchestrator:
         # Ensure directories exist
         self.agents_dir.mkdir(exist_ok=True)
         self.outputs_dir.mkdir(exist_ok=True)
-        
+
+    def _echo_visible_message(self, message: str):
+        """Print message that will be immediately visible to Claude without truncation"""
+        print("\n" + "=" * 80)
+        print(message)
+        print("=" * 80)
+
     def _build_agent_instructions(self, agent_name: str, primary_objective: str, work_section: str, completion_phrase: str) -> str:
         """Build standardized agent instructions with primary objective framing"""
         return f"""PRIMARY OBJECTIVE: {primary_objective}
@@ -262,17 +268,27 @@ FINAL STEP: Run /orchestrate next
 REMEMBER: You are not finished until you execute the final step above. Your main job is workflow advancement after completing the work."""
 
     def _build_gate_instructions(self, gate_name: str, content: str, options: list) -> str:
-        """Build standardized gate instructions"""
+        """Build standardized gate instructions with improved visibility"""
         options_text = '\n'.join(f"• {option}" for option in options)
         
-        return f"""🚪 {gate_name.upper()} GATE: Human Review Required
+        # Echo the gate info immediately for visibility
+        self._echo_visible_message(f"""{gate_name.upper()} GATE: Human Review Required
+
+{content}
+
+AVAILABLE OPTIONS:
+{options_text}
+
+WORKFLOW PAUSED - Choose an option above""")
+        
+        return f"""{gate_name.upper()} GATE: Human Review Required
 
 {content}
 
 OPTIONS:
 {options_text}
 
-⏳ Paused - choose option above
+Paused - choose option above
 
 STOP: My instructions end here. I must wait for the human to choose one of the options above. I will not provide commentary, analysis, or summaries. The human will select an option."""
 
@@ -282,12 +298,12 @@ STOP: My instructions end here. I must wait for the human to choose one of the o
             display_name = phase_name.title()
             
         self._clean_from_phase(phase_name)
-        print(f"🔄 Restarting from {display_name} phase")
+        print(f"Restarting from {display_name} phase")
         
         # Continue to next agent
         agent, instructions = self.get_next_agent()
         print(f"\n{'='*60}")
-        print(f"🔄 RESTARTING FROM {agent.upper()}")
+        print(f"RESTARTING FROM {agent.upper()}")
         print(f"{'='*60}")
         print(instructions)
         print(f"{'='*60}")
@@ -405,12 +421,12 @@ STOP: My instructions end here. I must wait for the human to choose one of the o
             criteria_file = self.outputs_dir / "success-criteria.md"
             criteria_file.write_text(f"# Approved Success Criteria\n\n{criteria_text}\n")
             
-            print("✅ Success criteria approved and saved")
+            print("Success criteria approved and saved")
             
             # Continue to next agent
             agent, instructions = self.get_next_agent()
             print(f"\n{'='*60}")
-            print(f"✅ CRITERIA APPROVED - CONTINUING TO {agent.upper()}")
+            print(f"CRITERIA APPROVED - CONTINUING TO {agent.upper()}")
             print(f"{'='*60}")
             print(instructions)
             print(f"{'='*60}")
@@ -418,14 +434,14 @@ STOP: My instructions end here. I must wait for the human to choose one of the o
     def modify_criteria(self, modification_request=None):
         """Set up criteria modification task for Claude and continue workflow"""
         if not modification_request:
-            print("❌ No modification request provided")
+            print("No modification request provided")
             print("Usage: /orchestrate modify-criteria \"your modification instructions\"")
             return
             
         # Read the current exploration results
         exploration_file = self.outputs_dir / "exploration.md"
         if not exploration_file.exists():
-            print("❌ No exploration.md found. Run the Explorer first.")
+            print("No exploration.md found. Run the Explorer first.")
             return
             
         # Save the modification request for Claude to process
@@ -434,7 +450,7 @@ STOP: My instructions end here. I must wait for the human to choose one of the o
         
         # Set up a special "criteria modifier" agent task
         task = self._get_current_task()
-        self._update_task_status(task, "🔄 MODIFYING CRITERIA")
+        self._update_task_status(task, "MODIFYING CRITERIA")
         
         instructions = f"""FIRST: Run /clear to reset context
 
@@ -457,7 +473,7 @@ When complete, say "CRITERIA MODIFICATION COMPLETE"
 FINAL STEP: Run /clear to reset context, then run: /orchestrate next"""
         
         print(f"\n{'='*60}")
-        print(f"✅ CRITERIA MODIFICATION TASK READY")
+        print(f"CRITERIA MODIFICATION TASK READY")
         print(f"{'='*60}")
         print(instructions)
         print(f"{'='*60}")
@@ -472,18 +488,18 @@ FINAL STEP: Run /clear to reset context, then run: /orchestrate next"""
         """Approve completion and mark task done"""
         task = self._get_current_task()
         if task:
-            self._update_task_status(task, "✅ COMPLETE")
+            self._update_task_status(task, "COMPLETE")
             self._update_checklist(task, completed=True)
             approval_file = self.outputs_dir / "completion-approved.md"
             approval_file.write_text(f"# Task Completion Approved\n\nTask: {task}\nApproved at: {datetime.now().isoformat()}\n")
             
             print(f"\n{'='*60}")
-            print("🎉 TASK COMPLETED SUCCESSFULLY!")
+            print("TASK COMPLETED SUCCESSFULLY!")
             print(f"{'='*60}")
-            print(f"✅ Task marked complete: {task}")
-            print("✅ Updated tasks.md and tasks-checklist.md")
-            print("📄 Check .agent-outputs/verification.md for final results")
-            print("🧹 Run /orchestrate clean to prepare for next task")
+            print(f"Task marked complete: {task}")
+            print("Updated tasks.md and tasks-checklist.md")
+            print("Check .agent-outputs/verification.md for final results")
+            print("Run /orchestrate clean to prepare for next task")
             print(f"{'='*60}")
             
     def retry_from_planner(self):
@@ -518,7 +534,7 @@ FINAL STEP: Run /clear to reset context, then run: /orchestrate next"""
                 
         task = self._get_current_task()
         if task:
-            self._update_task_status(task, f"🔄 RETRY FROM {phase.upper()}")
+            self._update_task_status(task, f"RETRY FROM {phase.upper()}")
         
     def mark_complete(self, success: bool = True):
         """Mark current task as complete or failed"""
@@ -528,12 +544,12 @@ FINAL STEP: Run /clear to reset context, then run: /orchestrate next"""
             return
             
         if success:
-            self._update_task_status(task, "✅ COMPLETE")
+            self._update_task_status(task, "COMPLETE")
             self._update_checklist(task, completed=True)
-            print(f"\n✅ Task marked complete: {task}")
+            print(f"\nTask marked complete: {task}")
         else:
-            self._update_task_status(task, "⚠️ NEEDS REVIEW")
-            print(f"\n⚠️ Task needs review: {task}")
+            self._update_task_status(task, "NEEDS REVIEW")
+            print(f"\nTask needs review: {task}")
             
     def clean_outputs(self):
         """Clean output directory for fresh run"""
@@ -556,12 +572,12 @@ FINAL STEP: Run /clear to reset context, then run: /orchestrate next"""
                 filepath.unlink()
                 cleaned_count += 1
                 
-        print(f"🧹 Cleaned {cleaned_count} orchestrator files from .agent-outputs/")
+        print(f"Cleaned {cleaned_count} orchestrator files from .agent-outputs/")
         
     def status(self):
         """Show current orchestration status"""
         
-        print("\n📊 Orchestration Status:")
+        print("\nOrchestration Status:")
         print("-" * 50)
         
         files = [
@@ -583,7 +599,7 @@ FINAL STEP: Run /clear to reset context, then run: /orchestrate next"""
                 
         current_task = self._get_current_task()
         if current_task:
-            print(f"\n📋 Current task: {current_task[:60]}")
+            print(f"\nCurrent task: {current_task[:60]}")
             
     def _get_current_task(self) -> Optional[str]:
         """Extract next uncompleted task from tasks-checklist.md"""
@@ -620,7 +636,7 @@ FINAL STEP: Run /clear to reset context, then run: /orchestrate next"""
                 if '- [ ]' in line:
                     lines[i] = f"- [ ] {task} - {status}"
                 elif '- [x]' in line:
-                    if status == "✅ COMPLETE":
+                    if status == "COMPLETE":
                         lines[i] = f"- [x] {task} - {status}"
                     else:
                         lines[i] = f"- [ ] {task} - {status}"
