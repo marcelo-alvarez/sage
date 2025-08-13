@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Claude-Driven Orchestrator with Human-in-the-Loop Gates
+Claude-Driven Orchestrator with Human-in-the-Loop Gates via Slash Commands
 Designed to be run BY Claude Code to orchestrate itself through agents
 """
 
@@ -92,12 +92,12 @@ Output format for exploration.md:
 
 When complete, say "EXPLORER COMPLETE"
 
-FINAL STEP: Run /clear to reset context, then run: source load_env.sh && python orchestrate_claude.py next"""
+FINAL STEP: Run /clear to reset context, then run: /orchestrate next"""
         
         return "explorer", instructions
         
     def _prepare_criteria_gate(self) -> Tuple[str, str]:
-        """Prepare criteria approval gate"""
+        """Prepare criteria approval gate - REMOVES auto-continue"""
         
         task = self._get_current_task()
         self._update_task_status(task, "🚪 CRITERIA GATE")
@@ -124,27 +124,19 @@ FINAL STEP: Run /clear to reset context, then run: source load_env.sh && python 
         
         criteria_text = '\n'.join(criteria_section) if criteria_section else "No criteria found in exploration.md"
         
-        instructions = f"""HUMAN APPROVAL REQUIRED: Success Criteria Gate
+        instructions = f"""🚪 CRITERIA GATE: Human Review Required
 
-The Explorer has suggested the following success criteria:
+Success criteria suggested (see .agent-outputs/exploration.md for details):
+{criteria_text[:200]}{'...' if len(criteria_text) > 200 else ''}
 
-{criteria_text}
+OPTIONS:
+• /orchestrate approve-criteria    - Accept and continue
+• /orchestrate modify-criteria     - Modify criteria first  
+• /orchestrate retry-explorer      - Restart exploration
 
-**WORKFLOW GATE: Human Review Required**
+⏳ Paused - choose option above
 
-Please review the success criteria above and choose one of the following options:
-1. **APPROVED** - Accept criteria and continue to Planner
-2. **MODIFY: [your changes]** - Update criteria and continue  
-3. **RETRY EXPLORER** - Restart from Explorer phase
-
-CLAUDE: After the USER responds above, substitute their response in this command:
-source load_env.sh && python -c "
-from orchestrate_claude import ClaudeDrivenOrchestrator
-orch = ClaudeDrivenOrchestrator()
-orch.process_gate_response('APPROVED', 'criteria')
-"
-
-Then run: source load_env.sh && python orchestrate_claude.py next"""
+STOP: My instructions end here. I must wait for the human to choose one of the options above. I will not provide commentary, analysis, or summaries. The human will select an option."""
         
         return "criteria_gate", instructions
         
@@ -180,7 +172,7 @@ Output format for plan.md:
 
 When complete, say "PLANNER COMPLETE"
 
-FINAL STEP: Run /clear to reset context, then run: source load_env.sh && python orchestrate_claude.py next"""
+FINAL STEP: Run /clear to reset context, then run: /orchestrate next"""
         
         return "planner", instructions
         
@@ -214,7 +206,7 @@ Output format for changes.md:
 
 When complete, say "CODER COMPLETE"
 
-FINAL STEP: Run /clear to reset context, then run: source load_env.sh && python orchestrate_claude.py next"""
+FINAL STEP: Run /clear to reset context, then run: /orchestrate next"""
         
         return "coder", instructions
         
@@ -254,12 +246,12 @@ Output format for verification.md:
 
 When complete, say "VERIFIER COMPLETE"
 
-FINAL STEP: Run /clear to reset context, then run: source load_env.sh && python orchestrate_claude.py next"""
+FINAL STEP: Run /clear to reset context, then run: /orchestrate next"""
         
         return "verifier", instructions
         
     def _prepare_completion_gate(self) -> Tuple[str, str]:
-        """Prepare completion approval gate"""
+        """Prepare completion approval gate - REMOVES auto-continue"""
         
         task = self._get_current_task()
         self._update_task_status(task, "🚪 COMPLETION GATE")
@@ -277,106 +269,183 @@ FINAL STEP: Run /clear to reset context, then run: source load_env.sh && python 
                 status_line = line.strip()
                 break
         
-        instructions = f"""HUMAN APPROVAL REQUIRED: Completion Gate
+        instructions = f"""🚪 COMPLETION GATE: Human Review Required
 
-The Verifier has completed with the following results:
+Verification: {status_line}
+(Full details in .agent-outputs/verification.md)
 
-{status_line}
+OPTIONS:
+• /orchestrate approve-completion     - Mark complete
+• /orchestrate retry-explorer         - Restart all
+• /orchestrate retry-from-planner     - Restart from Planner  
+• /orchestrate retry-from-coder       - Restart from Coder
+• /orchestrate retry-from-verifier    - Re-verify only
 
-Full verification details in .agent-outputs/verification.md
+⏳ Paused - choose option above
 
-**WORKFLOW GATE: Human Review Required**
-
-Please review the verification results above and choose one of the following options:
-1. **APPROVED** - Mark task complete and finish
-2. **RETRY EXPLORER** - Restart entire workflow from Explorer
-3. **RETRY PLANNER** - Restart from Planner (keep criteria)
-4. **RETRY CODER** - Restart from Coder (keep plan)
-5. **RETRY VERIFIER** - Restart just Verifier (keep changes)
-
-CLAUDE: After the USER responds above, detect their response and call:
-orchestrator.process_gate_response(user_response, 'completion')
-
-Then run: source load_env.sh && python orchestrate_claude.py next"""
+STOP: My instructions end here. I must wait for the human to choose one of the options above. I will not provide commentary, analysis, or summaries. The human will select an option."""
         
         return "completion_gate", instructions
-        
-    def process_gate_response(self, response: str, gate_type: str):
-        """Process user response at a gate"""
-        
-        if gate_type == "criteria":
-            return self.process_criteria_approval(response)
-        elif gate_type == "completion":
-            return self.process_completion_approval(response)
+
+    # GATE APPROVAL COMMANDS
+    
+    def approve_criteria(self):
+        """Approve criteria and continue to Planner"""
+        # Extract criteria from exploration.md and save
+        exploration_file = self.outputs_dir / "exploration.md"
+        if exploration_file.exists():
+            content = exploration_file.read_text()
+            lines = content.split('\n')
+            criteria_section = []
+            in_criteria = False
             
-        return False
-        
-    def process_criteria_approval(self, response: str):
-        """Process criteria approval response"""
-        
-        response = response.strip().upper()
-        
-        if response == "APPROVED":
-            # Extract criteria from exploration.md and save
-            exploration_file = self.outputs_dir / "exploration.md"
-            if exploration_file.exists():
-                content = exploration_file.read_text()
-                lines = content.split('\n')
-                criteria_section = []
-                in_criteria = False
-                
-                for line in lines:
-                    if "## Suggested Success Criteria" in line:
-                        in_criteria = True
-                        continue
-                    elif in_criteria and line.strip().startswith('##') and not line.strip().startswith('###'):
-                        break
-                    elif in_criteria:
-                        criteria_section.append(line)
-                
-                criteria_text = '\n'.join(criteria_section)
-                criteria_file = self.outputs_dir / "success-criteria.md"
-                criteria_file.write_text(f"# Approved Success Criteria\n\n{criteria_text}\n")
-                print("✅ Success criteria approved and saved")
-                return True
-                
-        elif response.startswith("MODIFY:"):
-            # Save modified criteria
-            modified_criteria = response[7:].strip()
+            for line in lines:
+                if "## Suggested Success Criteria" in line:
+                    in_criteria = True
+                    continue
+                elif in_criteria and line.strip().startswith('##') and not line.strip().startswith('###'):
+                    break
+                elif in_criteria:
+                    criteria_section.append(line)
+            
+            criteria_text = '\n'.join(criteria_section)
             criteria_file = self.outputs_dir / "success-criteria.md"
-            criteria_file.write_text(f"# Approved Success Criteria\n\n{modified_criteria}\n")
-            print("✅ Modified success criteria saved")
-            return True
+            criteria_file.write_text(f"# Approved Success Criteria\n\n{criteria_text}\n")
             
-        elif response == "RETRY EXPLORER":
-            self._clean_from_phase("explorer")
-            print("🔄 Restarting from Explorer phase")
-            return True
+            print("✅ Success criteria approved and saved")
             
-        return False
-        
-    def process_completion_approval(self, response: str):
-        """Process completion approval response"""
-        
-        response = response.strip().upper()
-        
-        if response == "APPROVED":
-            task = self._get_current_task()
-            if task:
-                self._update_task_status(task, "✅ COMPLETE")
-                self._update_checklist(task, completed=True)
-                approval_file = self.outputs_dir / "completion-approved.md"
-                approval_file.write_text(f"# Task Completion Approved\n\nTask: {task}\nApproved at: {datetime.now().isoformat()}\n")
-                print(f"✅ Task marked complete: {task}")
-                return True
-                
-        elif "RETRY" in response:
-            phase = response.split()[-1].lower()
-            self._clean_from_phase(phase)
-            print(f"🔄 Restarting from {phase.title()} phase")
-            return True
+            # Continue to next agent
+            agent, instructions = self.get_next_agent()
+            print(f"\n{'='*60}")
+            print(f"✅ CRITERIA APPROVED - CONTINUING TO {agent.upper()}")
+            print(f"{'='*60}")
+            print(instructions)
+            print(f"{'='*60}")
             
-        return False
+    def modify_criteria(self, modification_request=None):
+        """Set up criteria modification task for Claude and continue workflow"""
+        if not modification_request:
+            print("❌ No modification request provided")
+            print("Usage: /orchestrate modify-criteria \"your modification instructions\"")
+            return
+            
+        # Read the current exploration results
+        exploration_file = self.outputs_dir / "exploration.md"
+        if not exploration_file.exists():
+            print("❌ No exploration.md found. Run the Explorer first.")
+            return
+            
+        # Save the modification request for Claude to process
+        modification_file = self.outputs_dir / "criteria-modification-request.md"
+        modification_file.write_text(f"# Criteria Modification Request\n\n{modification_request}\n")
+        
+        # Set up a special "criteria modifier" agent task
+        task = self._get_current_task()
+        self._update_task_status(task, "🔄 MODIFYING CRITERIA")
+        
+        instructions = f"""FIRST: Run /clear to reset context
+
+CRITERIA MODIFICATION TASK:
+
+1. Read .agent-outputs/exploration.md to see the original suggested criteria
+2. Read .agent-outputs/criteria-modification-request.md for the modification request
+3. Apply the requested modifications to create updated success criteria
+4. Write the final modified criteria to .agent-outputs/success-criteria.md
+
+MODIFICATION REQUEST: {modification_request}
+
+Output format for success-criteria.md:
+# Approved Success Criteria
+
+[Your modified criteria here - apply the modification request to the original suggestions]
+
+When complete, say "CRITERIA MODIFICATION COMPLETE"
+
+FINAL STEP: Run /clear to reset context, then run: /orchestrate next"""
+        
+        print(f"\n{'='*60}")
+        print(f"✅ CRITERIA MODIFICATION TASK READY")
+        print(f"{'='*60}")
+        print(instructions)
+        print(f"{'='*60}")
+        
+        return "criteria_modifier", instructions
+        
+    def retry_explorer(self):
+        """Restart from Explorer phase"""
+        self._clean_from_phase("explorer")
+        
+        print("🔄 Restarting from Explorer phase")
+        
+        # Continue to next agent (which will be Explorer)
+        agent, instructions = self.get_next_agent()
+        print(f"\n{'='*60}")
+        print(f"🔄 RESTARTING FROM {agent.upper()}")
+        print(f"{'='*60}")
+        print(instructions)
+        print(f"{'='*60}")
+        
+    def approve_completion(self):
+        """Approve completion and mark task done"""
+        task = self._get_current_task()
+        if task:
+            self._update_task_status(task, "✅ COMPLETE")
+            self._update_checklist(task, completed=True)
+            approval_file = self.outputs_dir / "completion-approved.md"
+            approval_file.write_text(f"# Task Completion Approved\n\nTask: {task}\nApproved at: {datetime.now().isoformat()}\n")
+            
+            print(f"\n{'='*60}")
+            print("🎉 TASK COMPLETED SUCCESSFULLY!")
+            print(f"{'='*60}")
+            print(f"✅ Task marked complete: {task}")
+            print("✅ Updated tasks.md and tasks-checklist.md")
+            print("📄 Check .agent-outputs/verification.md for final results")
+            print("🧹 Run /orchestrate clean to prepare for next task")
+            print(f"{'='*60}")
+            
+    def retry_from_planner(self):
+        """Restart from Planner phase (keep criteria)"""
+        self._clean_from_phase("planner")
+        
+        print("🔄 Restarting from Planner phase (keeping criteria)")
+        
+        # Continue to next agent
+        agent, instructions = self.get_next_agent()
+        print(f"\n{'='*60}")
+        print(f"🔄 RESTARTING FROM {agent.upper()} (KEEPING CRITERIA)")
+        print(f"{'='*60}")
+        print(instructions)
+        print(f"{'='*60}")
+        
+    def retry_from_coder(self):
+        """Restart from Coder phase (keep plan)"""
+        self._clean_from_phase("coder")
+        
+        print("🔄 Restarting from Coder phase (keeping plan)")
+        
+        # Continue to next agent
+        agent, instructions = self.get_next_agent()
+        print(f"\n{'='*60}")
+        print(f"🔄 RESTARTING FROM {agent.upper()} (KEEPING PLAN)")
+        print(f"{'='*60}")
+        print(instructions)
+        print(f"{'='*60}")
+        
+    def retry_from_verifier(self):
+        """Restart just Verifier phase (keep changes)"""
+        self._clean_from_phase("verifier")
+        
+        print("🔄 Restarting from Verifier phase (keeping changes)")
+        
+        # Continue to next agent
+        agent, instructions = self.get_next_agent()
+        print(f"\n{'='*60}")
+        print(f"🔄 RESTARTING FROM {agent.upper()} (KEEPING CHANGES)")
+        print(f"{'='*60}")
+        print(instructions)
+        print(f"{'='*60}")
+        
+    # UTILITY METHODS
     
     def _clean_from_phase(self, phase: str):
         """Clean outputs from specified phase onwards"""
@@ -416,9 +485,25 @@ Then run: source load_env.sh && python orchestrate_claude.py next"""
     def clean_outputs(self):
         """Clean output directory for fresh run"""
         
-        for file in self.outputs_dir.glob("*.md"):
-            file.unlink()
-        print("🧹 Cleaned .agent-outputs/ directory")
+        # Only clean known orchestrator files
+        orchestrator_files = [
+            "exploration.md",
+            "success-criteria.md", 
+            "plan.md",
+            "changes.md", 
+            "verification.md",
+            "completion-approved.md",
+            "criteria-modification-request.md"
+        ]
+        
+        cleaned_count = 0
+        for filename in orchestrator_files:
+            filepath = self.outputs_dir / filename
+            if filepath.exists():
+                filepath.unlink()
+                cleaned_count += 1
+                
+        print(f"🧹 Cleaned {cleaned_count} orchestrator files from .agent-outputs/")
         
     def status(self):
         """Show current orchestration status"""
@@ -535,8 +620,7 @@ def main():
     else:
         command = sys.argv[1]
     
-    print(f"DEBUG: Command received: '{command}', Args: {sys.argv}")
-    
+    # Basic workflow commands
     if command == "start":
         # Start fresh: clean outputs then begin
         orchestrator.clean_outputs()
@@ -547,19 +631,6 @@ def main():
         print(instructions)
         print(f"{'='*60}")
         
-        # Special handling for gates - tell Claude to wait for user response
-        if agent == "criteria_gate":
-            print("\n⚠️  CRITERIA GATE: Please respond with one of the options above.")
-            print("Claude: After the user responds, detect their response and call:")
-            print("orchestrator.process_gate_response(user_response, 'criteria')")
-            print("Then continue with: python orchestrate_claude.py next")
-            
-        elif agent == "completion_gate":
-            print("\n⚠️  COMPLETION GATE: Please respond with one of the options above.")
-            print("Claude: After the user responds, detect their response and call:")
-            print("orchestrator.process_gate_response(user_response, 'completion')")
-            print("Then continue with: python orchestrate_claude.py next")
-    
     elif command == "next":
         agent, instructions = orchestrator.get_next_agent()
         print(f"\n{'='*60}")
@@ -567,19 +638,6 @@ def main():
         print(f"{'='*60}")
         print(instructions)
         print(f"{'='*60}")
-        
-        # Special handling for gates - tell Claude to wait for user response
-        if agent == "criteria_gate":
-            print("\n⚠️  CRITERIA GATE: Please respond with one of the options above.")
-            print("Claude: After the user responds, detect their response and call:")
-            print("orchestrator.process_gate_response(user_response, 'criteria')")
-            print("Then continue with: python orchestrate_claude.py next")
-            
-        elif agent == "completion_gate":
-            print("\n⚠️  COMPLETION GATE: Please respond with one of the options above.")
-            print("Claude: After the user responds, detect their response and call:")
-            print("orchestrator.process_gate_response(user_response, 'completion')")
-            print("Then continue with: python orchestrate_claude.py next")
         
     elif command == "status":
         orchestrator.status()
@@ -593,10 +651,39 @@ def main():
     elif command == "fail":
         orchestrator.mark_complete(success=False)
         
+    # Gate approval commands
+    elif command == "approve-criteria":
+        orchestrator.approve_criteria()
+        
+    elif command == "modify-criteria":
+        # Get modification request from remaining arguments
+        if len(sys.argv) > 2:
+            modification_request = " ".join(sys.argv[2:])
+            orchestrator.modify_criteria(modification_request)
+        else:
+            orchestrator.modify_criteria()
+        
+    elif command == "retry-explorer":
+        orchestrator.retry_explorer()
+        
+    elif command == "approve-completion":
+        orchestrator.approve_completion()
+        
+    elif command == "retry-from-planner":
+        orchestrator.retry_from_planner()
+        
+    elif command == "retry-from-coder":
+        orchestrator.retry_from_coder()
+        
+    elif command == "retry-from-verifier":
+        orchestrator.retry_from_verifier()
         
     else:
         print(f"Unknown command: {command}")
-        print("Available commands: start, next, status, clean, complete, fail")
+        print("\nAvailable commands:")
+        print("  Workflow: start, next, status, clean, complete, fail")
+        print("  Gates: approve-criteria, modify-criteria, retry-explorer")
+        print("         approve-completion, retry-from-planner, retry-from-coder, retry-from-verifier")
 
 
 if __name__ == "__main__":

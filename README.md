@@ -1,135 +1,100 @@
-# Claude Orchestrator
+# Claude Code Orchestrator
 
-A reusable orchestration system for Claude Code that provides:
-- Focused agent-based task execution
-- Task tracking and management  
-- Context isolation between phases
-- Visibility into Claude's process
+A workflow system for Claude Code that guides development through focused agent phases with human approval gates.
 
-## Required Files
+## Overview
 
-The orchestrator requires these files in your project root:
+This orchestrator runs inside Claude Code conversations, directing Claude through a structured workflow: Explorer → Criteria Gate → Planner → Coder → Verifier → Completion Gate. At decision gates, the workflow pauses and presents slash command options for you to control the next steps.
 
-| File | Purpose | Created By |
-|------|---------|------------|
-| `CLAUDE.md` | Project context and guidelines for Claude Code | `setup_orchestrator.sh` (template) |
-| `tasks-checklist.md` | List of tasks to complete (source of truth) | `setup_orchestrator.sh` (template) |
-| `tasks.md` | Task status tracking and history | `setup_orchestrator.sh` (template) |
-| `.orchestrator.env` | Environment setup commands (optional) | User (when needed) |
+The key insight is separating the work phases (automated) from the decision points (human-controlled), while maintaining context isolation between agents through `/clear` commands and file-based handoffs.
 
 ## Quick Start
 
-### 1. Setup in Your Project
+### Setup
+1. Copy `orchestrate.md` to your Claude Code commands directory:
+   ```bash
+   cp orchestrator-commands/orchestrate.md ~/.claude/commands/
+   ```
 
-```bash
-# From your project directory
-./setup_orchestrator.sh
+2. Add tasks to `tasks-checklist.md`:
+   ```markdown
+   - [ ] Fix authentication bug
+   - [ ] Add user profile feature
+   ```
+
+### Usage
+Start a workflow in Claude Code:
+```
+/orchestrate
 ```
 
-This creates:
-- Agent configuration files in `.claude-agents/`
-- Output directory `.agent-outputs/`
-- Template files: `CLAUDE.md`, `tasks-checklist.md`, `tasks.md`
-
-### 2. Customize Project Context
-
-Edit `CLAUDE.md` to add your project-specific information:
-```markdown
-## PROJECT OVERVIEW
-
-[Replace with: Description of your project, main purpose, key technologies]
-
-## PROJECT-SPECIFIC GUIDELINES
-
-[Add: Any project conventions, patterns, or requirements]
+Claude will work through the Explorer phase automatically, then pause at the Criteria Gate:
+```
+🚪 CRITERIA GATE: Human Review Required
+• /orchestrate approve-criteria
+• /orchestrate modify-criteria "your changes"  
+• /orchestrate retry-explorer
 ```
 
-### 3. Add Tasks
+Choose your path and the workflow continues based on your decision.
 
-Edit `tasks-checklist.md`:
-```markdown
-- [ ] Fix authentication bug
-- [ ] Add user profile feature
-- [ ] Optimize database queries
+## Workflow
+
+```
+Explorer ──→ Criteria Gate ──→ Planner ──→ Coder ──→ Verifier ──→ Completion Gate
+   ↓              ↓               ↓          ↓          ↓              ↓
+analyzes     USER APPROVES     creates   implements  verifies     USER APPROVES
+  task         criteria         plan      changes     results      completion
 ```
 
-### 4. Configure Environment (Optional)
+**Automated phases:** Explorer, Planner, Coder, Verifier run automatically and hand off to the next phase.
 
-If your project requires environment setup (e.g., virtual environments, API keys):
-```bash
-# Create .orchestrator.env in your project root
-echo 'source venv/bin/activate' > .orchestrator.env
-echo 'export API_KEY=your-key' >> .orchestrator.env
-```
+**Decision gates:** Criteria Gate and Completion Gate pause for human input via slash commands.
 
-The orchestrator will automatically source `.orchestrator.env` before running.
-
-### 5. Enable Slash Command (Optional)
-
-Copy the orchestrate command to Claude Code's commands directory:
-```bash
-# For global use across all projects
-cp orchestrator-commands/orchestrate.md ~/.claude/commands/
-
-# OR for project-specific use
-cp orchestrator-commands/orchestrate.md .claude/commands/
-```
-
-This enables `/orchestrate` commands in Claude Code.
-
-### 6. Run in Claude Code
-
-Tell Claude:
-```
-Run the task orchestration. Always use: python orchestrate_claude.py
-Start with "status", then "next" for each agent until complete.
-```
-
-Or use the slash command if enabled:
-```
-/orchestrate status
-/orchestrate next
-```
-
-## How It Works
-
-The orchestrator runs Claude through focused agents with user approval gates:
-
-1. **Explorer** - Understands the task and explores the codebase
-2. **Criteria Gate** - User approves/modifies success criteria (human-in-the-loop)
-3. **Planner** - Creates an implementation plan based on approved criteria
-4. **Coder** - Implements the plan exactly
-5. **Verifier** - Verifies all changes with fresh context
-6. **Completion Gate** - User approves completion or requests changes (human-in-the-loop)
-
-### Agent Characteristics
-Each agent:
-- Starts with `/clear` to reset context
-- Has a single, focused responsibility
-- Cannot exceed its defined scope
-- Passes outputs to the next agent via files
-
-### User Gates
-- **Criteria Gate**: Review and approve success criteria after exploration
-- **Completion Gate**: Verify work is complete or request modifications
+**Context isolation:** Each agent starts with `/clear` and communicates through files in `.agent-outputs/`.
 
 ## Commands
 
-| Command | Description | When to Use |
-|---------|-------------|-------------|
-| `python orchestrate_claude.py` (no args) | Start fresh workflow | Begin new task |
-| `python orchestrate_claude.py start` | Start fresh workflow | Same as no args |
-| `python orchestrate_claude.py next` | Continue from current state | Resume workflow |
-| `python orchestrate_claude.py status` | Show current progress | Check what's done |
-| `python orchestrate_claude.py clean` | Clean outputs only | Reset without starting |
-| `python orchestrate_claude.py complete` | Mark task complete | Force completion |
-| `python orchestrate_claude.py fail` | Mark task failed | Force failure |
+**Workflow control:**
+- `/orchestrate` - Start fresh workflow  
+- `/orchestrate status` - Show current progress
+- `/orchestrate clean` - Reset outputs
 
-**Key Differences:**
-- **`start`** (default): Always begins fresh by cleaning outputs first, then starts Explorer
-- **`next`**: Continues from wherever you left off (Explorer → Criteria Gate → Planner → Coder → Verifier → Completion Gate)
-- **`clean`**: Just resets outputs without starting the workflow
+**Gate decisions:**
+- `/orchestrate approve-criteria` - Accept criteria and continue
+- `/orchestrate modify-criteria "changes"` - Edit criteria based on feedback
+- `/orchestrate approve-completion` - Mark task complete
+- `/orchestrate retry-from-planner` - Restart from planning phase
 
-## License
+## Architecture
 
-MIT
+The orchestrator is a state machine where:
+- Python script (`orchestrate_claude.py`) manages workflow state and generates agent instructions
+- Claude Code executes the instructions within the conversation
+- Files in `.agent-outputs/` provide context between isolated agent phases
+- Human input via slash commands controls workflow branching at decision points
+
+## File Structure
+
+```
+.agent-outputs/          # Agent work products
+├── exploration.md       # Task analysis and suggested criteria
+├── success-criteria.md  # Approved success criteria  
+├── plan.md             # Implementation plan
+├── changes.md          # Code changes made
+└── verification.md     # Verification results
+
+tasks-checklist.md      # Task list (source of truth)
+tasks.md               # Task status tracking
+orchestrate_claude.py  # Workflow engine
+```
+
+## Design Principles
+
+**Separation of concerns:** Python manages workflow state, Claude does the development work, human makes decisions.
+
+**Context isolation:** Each agent gets fresh context to avoid pollution and maintain focus.
+
+**File-based communication:** Agents pass information through structured files rather than conversation history.
+
+**Human control:** Decision gates prevent runaway automation and ensure human oversight of critical choices.
