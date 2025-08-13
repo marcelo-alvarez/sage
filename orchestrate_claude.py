@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Claude-Driven Orchestrator with Dedicated Gate Steps
+Claude-Driven Orchestrator with Automatic Response Detection
 Designed to be run BY Claude Code to orchestrate itself through agents
 """
 
@@ -135,14 +135,14 @@ PLEASE REVIEW AND RESPOND:
 2. **MODIFY: [your changes]** - Update criteria and continue  
 3. **RETRY EXPLORER** - Restart from Explorer phase
 
-IMPORTANT: Your response determines the next action:
-- "APPROVED" → Save criteria and continue to Planner
-- "MODIFY: [new criteria]" → Save modified criteria and continue
-- "RETRY EXPLORER" → Clean outputs and restart from Explorer
+I will now detect your response and process it automatically.
 
-After you respond, I will process your decision and continue accordingly.
+When you respond, I will:
+- Parse your response (APPROVED/MODIFY/RETRY EXPLORER)
+- Save the appropriate criteria to success-criteria.md
+- Continue to the next phase automatically
 
-FINAL STEP AFTER YOUR RESPONSE: Run /clear to reset context, then run: source load_env.sh && python orchestrate_claude.py next"""
+Waiting for your response..."""
         
         return "criteria_gate", instructions
         
@@ -290,70 +290,102 @@ PLEASE REVIEW AND RESPOND:
 4. **RETRY CODER** - Restart from Coder (keep plan)
 5. **RETRY VERIFIER** - Restart just Verifier (keep changes)
 
-IMPORTANT: Your response determines the next action:
-- "APPROVED" → Mark task complete
-- "RETRY [PHASE]" → Clean appropriate outputs and restart from that phase
+I will now detect your response and process it automatically.
 
-After you respond, I will process your decision and continue accordingly.
+When you respond, I will:
+- Parse your response (APPROVED/RETRY [PHASE])
+- Either mark task complete or clean and restart from specified phase
+- Continue the workflow automatically
 
-FINAL STEP AFTER YOUR RESPONSE: Run /clear to reset context, then run: source load_env.sh && python orchestrate_claude.py next"""
+Waiting for your response..."""
         
         return "completion_gate", instructions
         
-    def process_gate_response(self, response: str, gate_type: str):
-        """Process human response at a gate"""
+    def detect_and_process_response(self, gate_type: str) -> bool:
+        """Detect human response in conversation and process it automatically"""
+        
+        # This method will be called by Claude after showing the gate prompt
+        # Claude should provide the human response as context
+        
+        # For criteria gate
+        if gate_type == "criteria":
+            # Claude should detect "APPROVED", "MODIFY: ...", or "RETRY EXPLORER" in conversation
+            # and call the appropriate processing
+            pass
+            
+        elif gate_type == "completion":
+            # Claude should detect "APPROVED" or "RETRY [PHASE]" in conversation
+            # and call the appropriate processing
+            pass
+            
+        return False
+        
+    def process_criteria_approval(self, response: str):
+        """Process criteria approval response"""
         
         response = response.strip().upper()
         
-        if gate_type == "criteria":
-            if response == "APPROVED":
-                # Extract criteria from exploration.md and save
-                exploration_file = self.outputs_dir / "exploration.md"
-                if exploration_file.exists():
-                    content = exploration_file.read_text()
-                    lines = content.split('\n')
-                    criteria_section = []
-                    in_criteria = False
-                    
-                    for line in lines:
-                        if "## Suggested Success Criteria" in line:
-                            in_criteria = True
-                            continue
-                        elif in_criteria and line.strip().startswith('##'):
-                            break
-                        elif in_criteria and line.strip():
-                            criteria_section.append(line.strip())
-                    
-                    criteria_text = '\n'.join(criteria_section)
-                    criteria_file = self.outputs_dir / "success-criteria.md"
-                    criteria_file.write_text(f"# Approved Success Criteria\n\n{criteria_text}\n")
-                    print("✅ Success criteria approved and saved")
-                    
-            elif response.startswith("MODIFY:"):
-                # Save modified criteria
-                modified_criteria = response[7:].strip()
+        if response == "APPROVED":
+            # Extract criteria from exploration.md and save
+            exploration_file = self.outputs_dir / "exploration.md"
+            if exploration_file.exists():
+                content = exploration_file.read_text()
+                lines = content.split('\n')
+                criteria_section = []
+                in_criteria = False
+                
+                for line in lines:
+                    if "## Suggested Success Criteria" in line:
+                        in_criteria = True
+                        continue
+                    elif in_criteria and line.strip().startswith('##'):
+                        break
+                    elif in_criteria and line.strip():
+                        criteria_section.append(line.strip())
+                
+                criteria_text = '\n'.join(criteria_section)
                 criteria_file = self.outputs_dir / "success-criteria.md"
-                criteria_file.write_text(f"# Approved Success Criteria\n\n{modified_criteria}\n")
-                print("✅ Modified success criteria saved")
+                criteria_file.write_text(f"# Approved Success Criteria\n\n{criteria_text}\n")
+                print("✅ Success criteria approved and saved")
+                return True
                 
-            elif response == "RETRY EXPLORER":
-                self._clean_from_phase("explorer")
-                print("🔄 Restarting from Explorer phase")
+        elif response.startswith("MODIFY:"):
+            # Save modified criteria
+            modified_criteria = response[7:].strip()
+            criteria_file = self.outputs_dir / "success-criteria.md"
+            criteria_file.write_text(f"# Approved Success Criteria\n\n{modified_criteria}\n")
+            print("✅ Modified success criteria saved")
+            return True
+            
+        elif response == "RETRY EXPLORER":
+            self._clean_from_phase("explorer")
+            print("🔄 Restarting from Explorer phase")
+            return True
+            
+        return False
+        
+    def process_completion_approval(self, response: str):
+        """Process completion approval response"""
+        
+        response = response.strip().upper()
+        
+        if response == "APPROVED":
+            task = self._get_current_task()
+            if task:
+                self._update_task_status(task, "✅ COMPLETE")
+                self._update_checklist(task, completed=True)
+                approval_file = self.outputs_dir / "completion-approved.md"
+                approval_file.write_text(f"# Task Completion Approved\n\nTask: {task}\nApproved at: {datetime.now().isoformat()}\n")
+                print(f"✅ Task marked complete: {task}")
+                return True
                 
-        elif gate_type == "completion":
-            if response == "APPROVED":
-                task = self._get_current_task()
-                if task:
-                    self._update_task_status(task, "✅ COMPLETE")
-                    self._update_checklist(task, completed=True)
-                    approval_file = self.outputs_dir / "completion-approved.md"
-                    approval_file.write_text(f"# Task Completion Approved\n\nTask: {task}\nApproved at: {datetime.now().isoformat()}\n")
-                    print(f"✅ Task marked complete: {task}")
-                    
-            elif "RETRY" in response:
-                phase = response.split()[-1].lower()
-                self._clean_from_phase(phase)
-                print(f"🔄 Restarting from {phase.title()} phase")
+        elif "RETRY" in response:
+            phase = response.split()[-1].lower()
+            self._clean_from_phase(phase)
+            print(f"🔄 Restarting from {phase.title()} phase")
+            return True
+            
+        return False
     
     def _clean_from_phase(self, phase: str):
         """Clean outputs from specified phase onwards"""
@@ -519,6 +551,23 @@ def main():
         print(f"{'='*60}")
         print(instructions)
         print(f"{'='*60}")
+        
+        # Special handling for gates - Claude should detect and process responses
+        if agent == "criteria_gate":
+            print("\nAfter you respond with APPROVED/MODIFY/RETRY EXPLORER:")
+            print("I will automatically detect your response and:")
+            print("1. Parse your approval/modification/retry request")
+            print("2. Save the appropriate criteria to success-criteria.md")
+            print("3. Continue to the next phase")
+            print("\nNo additional commands needed - just respond with your decision.")
+            
+        elif agent == "completion_gate":
+            print("\nAfter you respond with APPROVED/RETRY [PHASE]:")
+            print("I will automatically detect your response and:")
+            print("1. Parse your approval/retry request")
+            print("2. Either mark complete or restart from specified phase")
+            print("3. Continue the workflow")
+            print("\nNo additional commands needed - just respond with your decision.")
         
     elif command == "status":
         orchestrator.status()
