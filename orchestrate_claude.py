@@ -11,6 +11,223 @@ from typing import Dict, Any, Optional, Tuple
 import re
 import sys
 
+
+# AGENT PROMPT TEMPLATES
+AGENT_PROMPTS = {
+    "explorer": {
+        "work_section": """Then execute as EXPLORER agent:
+
+TASK: {task}
+
+YOUR ONLY RESPONSIBILITIES:
+1. Understand what needs to be done
+2. Read relevant files (maximum 7)
+3. Identify patterns and dependencies
+4. Write findings to .agent-outputs/exploration.md
+5. Suggest objective success criteria for this task
+
+FORBIDDEN ACTIONS:
+- Writing code
+- Modifying files
+- Creating tests
+
+Output format for exploration.md:
+# Task Exploration
+## Task Understanding
+## Relevant Files
+## Current Implementation
+## Constraints & Risks
+## Suggested Success Criteria
+- [Objective criterion 1 - e.g., specific files must exist]
+- [Objective criterion 2 - e.g., no hanging processes]
+- [Objective criterion 3 - e.g., specific output generated]""",
+        "primary_objective": "After completing exploration work, run /clear then /orchestrate next to advance the workflow",
+        "completion_phrase": "EXPLORER COMPLETE"
+    },
+    
+    "planner": {
+        "work_section": """Then execute as PLANNER agent:
+
+Read .agent-outputs/exploration.md to understand the task.
+Read .agent-outputs/success-criteria.md for the approved success criteria.
+
+YOUR ONLY RESPONSIBILITIES:
+1. Create step-by-step implementation plan
+2. List exact files to modify
+3. Define success criteria (from approved criteria)
+4. Write plan to .agent-outputs/plan.md
+
+FORBIDDEN ACTIONS:
+- Reading source code files directly
+- Writing implementation code
+- Adding unrequested features
+
+Output format for plan.md:
+# Implementation Plan
+## Steps
+## Files to Modify
+## Success Criteria""",
+        "primary_objective": "After completing the plan, run /clear then /orchestrate next to advance the workflow",
+        "completion_phrase": "PLANNER COMPLETE"
+    },
+    
+    "coder": {
+        "work_section": """Then execute as CODER agent:
+
+Read .agent-outputs/plan.md to understand what to implement.
+
+YOUR ONLY RESPONSIBILITIES:
+1. Implement EXACTLY what the plan specifies
+2. Modify only listed files
+3. Document changes in .agent-outputs/changes.md
+
+FORBIDDEN ACTIONS:
+- Exceeding plan scope
+- Refactoring unrelated code
+- Adding unrequested features
+
+Output format for changes.md:
+# Implementation Changes
+## Files Modified
+## Changes Made
+## Tests Updated""",
+        "primary_objective": "After completing implementation, run /clear then /orchestrate next to advance the workflow",
+        "completion_phrase": "CODER COMPLETE"
+    },
+    
+    "verifier": {
+        "work_section": """Then execute as VERIFIER agent with fresh perspective:
+
+Read .agent-outputs/changes.md to see what was supposedly done.
+Read .agent-outputs/success-criteria.md for the approved success criteria.
+
+YOUR ONLY RESPONSIBILITIES:
+1. Verify all claimed changes actually exist
+2. Check if implementation matches plan
+3. CHECK OBJECTIVE SUCCESS CRITERIA FIRST - These are mandatory
+4. Run tests if applicable
+5. Write results to .agent-outputs/verification.md
+
+Be skeptical. Check everything. Trust nothing.
+SUCCESS CRITERIA MUST BE MET - No partial credit for "progress" or "breakthroughs".
+
+Output format for verification.md:
+# Verification Report
+## Success Criteria Verification
+- Criterion 1: PASS/FAIL with evidence
+- Criterion 2: PASS/FAIL with evidence
+- Criterion 3: PASS/FAIL with evidence
+## Code Changes Verification
+- Claim 1: PASS/FAIL with evidence
+- Claim 2: PASS/FAIL with evidence
+## Overall Status: SUCCESS/FAILURE""",
+        "primary_objective": "After completing verification, run /clear then /orchestrate next to advance the workflow",
+        "completion_phrase": "VERIFIER COMPLETE"
+    }
+}
+
+GATE_OPTIONS = {
+    "criteria": [
+        "/orchestrate approve-criteria    - Accept and continue",
+        "/orchestrate modify-criteria     - Modify criteria first",  
+        "/orchestrate retry-explorer      - Restart exploration"
+    ],
+    
+    "completion": [
+        "/orchestrate approve-completion     - Mark complete",
+        "/orchestrate retry-explorer         - Restart all",
+        "/orchestrate retry-from-planner     - Restart from Planner",  
+        "/orchestrate retry-from-coder       - Restart from Coder",
+        "/orchestrate retry-from-verifier    - Re-verify only"
+    ]
+}
+
+
+class AgentDefinitions:
+    """Centralized agent role definitions using external prompts"""
+    
+    @staticmethod
+    def get_work_agent_role(agent_type: str, **kwargs) -> dict:
+        """Generic method for work agents (explorer, planner, coder, verifier)"""
+        prompt = AGENT_PROMPTS[agent_type]
+        
+        # Handle template variables (like {task} for explorer)
+        work_section = prompt["work_section"]
+        if kwargs:
+            work_section = work_section.format(**kwargs)
+        
+        return {
+            "name": agent_type.upper(),
+            "status": f"🔄 {agent_type.upper()}",
+            "completion_phrase": prompt["completion_phrase"],
+            "primary_objective": prompt["primary_objective"],
+            "work_section": work_section,
+            "auto_continue": True
+        }
+    
+    @staticmethod
+    def get_gate_role(gate_type: str, content: str) -> dict:
+        """Generic method for gate agents"""
+        return {
+            "name": f"{gate_type.upper()}_GATE",
+            "status": f"🚪 {gate_type.upper()} GATE",
+            "content": content,
+            "options": GATE_OPTIONS[gate_type],
+            "auto_continue": False
+        }
+
+
+class AgentFactory:
+    """Factory for creating agent instructions"""
+    
+    def __init__(self, orchestrator):
+        self.orchestrator = orchestrator
+        
+    def create_agent(self, agent_type: str, **kwargs) -> Tuple[str, str]:
+        """Create agent instructions based on type"""
+        
+        if agent_type in ["explorer", "planner", "coder", "verifier"]:
+            role = AgentDefinitions.get_work_agent_role(agent_type, **kwargs)
+            
+        elif agent_type == "criteria_gate":
+            criteria_text = kwargs.get("criteria_text", "")
+            content = f"""Success criteria suggested (see .agent-outputs/exploration.md for details):
+{criteria_text[:200]}{'...' if len(criteria_text) > 200 else ''}"""
+            role = AgentDefinitions.get_gate_role("criteria", content)
+            
+        elif agent_type == "completion_gate":
+            status_line = kwargs.get("status_line", "")
+            content = f"""Verification: {status_line}
+(Full details in .agent-outputs/verification.md)"""
+            role = AgentDefinitions.get_gate_role("completion", content)
+            
+        else:
+            return "error", f"Unknown agent type: {agent_type}"
+        
+        # Update task status
+        self.orchestrator._update_task_status(
+            self.orchestrator._get_current_task(), 
+            role["status"]
+        )
+        
+        # Build instructions based on agent type
+        if role["auto_continue"]:
+            instructions = self.orchestrator._build_agent_instructions(
+                role["name"].lower(),
+                role["primary_objective"], 
+                role["work_section"],
+                role["completion_phrase"]
+            )
+        else:
+            instructions = self.orchestrator._build_gate_instructions(
+                role["name"].split("_")[0],  # "CRITERIA" from "CRITERIA_GATE"
+                role["content"],
+                role["options"] 
+            )
+            
+        return role["name"].lower(), instructions
+
+
 class ClaudeDrivenOrchestrator:
     def __init__(self):
         self.project_root = Path.cwd()
@@ -21,9 +238,59 @@ class ClaudeDrivenOrchestrator:
         self.tasks_file = self.project_root / "tasks.md"
         self.checklist_file = self.project_root / "tasks-checklist.md"
         
+        # Initialize agent factory
+        self.agent_factory = AgentFactory(self)
+        
         # Ensure directories exist
         self.agents_dir.mkdir(exist_ok=True)
         self.outputs_dir.mkdir(exist_ok=True)
+        
+    def _build_agent_instructions(self, agent_name: str, primary_objective: str, work_section: str, completion_phrase: str) -> str:
+        """Build standardized agent instructions with primary objective framing"""
+        return f"""PRIMARY OBJECTIVE: {primary_objective}
+
+WORK TO COMPLETE FIRST:
+
+FIRST: Run /clear to reset context
+
+{work_section}
+
+When complete, say "{completion_phrase}"
+
+FINAL STEP: Run /orchestrate next
+
+REMEMBER: You are not finished until you execute the final step above. Your main job is workflow advancement after completing the work."""
+
+    def _build_gate_instructions(self, gate_name: str, content: str, options: list) -> str:
+        """Build standardized gate instructions"""
+        options_text = '\n'.join(f"• {option}" for option in options)
+        
+        return f"""🚪 {gate_name.upper()} GATE: Human Review Required
+
+{content}
+
+OPTIONS:
+{options_text}
+
+⏳ Paused - choose option above
+
+STOP: My instructions end here. I must wait for the human to choose one of the options above. I will not provide commentary, analysis, or summaries. The human will select an option."""
+
+    def _retry_from_phase(self, phase_name: str, display_name: str = None):
+        """Generic retry method for any phase"""
+        if not display_name:
+            display_name = phase_name.title()
+            
+        self._clean_from_phase(phase_name)
+        print(f"🔄 Restarting from {display_name} phase")
+        
+        # Continue to next agent
+        agent, instructions = self.get_next_agent()
+        print(f"\n{'='*60}")
+        print(f"🔄 RESTARTING FROM {agent.upper()}")
+        print(f"{'='*60}")
+        print(instructions)
+        print(f"{'='*60}")
         
     def get_next_agent(self) -> Tuple[str, str]:
         """Get the next agent to run and its instructions"""
@@ -54,54 +321,13 @@ class ClaudeDrivenOrchestrator:
             
     def _prepare_explorer(self) -> Tuple[str, str]:
         """Prepare explorer agent instructions"""
-        
         task = self._get_current_task()
         if not task:
             return "error", "No task found in tasks-checklist.md"
-            
-        self._update_task_status(task, "🔄 EXPLORER")
-        
-        instructions = f"""FIRST: Run /clear to reset context
-
-Then execute as EXPLORER agent:
-
-TASK: {task}
-
-YOUR ONLY RESPONSIBILITIES:
-1. Understand what needs to be done
-2. Read relevant files (maximum 7)
-3. Identify patterns and dependencies
-4. Write findings to .agent-outputs/exploration.md
-5. Suggest objective success criteria for this task
-
-FORBIDDEN ACTIONS:
-- Writing code
-- Modifying files
-- Creating tests
-
-Output format for exploration.md:
-# Task Exploration
-## Task Understanding
-## Relevant Files
-## Current Implementation
-## Constraints & Risks
-## Suggested Success Criteria
-- [Objective criterion 1 - e.g., specific files must exist]
-- [Objective criterion 2 - e.g., no hanging processes]
-- [Objective criterion 3 - e.g., specific output generated]
-
-When complete, say "EXPLORER COMPLETE"
-
-FINAL STEP: Run /clear to reset context, then run: /orchestrate next"""
-        
-        return "explorer", instructions
+        return self.agent_factory.create_agent("explorer", task=task)
         
     def _prepare_criteria_gate(self) -> Tuple[str, str]:
-        """Prepare criteria approval gate - REMOVES auto-continue"""
-        
-        task = self._get_current_task()
-        self._update_task_status(task, "🚪 CRITERIA GATE")
-        
+        """Prepare criteria approval gate"""
         exploration_file = self.outputs_dir / "exploration.md"
         if not exploration_file.exists():
             return "error", "No exploration.md found for criteria approval"
@@ -123,139 +349,22 @@ FINAL STEP: Run /clear to reset context, then run: /orchestrate next"""
                 criteria_section.append(line)
         
         criteria_text = '\n'.join(criteria_section) if criteria_section else "No criteria found in exploration.md"
-        
-        instructions = f"""🚪 CRITERIA GATE: Human Review Required
-
-Success criteria suggested (see .agent-outputs/exploration.md for details):
-{criteria_text[:200]}{'...' if len(criteria_text) > 200 else ''}
-
-OPTIONS:
-• /orchestrate approve-criteria    - Accept and continue
-• /orchestrate modify-criteria     - Modify criteria first  
-• /orchestrate retry-explorer      - Restart exploration
-
-⏳ Paused - choose option above
-
-STOP: My instructions end here. I must wait for the human to choose one of the options above. I will not provide commentary, analysis, or summaries. The human will select an option."""
-        
-        return "criteria_gate", instructions
+        return self.agent_factory.create_agent("criteria_gate", criteria_text=criteria_text)
         
     def _prepare_planner(self) -> Tuple[str, str]:
         """Prepare planner agent instructions"""
-        
-        task = self._get_current_task()
-        self._update_task_status(task, "🔄 PLANNER")
-        
-        instructions = """FIRST: Run /clear to reset context
-
-Then execute as PLANNER agent:
-
-Read .agent-outputs/exploration.md to understand the task.
-Read .agent-outputs/success-criteria.md for the approved success criteria.
-
-YOUR ONLY RESPONSIBILITIES:
-1. Create step-by-step implementation plan
-2. List exact files to modify
-3. Define success criteria (from approved criteria)
-4. Write plan to .agent-outputs/plan.md
-
-FORBIDDEN ACTIONS:
-- Reading source code files directly
-- Writing implementation code
-- Adding unrequested features
-
-Output format for plan.md:
-# Implementation Plan
-## Steps
-## Files to Modify
-## Success Criteria
-
-When complete, say "PLANNER COMPLETE"
-
-FINAL STEP: Run /clear to reset context, then run: /orchestrate next"""
-        
-        return "planner", instructions
+        return self.agent_factory.create_agent("planner")
         
     def _prepare_coder(self) -> Tuple[str, str]:
         """Prepare coder agent instructions"""
-        
-        task = self._get_current_task()
-        self._update_task_status(task, "🔄 CODER")
-        
-        instructions = """FIRST: Run /clear to reset context
-
-Then execute as CODER agent:
-
-Read .agent-outputs/plan.md to understand what to implement.
-
-YOUR ONLY RESPONSIBILITIES:
-1. Implement EXACTLY what the plan specifies
-2. Modify only listed files
-3. Document changes in .agent-outputs/changes.md
-
-FORBIDDEN ACTIONS:
-- Exceeding plan scope
-- Refactoring unrelated code
-- Adding unrequested features
-
-Output format for changes.md:
-# Implementation Changes
-## Files Modified
-## Changes Made
-## Tests Updated
-
-When complete, say "CODER COMPLETE"
-
-FINAL STEP: Run /clear to reset context, then run: /orchestrate next"""
-        
-        return "coder", instructions
+        return self.agent_factory.create_agent("coder")
         
     def _prepare_verifier(self) -> Tuple[str, str]:
         """Prepare verifier agent instructions"""
-        
-        task = self._get_current_task()
-        self._update_task_status(task, "🔄 VERIFIER")
-        
-        instructions = """FIRST: Run /clear to reset context
-
-Then execute as VERIFIER agent with fresh perspective:
-
-Read .agent-outputs/changes.md to see what was supposedly done.
-Read .agent-outputs/success-criteria.md for the approved success criteria.
-
-YOUR ONLY RESPONSIBILITIES:
-1. Verify all claimed changes actually exist
-2. Check if implementation matches plan
-3. CHECK OBJECTIVE SUCCESS CRITERIA FIRST - These are mandatory
-4. Run tests if applicable
-5. Write results to .agent-outputs/verification.md
-
-Be skeptical. Check everything. Trust nothing.
-SUCCESS CRITERIA MUST BE MET - No partial credit for "progress" or "breakthroughs".
-
-Output format for verification.md:
-# Verification Report
-## Success Criteria Verification
-- Criterion 1: PASS/FAIL with evidence
-- Criterion 2: PASS/FAIL with evidence
-- Criterion 3: PASS/FAIL with evidence
-## Code Changes Verification
-- Claim 1: PASS/FAIL with evidence
-- Claim 2: PASS/FAIL with evidence
-## Overall Status: SUCCESS/FAILURE
-
-When complete, say "VERIFIER COMPLETE"
-
-FINAL STEP: Run /clear to reset context, then run: /orchestrate next"""
-        
-        return "verifier", instructions
+        return self.agent_factory.create_agent("verifier")
         
     def _prepare_completion_gate(self) -> Tuple[str, str]:
-        """Prepare completion approval gate - REMOVES auto-continue"""
-        
-        task = self._get_current_task()
-        self._update_task_status(task, "🚪 COMPLETION GATE")
-        
+        """Prepare completion approval gate"""
         verification_file = self.outputs_dir / "verification.md"
         if not verification_file.exists():
             return "error", "No verification.md found for completion approval"
@@ -269,23 +378,7 @@ FINAL STEP: Run /clear to reset context, then run: /orchestrate next"""
                 status_line = line.strip()
                 break
         
-        instructions = f"""🚪 COMPLETION GATE: Human Review Required
-
-Verification: {status_line}
-(Full details in .agent-outputs/verification.md)
-
-OPTIONS:
-• /orchestrate approve-completion     - Mark complete
-• /orchestrate retry-explorer         - Restart all
-• /orchestrate retry-from-planner     - Restart from Planner  
-• /orchestrate retry-from-coder       - Restart from Coder
-• /orchestrate retry-from-verifier    - Re-verify only
-
-⏳ Paused - choose option above
-
-STOP: My instructions end here. I must wait for the human to choose one of the options above. I will not provide commentary, analysis, or summaries. The human will select an option."""
-        
-        return "completion_gate", instructions
+        return self.agent_factory.create_agent("completion_gate", status_line=status_line)
 
     # GATE APPROVAL COMMANDS
     
@@ -373,17 +466,7 @@ FINAL STEP: Run /clear to reset context, then run: /orchestrate next"""
         
     def retry_explorer(self):
         """Restart from Explorer phase"""
-        self._clean_from_phase("explorer")
-        
-        print("🔄 Restarting from Explorer phase")
-        
-        # Continue to next agent (which will be Explorer)
-        agent, instructions = self.get_next_agent()
-        print(f"\n{'='*60}")
-        print(f"🔄 RESTARTING FROM {agent.upper()}")
-        print(f"{'='*60}")
-        print(instructions)
-        print(f"{'='*60}")
+        self._retry_from_phase("explorer")
         
     def approve_completion(self):
         """Approve completion and mark task done"""
@@ -405,45 +488,15 @@ FINAL STEP: Run /clear to reset context, then run: /orchestrate next"""
             
     def retry_from_planner(self):
         """Restart from Planner phase (keep criteria)"""
-        self._clean_from_phase("planner")
-        
-        print("🔄 Restarting from Planner phase (keeping criteria)")
-        
-        # Continue to next agent
-        agent, instructions = self.get_next_agent()
-        print(f"\n{'='*60}")
-        print(f"🔄 RESTARTING FROM {agent.upper()} (KEEPING CRITERIA)")
-        print(f"{'='*60}")
-        print(instructions)
-        print(f"{'='*60}")
+        self._retry_from_phase("planner", "Planner (keeping criteria)")
         
     def retry_from_coder(self):
         """Restart from Coder phase (keep plan)"""
-        self._clean_from_phase("coder")
-        
-        print("🔄 Restarting from Coder phase (keeping plan)")
-        
-        # Continue to next agent
-        agent, instructions = self.get_next_agent()
-        print(f"\n{'='*60}")
-        print(f"🔄 RESTARTING FROM {agent.upper()} (KEEPING PLAN)")
-        print(f"{'='*60}")
-        print(instructions)
-        print(f"{'='*60}")
+        self._retry_from_phase("coder", "Coder (keeping plan)")
         
     def retry_from_verifier(self):
         """Restart just Verifier phase (keep changes)"""
-        self._clean_from_phase("verifier")
-        
-        print("🔄 Restarting from Verifier phase (keeping changes)")
-        
-        # Continue to next agent
-        agent, instructions = self.get_next_agent()
-        print(f"\n{'='*60}")
-        print(f"🔄 RESTARTING FROM {agent.upper()} (KEEPING CHANGES)")
-        print(f"{'='*60}")
-        print(instructions)
-        print(f"{'='*60}")
+        self._retry_from_phase("verifier", "Verifier (keeping changes)")
         
     # UTILITY METHODS
     
