@@ -108,34 +108,53 @@ class AgentConfig:
         
     def _load_from_templates(self):
         """Load agent definitions from template files"""
-        agent_types = ['explorer', 'planner', 'coder', 'scribe', 'verifier']
-        
-        for agent_type in agent_types:
-            template_path = self.templates_dir / agent_type / 'CLAUDE.md'
-            if template_path.exists():
-                try:
-                    content = template_path.read_text()
-                    template = self._parse_template_file(agent_type, content)
-                    self.agents[agent_type] = template
-                except Exception as e:
-                    print(f"Warning: Failed to load template for {agent_type}: {e}")
+        # Scan all subdirectories in templates/agents/ for custom agents
+        if self.templates_dir.exists():
+            for agent_dir in self.templates_dir.iterdir():
+                if agent_dir.is_dir():
+                    agent_type = agent_dir.name
+                    template_path = agent_dir / 'CLAUDE.md'
+                    if template_path.exists():
+                        try:
+                            content = template_path.read_text()
+                            template = self._parse_template_file(agent_type, content)
+                            # Validate template before adding
+                            if self.validate_template(template):
+                                self.agents[agent_type] = template
+                            else:
+                                print(f"Warning: Template validation failed for {agent_type}")
+                        except Exception as e:
+                            print(f"Warning: Failed to load template for {agent_type}: {e}")
                     
     def _parse_template_file(self, agent_name: str, content: str) -> AgentTemplate:
         """Parse template file content into AgentTemplate"""
-        # Extract variables from template content
+        # Extract all variables from template content using regex
         variables = []
-        if '{{task}}' in content or '{task}' in content:
-            variables.append('task')
+        import re
+        
+        # Find all {{variable}} patterns
+        double_brace_vars = re.findall(r'\{\{([^}]+)\}\}', content)
+        # Find all {variable} patterns (excluding double braces)
+        single_brace_vars = re.findall(r'(?<!\{)\{([^{}]+)\}(?!\})', content)
+        
+        # Combine and deduplicate variables
+        all_vars = list(set(double_brace_vars + single_brace_vars))
+        variables = [var.strip() for var in all_vars if var.strip()]
             
-        # Extract completion phrase if present
+        # Extract completion phrase if present - look for multiple patterns
         completion_phrase = f'{agent_name.upper()} COMPLETE'
         for line in content.split('\n'):
-            if 'complete' in line.lower() and 'output:' in line.lower():
+            line_lower = line.lower()
+            # Look for "When complete, output:" or "When complete, say"
+            if ('complete' in line_lower and ('output:' in line_lower or 'say' in line_lower)):
                 # Extract completion phrase from lines like "When complete, output: EXPLORER COMPLETE"
-                parts = line.split(':')
-                if len(parts) > 1:
-                    completion_phrase = parts[1].strip()
-                    break
+                if ':' in line:
+                    parts = line.split(':', 1)
+                    if len(parts) > 1:
+                        phrase = parts[1].strip().strip('"').strip("'")
+                        if phrase:
+                            completion_phrase = phrase
+                            break
                     
         return AgentTemplate(
             name=agent_name,
@@ -148,6 +167,41 @@ class AgentConfig:
             capabilities=[f"{agent_name}_operations"],
             requirements=[]
         )
+        
+    def validate_template(self, template: AgentTemplate) -> bool:
+        """Validate that template has required fields and proper structure"""
+        try:
+            # Check required fields are not empty
+            if not template.name or not template.name.strip():
+                print(f"Template validation failed: Missing agent name")
+                return False
+                
+            if not template.work_section or not template.work_section.strip():
+                print(f"Template validation failed: Missing work_section for {template.name}")
+                return False
+                
+            if not template.completion_phrase or not template.completion_phrase.strip():
+                print(f"Template validation failed: Missing completion_phrase for {template.name}")
+                return False
+            
+            # Check that work_section contains some basic structure
+            work_section = template.work_section.lower()
+            if 'responsibilities' not in work_section and 'responsibility' not in work_section:
+                print(f"Warning: Template for {template.name} may be missing responsibilities section")
+            
+            # Check for forbidden actions section (good practice but not required)
+            if 'forbidden' not in work_section:
+                print(f"Info: Template for {template.name} doesn't specify forbidden actions")
+            
+            # Validate completion phrase format
+            if template.completion_phrase.upper() != template.completion_phrase:
+                print(f"Warning: Completion phrase for {template.name} should be uppercase: {template.completion_phrase}")
+            
+            return True
+            
+        except Exception as e:
+            print(f"Template validation error for {template.name}: {e}")
+            return False
         
     def get_agent_template(self, agent_type: str) -> Optional[AgentTemplate]:
         """Get agent template by type"""
