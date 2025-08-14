@@ -1141,148 +1141,49 @@ Begin by analyzing the current directory and asking the user about their goals.
 
 
 def main():
-    """CLI interface for the extensible orchestrator"""
+    """CLI entry point - designed for actual workflow operations"""
     
-    if len(sys.argv) < 2:
-        # Test mode - show configuration
-        orchestrator = ExtensibleClaudeDrivenOrchestrator()
-        print("Testing Extensible Orchestrator")
-        print("=" * 50)
-        print(f"Available agents: {orchestrator.agent_factory.get_available_agents()}")
-        print(f"Workflow sequence: {orchestrator.workflow_config.sequence}")
-        print("=" * 50)
-        print("Extensible orchestrator test complete!")
-        return
-    
-    command = sys.argv[1]
     orchestrator = ExtensibleClaudeDrivenOrchestrator()
     
-    if command == "continue":
-        next_agent_result = orchestrator.get_continue_agent()
-        if next_agent_result:
-            if isinstance(next_agent_result, tuple):
-                next_agent_type, result = next_agent_result
-                print("============================================================")
-                print(f"STARTING FRESH - AGENT: {next_agent_type.upper()}")
-                print("============================================================")
-                print(result)
-                print("============================================================")
-            else:
-                print("============================================================")
-                print(f"STARTING FRESH - AGENT: {next_agent_result.upper()}")
-                print("============================================================")
-                result = orchestrator.agent_factory.create_agent(next_agent_result)
-                print(result)
-                print("============================================================")
-        else:
-            print("ERROR: Could not determine next agent")
-            
+    if len(sys.argv) < 2:
+        command = "start"  # Default to start when no arguments provided
+    else:
+        command = sys.argv[1]
+    
+    # Basic workflow commands
+    if command == "start":
+        # Start fresh: clean outputs then begin
+        orchestrator.clean_outputs()
+        agent, instructions = orchestrator.get_continue_agent()
+        print("\n" + "="*60)
+        print("STARTING FRESH - AGENT: " + agent.upper())
+        print("="*60)
+        print(instructions)
+        print("="*60)
+        
+    elif command == "continue":
+        agent, instructions = orchestrator.get_continue_agent()
+        print("\n" + "="*60)
+        print("AGENT: " + agent.upper())
+        print("="*60)
+        print(instructions)
+        print("="*60)
+        
     elif command == "status":
         orchestrator.status()
         
     elif command == "clean":
-        # Clean outputs directory
-        import shutil
-        if orchestrator.outputs_dir.exists():
-            files_removed = len(list(orchestrator.outputs_dir.glob("*")))
-            shutil.rmtree(orchestrator.outputs_dir)
-            orchestrator.outputs_dir.mkdir(exist_ok=True)
-            print(f"Cleaned {files_removed} orchestrator files from .agent-outputs/")
-        else:
-            print("Cleaned 0 orchestrator files from .agent-outputs/")
-            
-    elif command == "start":
-        # Clean and start fresh
-        import shutil
-        if orchestrator.outputs_dir.exists():
-            files_removed = len(list(orchestrator.outputs_dir.glob("*")))
-            shutil.rmtree(orchestrator.outputs_dir)
-            print(f"Cleaned {files_removed} orchestrator files from .agent-outputs/")
-        else:
-            print("Cleaned 0 orchestrator files from .agent-outputs/")
-        orchestrator.outputs_dir.mkdir(exist_ok=True)
-        
-        # Start with explorer
-        print("INSTRUCTION TO CLAUDE:")
-        print("Read the file .agent-outputs/next-command.txt")
-        print("Then follow the instructions it contains exactly.")
-        print("Purpose: Reset context and start explorer agent")
-        print("Do not analyze or explain. Just follow the instructions from the file.")
-        print()
-        print("============================================================")
-        print("STARTING FRESH - AGENT: EXPLORER")
-        print("============================================================")
-        result = orchestrator.agent_factory.create_agent("explorer", task=orchestrator._get_current_task())
-        print(result)
-        print("============================================================")
-        
-    elif command == "approve-criteria":
-        # Copy exploration criteria to success-criteria.md
-        exploration_file = orchestrator.outputs_dir / "exploration.md"
-        criteria_file = orchestrator.outputs_dir / "success-criteria.md"
-        
-        if exploration_file.exists():
-            exploration_content = exploration_file.read_text()
-            
-            # Extract criteria section
-            lines = exploration_content.split('\n')
-            criteria_section = []
-            in_criteria = False
-            
-            for line in lines:
-                if "## Suggested Success Criteria" in line:
-                    in_criteria = True
-                    criteria_section.append("# Success Criteria")
-                    continue
-                elif in_criteria and line.strip().startswith('##') and not line.strip().startswith('###'):
-                    break
-                elif in_criteria:
-                    criteria_section.append(line)
-            
-            criteria_content = '\n'.join(criteria_section)
-            criteria_file.write_text(criteria_content)
-            print("SUCCESS CRITERIA APPROVED")
-            print("Criteria copied to .agent-outputs/success-criteria.md")
-            print()
-            print("INSTRUCTION TO CLAUDE:")
-            print("Read the file .agent-outputs/next-command.txt")
-            print("Then follow the instructions it contains exactly.")
-            print("Purpose: Continue to planner agent")
-            print("Do not analyze or explain. Just follow the instructions from the file.")
-            print()
-            print("============================================================")
-            print("STARTING FRESH - AGENT: PLANNER")
-            print("============================================================")
-            result = orchestrator.agent_factory.create_agent("planner")
-            print(result)
-            print("============================================================")
-        else:
-            print("ERROR: exploration.md not found")
-            
-    elif command == "retry-from-verifier":
-        # Remove verification.md and restart verifier
-        verification_file = orchestrator.outputs_dir / "verification.md"
-        if verification_file.exists():
-            verification_file.unlink()
-            
-        print("INSTRUCTION TO CLAUDE:")
-        print("Read the file .agent-outputs/next-command.txt")
-        print("Then follow the instructions it contains exactly.")
-        print("Purpose: Retry verification")
-        print("Do not analyze or explain. Just follow the instructions from the file.")
-        print()
-        print("============================================================")
-        print("STARTING FRESH - AGENT: VERIFIER")
-        print("============================================================")
-        result = orchestrator.agent_factory.create_agent("verifier")
-        print(result)
-        print("============================================================")
+        orchestrator.clean_outputs()
         
     elif command == "complete":
         orchestrator.mark_complete(success=True)
         
     elif command == "fail":
         orchestrator.mark_complete(success=False)
+        
+    # Gate approval commands
+    elif command == "approve-criteria":
+        orchestrator.approve_criteria()
         
     elif command == "modify-criteria":
         # Get modification request from remaining arguments
@@ -1304,11 +1205,14 @@ def main():
     elif command == "retry-from-coder":
         orchestrator.retry_from_coder()
         
+    elif command == "retry-from-verifier":
+        orchestrator.retry_from_verifier()
+        
     elif command == "bootstrap":
         orchestrator.bootstrap_tasks()
         
     else:
-        print(f"Unknown command: {command}")
+        print("Unknown command: " + command)
         print("\nAvailable commands:")
         print("  Workflow: start, continue, status, clean, complete, fail, bootstrap")
         print("  Gates: approve-criteria, modify-criteria, retry-explorer")

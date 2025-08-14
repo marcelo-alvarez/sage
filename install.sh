@@ -9,6 +9,7 @@ set -e
 PROJECT_DIR=""
 GLOBAL_INSTALL=false
 TEMP_DIR=""
+BRANCH="main"
 
 # Colors for output
 RED='\033[0;31m'
@@ -51,6 +52,7 @@ show_usage() {
     echo ""
     echo "Options:"
     echo "  --project-dir DIR    Install to specific directory (default: current directory)"
+    echo "  --branch BRANCH      Install from specific branch (default: main)"
     echo "  --global            Install slash command globally (~/.claude/commands/)"
     echo "  --help              Show this help message"
     echo ""
@@ -63,6 +65,9 @@ show_usage() {
     echo ""
     echo "  # Install with global slash command"
     echo "  curl -fsSL https://raw.githubusercontent.com/marcelo-alvarez/claude-orchestrator/main/install.sh | bash -s -- --project-dir ~/my-project --global"
+    echo ""
+    echo "  # Install from specific branch"
+    echo "  ./install.sh --branch feature/web-dashboard"
 }
 
 # Parse command line arguments
@@ -70,6 +75,10 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         --project-dir)
             PROJECT_DIR="$2"
+            shift 2
+            ;;
+        --branch)
+            BRANCH="$2"
             shift 2
             ;;
         --global)
@@ -134,11 +143,11 @@ validate_target_directory() {
 
 # Clone repository to temporary directory
 clone_repository() {
-    print_info "Downloading Claude Orchestrator..."
+    print_info "Downloading Claude Orchestrator from branch: $BRANCH"
     
     TEMP_DIR=$(mktemp -d)
-    git clone --quiet https://github.com/marcelo-alvarez/claude-orchestrator.git "$TEMP_DIR" || {
-        print_error "Failed to clone repository"
+    git clone --quiet --branch "$BRANCH" https://github.com/marcelo-alvarez/claude-orchestrator.git "$TEMP_DIR" || {
+        print_error "Failed to clone repository from branch: $BRANCH"
         exit 1
     }
     
