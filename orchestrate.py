@@ -71,12 +71,14 @@ class AgentConfig:
         self._load_config()
         
     def _load_config(self):
-        """Load agent configuration from JSON file"""
+        """Load agent configuration from JSON file and template files"""
         if self.config_path.exists():
             try:
                 with open(self.config_path, 'r') as f:
                     config_data = json.load(f)
                     self._parse_config(config_data)
+                # Always load template files in addition to config file
+                self._load_from_templates()
             except Exception as e:
                 print(f"Warning: Failed to load agent config: {e}")
                 self._load_defaults()
@@ -120,7 +122,11 @@ class AgentConfig:
                             template = self._parse_template_file(agent_type, content)
                             # Validate template before adding
                             if self.validate_template(template):
-                                self.agents[agent_type] = template
+                                # Only add if not already loaded from config file (config takes precedence)
+                                if agent_type not in self.agents:
+                                    self.agents[agent_type] = template
+                                else:
+                                    print(f"Info: Skipping template {agent_type} - already loaded from config")
                             else:
                                 print(f"Warning: Template validation failed for {agent_type}")
                         except Exception as e:
