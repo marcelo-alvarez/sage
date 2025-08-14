@@ -972,10 +972,29 @@ def main():
             print("============================================================")
         else:
             print("ERROR: exploration.md not found")
+            
+    elif command == "retry-from-verifier":
+        # Remove verification.md and restart verifier
+        verification_file = orchestrator.outputs_dir / "verification.md"
+        if verification_file.exists():
+            verification_file.unlink()
+            
+        print("INSTRUCTION TO CLAUDE:")
+        print("Read the file .agent-outputs/next-command.txt")
+        print("Then follow the instructions it contains exactly.")
+        print("Purpose: Retry verification")
+        print("Do not analyze or explain. Just follow the instructions from the file.")
+        print()
+        print("============================================================")
+        print("STARTING FRESH - AGENT: VERIFIER")
+        print("============================================================")
+        result = orchestrator.agent_factory.create_agent("verifier")
+        print(result)
+        print("============================================================")
         
     else:
         print(f"Unknown command: {command}")
-        print("Available commands: start, continue, status, clean, approve-criteria")
+        print("Available commands: start, continue, status, clean, approve-criteria, retry-from-verifier")
 
 
 if __name__ == "__main__":
