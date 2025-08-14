@@ -13,3 +13,7 @@ FORBIDDEN ACTIONS:
 - Adding unrequested features
 
 When complete, output: CODER COMPLETE
+
+Then execute: /clear
+
+Then execute: /orchestrate continue
