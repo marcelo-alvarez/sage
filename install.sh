@@ -154,8 +154,8 @@ install_orchestrator() {
     # Create .claude directory structure
     mkdir -p .claude
     
-    # Copy and rename main orchestrator script
-    cp "$TEMP_DIR/orchestrate_claude.py" .claude/orchestrate.py
+    # Copy main orchestrator script
+    cp "$TEMP_DIR/orchestrate.py" .claude/orchestrate.py
     
     # Update paths in orchestrate.py for .claude/ directory structure
     sed -i.bak 's|self\.outputs_dir = Path("\.agent-outputs")|self.outputs_dir = Path(".agent-outputs")|g' .claude/orchestrate.py
