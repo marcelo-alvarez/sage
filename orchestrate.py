@@ -275,21 +275,22 @@ class ClaudeDrivenOrchestrator:
     def _build_agent_instructions(self, agent_name, primary_objective, work_section, completion_phrase):
         """Build standardized agent instructions with primary objective framing"""
         
-        # Write the initial /clear command
-        self._write_and_execute_command("/clear", "Reset context for " + agent_name + " agent")
+        # Build complete instructions including /clear and work instructions
+        complete_instructions = "/clear\n\n" + \
+                               "You are now the " + agent_name.upper() + " agent.\n\n" + \
+                               work_section + "\n\n" + \
+                               "When complete, say \"" + completion_phrase + "\"\n\n" + \
+                               "Then execute: /orchestrate continue"
         
-        # Write the main work instructions to a file
-        work_instructions = "You are now the " + agent_name.upper() + " agent.\n\n" + \
-                           work_section + "\n\n" + \
-                           "When complete, say \"" + completion_phrase + "\"\n\n" + \
-                           "Then execute: /orchestrate continue"
+        # Write complete instructions to next-command.txt
+        self._write_and_execute_command(complete_instructions, "Reset context and start " + agent_name + " agent")
         
+        # Also write to agent-specific file for reference
         work_file = self.outputs_dir / (agent_name + "-instructions.md")
-        work_file.write_text(work_instructions)
+        work_file.write_text(complete_instructions)
         
         return "AGENT ACTIVATED: " + agent_name.upper() + "\n\n" + \
-               "After executing /clear, read .agent-outputs/" + agent_name + "-instructions.md\n" + \
-               "and follow those instructions exactly."
+               "Complete instructions written to .agent-outputs/next-command.txt"
 
     def _build_gate_instructions(self, gate_name, content, options):
         """Build standardized gate instructions with improved visibility"""
