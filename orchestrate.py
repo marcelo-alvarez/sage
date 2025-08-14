@@ -108,7 +108,7 @@ class AgentConfig:
         
     def _load_from_templates(self):
         """Load agent definitions from template files"""
-        agent_types = ['explorer', 'planner', 'coder', 'verifier']
+        agent_types = ['explorer', 'planner', 'coder', 'scribe', 'verifier']
         
         for agent_type in agent_types:
             template_path = self.templates_dir / agent_type / 'CLAUDE.md'
@@ -452,7 +452,7 @@ class WorkflowConfig:
     
     def __init__(self, config_path: Path = None):
         self.config_path = config_path or Path('.claude/workflow-config.json')
-        self.sequence = ["explorer", "criteria_gate", "planner", "coder", "verifier", "completion_gate"]
+        self.sequence = ["explorer", "criteria_gate", "planner", "coder", "scribe", "verifier", "completion_gate"]
         self.gates = {
             "criteria": {
                 "after": "explorer",
@@ -517,6 +517,8 @@ class WorkflowConfig:
             return "plan.md"
         elif agent_type == "coder":
             return "changes.md"
+        elif agent_type == "scribe":
+            return "documentation.md"
         elif agent_type == "verifier":
             return "verification.md"
         else:
