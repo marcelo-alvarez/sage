@@ -821,9 +821,9 @@ class ExtensibleClaudeDrivenOrchestrator:
         self.tasks_file.write_text('\n'.join(lines))
 
     def status(self):
-        """Show current orchestration status"""
+        """Show current orchestration status by writing to file and commanding display"""
         
-        status_info = "# Extensible Orchestration Status\n\n"
+        status_info = "# Orchestration Status\n\n"
         
         files = [
             ("exploration.md", "Explorer"),
@@ -846,12 +846,8 @@ class ExtensibleClaudeDrivenOrchestrator:
         if current_task:
             status_info += "\nCurrent task: " + current_task[:60] + "\n"
             
-        # Add configuration info
-        status_info += f"\nAvailable agents: {', '.join(self.agent_factory.get_available_agents())}\n"
-        status_info += f"Workflow sequence: {' → '.join(self.workflow_config.sequence)}\n"
-            
         # Write and display status
-        self._write_and_display(status_info, "extensible-status.md", "status")
+        self._write_and_display(status_info, "current-status.md", "status")
 
     def modify_criteria(self, modification_request=None):
         """Set up criteria modification task for Claude and continue workflow"""
@@ -897,17 +893,57 @@ class ExtensibleClaudeDrivenOrchestrator:
         """Restart from Explorer phase"""
         self._retry_from_phase("explorer")
         
+    def approve_criteria(self):
+        """Approve criteria and continue to Planner"""
+        # Extract criteria from exploration.md and save
+        exploration_file = self.outputs_dir / "exploration.md"
+        if exploration_file.exists():
+            content = exploration_file.read_text()
+            lines = content.split('\n')
+            criteria_section = []
+            in_criteria = False
+            
+            for line in lines:
+                if "## Suggested Success Criteria" in line:
+                    in_criteria = True
+                    continue
+                elif in_criteria and line.strip().startswith('##') and not line.strip().startswith('###'):
+                    break
+                elif in_criteria:
+                    criteria_section.append(line)
+            
+            criteria_text = '\n'.join(criteria_section)
+            criteria_file = self.outputs_dir / "success-criteria.md"
+            criteria_file.write_text("# Approved Success Criteria\n\n" + criteria_text + "\n")
+            
+            print("Success criteria approved and saved")
+            
+            # Continue to continue agent
+            agent, instructions = self.get_continue_agent()
+            print("\n" + "="*60)
+            print("CRITERIA APPROVED - CONTINUING TO " + agent.upper())
+            print("="*60)
+            print(instructions)
+            print("="*60)
+            
     def approve_completion(self):
         """Approve completion and mark task done"""
         task = self._get_current_task()
         if task:
             self._update_task_status(task, "COMPLETE")
+            self._update_checklist(task, completed=True)
+            approval_file = self.outputs_dir / "completion-approved.md"
+            approval_file.write_text("# Task Completion Approved\n\nTask: " + task + 
+                                    "\nApproved at: " + datetime.now().isoformat() + "\n")
             
-        # Mark completion approved
-        completion_file = self.outputs_dir / "completion-approved.md"
-        completion_file.write_text("# Completion Approved\n\nTask has been approved as complete.")
-        print("COMPLETION APPROVED")
-        print("Task marked as complete.")
+            print("\n" + "="*60)
+            print("TASK COMPLETED SUCCESSFULLY!")
+            print("="*60)
+            print("Task marked complete: " + task)
+            print("Updated tasks.md and tasks-checklist.md")
+            print("Check .agent-outputs/verification.md for final results")
+            print("Run /orchestrate clean to prepare for continue task")
+            print("="*60)
         
     def retry_from_planner(self):
         """Restart from Planner phase (keep criteria)"""
@@ -916,6 +952,33 @@ class ExtensibleClaudeDrivenOrchestrator:
     def retry_from_coder(self):
         """Restart from Coder phase (keep plan)"""
         self._retry_from_phase("coder", "Coder (keeping plan)")
+        
+    def retry_from_verifier(self):
+        """Restart just Verifier phase (keep changes)"""
+        self._retry_from_phase("verifier", "Verifier (keeping changes)")
+        
+    def clean_outputs(self):
+        """Clean output directory for fresh run"""
+        
+        # Only clean known orchestrator files
+        orchestrator_files = [
+            "exploration.md",
+            "success-criteria.md", 
+            "plan.md",
+            "changes.md", 
+            "verification.md",
+            "completion-approved.md",
+            "criteria-modification-request.md"
+        ]
+        
+        cleaned_count = 0
+        for filename in orchestrator_files:
+            filepath = self.outputs_dir / filename
+            if filepath.exists():
+                filepath.unlink()
+                cleaned_count += 1
+                
+        print("Cleaned " + str(cleaned_count) + " orchestrator files from .agent-outputs/")
         
     def mark_complete(self, success=True):
         """Mark current task as complete or failed"""
