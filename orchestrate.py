@@ -853,6 +853,229 @@ class ExtensibleClaudeDrivenOrchestrator:
         # Write and display status
         self._write_and_display(status_info, "extensible-status.md", "status")
 
+    def modify_criteria(self, modification_request=None):
+        """Set up criteria modification task for Claude and continue workflow"""
+        if not modification_request:
+            print("No modification request provided")
+            print("Usage: /orchestrate modify-criteria \"your modification instructions\"")
+            return
+            
+        # Read the current exploration results
+        exploration_file = self.outputs_dir / "exploration.md"
+        if not exploration_file.exists():
+            print("No exploration.md found. Run the Explorer first.")
+            return
+            
+        # Save the modification request for Claude to process
+        modification_file = self.outputs_dir / "criteria-modification-request.md"
+        modification_file.write_text("# Criteria Modification Request\n\n" + modification_request + "\n")
+        
+        # Set up a special "criteria modifier" agent task
+        task = self._get_current_task()
+        self._update_task_status(task, "MODIFYING CRITERIA")
+        
+        instructions = "FIRST: Run /clear to reset context\n\n" + \
+                      "CRITERIA MODIFICATION TASK:\n\n" + \
+                      "1. Read .agent-outputs/exploration.md to see the original suggested criteria\n" + \
+                      "2. Read .agent-outputs/criteria-modification-request.md for the modification request\n" + \
+                      "3. Apply the requested modifications to create updated success criteria\n" + \
+                      "4. Write the final modified criteria to .agent-outputs/success-criteria.md\n\n" + \
+                      "MODIFICATION REQUEST: " + modification_request + "\n\n" + \
+                      "Output format for success-criteria.md:\n" + \
+                      "# Approved Success Criteria\n\n" + \
+                      "[Your modified criteria here - apply the modification request to the original suggestions]\n\n" + \
+                      "When complete, say \"CRITERIA MODIFICATION COMPLETE\"\n\n" + \
+                      "FINAL STEP: Run /clear to reset context, then run: /orchestrate continue"
+        
+        print("\n" + "="*60)
+        print("CRITERIA MODIFICATION TASK READY")
+        print("="*60)
+        print(instructions)
+        print("="*60)
+        
+    def retry_explorer(self):
+        """Restart from Explorer phase"""
+        self._retry_from_phase("explorer")
+        
+    def approve_completion(self):
+        """Approve completion and mark task done"""
+        task = self._get_current_task()
+        if task:
+            self._update_task_status(task, "COMPLETE")
+            
+        # Mark completion approved
+        completion_file = self.outputs_dir / "completion-approved.md"
+        completion_file.write_text("# Completion Approved\n\nTask has been approved as complete.")
+        print("COMPLETION APPROVED")
+        print("Task marked as complete.")
+        
+    def retry_from_planner(self):
+        """Restart from Planner phase (keep criteria)"""
+        self._retry_from_phase("planner", "Planner (keeping criteria)")
+        
+    def retry_from_coder(self):
+        """Restart from Coder phase (keep plan)"""
+        self._retry_from_phase("coder", "Coder (keeping plan)")
+        
+    def mark_complete(self, success=True):
+        """Mark current task as complete or failed"""
+        
+        task = self._get_current_task()
+        if not task:
+            return
+            
+        if success:
+            self._update_task_status(task, "COMPLETE")
+            self._update_checklist(task, completed=True)
+            print("\nTask marked complete: " + task)
+        else:
+            self._update_task_status(task, "NEEDS REVIEW")
+            print("\nTask needs review: " + task)
+            
+    def bootstrap_tasks(self):
+        """Interactive bootstrap to help users generate initial tasks"""
+        
+        bootstrap_instructions = """
+BOOTSTRAP MODE: Help the user create initial tasks for their project
+
+TASK: Analyze the current project and guide the user through creating meaningful tasks
+
+YOUR RESPONSIBILITIES:
+1. Analyze the current codebase and project structure
+2. Ask the user about their goals and priorities  
+3. Suggest specific, actionable tasks based on the analysis
+4. Create both tasks.md and tasks-checklist.md files
+5. Explain the next steps for using the orchestrator
+
+ANALYSIS TO PERFORM:
+- Examine package.json, requirements.txt, or similar dependency files
+- Look at README.md and documentation
+- Identify main source code directories and files
+- Check for existing tests, build scripts, CI/CD
+- Note any obvious issues (missing tests, outdated deps, TODO comments)
+
+QUESTIONS TO ASK USER:
+1. "What are the main goals for this project?"
+2. "What problems are you currently facing?"
+3. "What would you like to work on first - bugs, features, or improvements?"
+4. "Are there any specific areas of the code that need attention?"
+
+TASK GENERATION APPROACH:
+- Create 3-5 specific, actionable tasks
+- Mix of different types: bug fixes, features, tests, docs, refactoring
+- Start with smaller tasks that can build momentum
+- Include acceptance criteria for each task
+
+OUTPUT FORMAT:
+Create both .claude/tasks.md and .claude/tasks-checklist.md with:
+
+tasks.md:
+```markdown
+# Project Tasks
+
+## Current Sprint
+- [ ] [Generated task 1 with clear acceptance criteria]
+- [ ] [Generated task 2 with clear acceptance criteria]
+
+## Backlog  
+- [ ] [Future task 1]
+- [ ] [Future task 2]
+
+## Completed
+[Empty initially]
+```
+
+tasks-checklist.md:
+```markdown
+# Tasks Checklist
+
+- [ ] [Same tasks as above but in simple checklist format]
+```
+
+FINAL STEP: 
+After creating the files, tell the user:
+"Bootstrap complete! Your tasks are ready. Run '/orchestrate start' to begin your first workflow."
+
+Begin by analyzing the current directory and asking the user about their goals.
+"""
+        
+        print("\n" + "="*60)
+        print("BOOTSTRAP MODE: Generating Initial Tasks")
+        print("="*60)
+        print(bootstrap_instructions)
+        print("="*60)
+        
+    def _retry_from_phase(self, phase_name, display_name=None):
+        """Generic retry method for any phase"""
+        if not display_name:
+            display_name = phase_name.title()
+            
+        self._clean_from_phase(phase_name)
+        print("Restarting from " + display_name + " phase")
+        
+        # Continue to continue agent
+        next_agent_result = self.get_continue_agent()
+        if next_agent_result:
+            if isinstance(next_agent_result, tuple):
+                next_agent_type, result = next_agent_result
+                print("\n" + "="*60)
+                print("RESTARTING FROM " + next_agent_type.upper())
+                print("="*60)
+                print(result)
+                print("="*60)
+            else:
+                print("\n" + "="*60)
+                print("RESTARTING FROM " + next_agent_result.upper())
+                print("="*60)
+                
+    def _clean_from_phase(self, phase):
+        """Clean outputs from specified phase onwards"""
+        
+        phase_files = {
+            "explorer": ["exploration.md", "success-criteria.md", "plan.md", "changes.md", "verification.md", "completion-approved.md"],
+            "planner": ["plan.md", "changes.md", "verification.md", "completion-approved.md"],
+            "coder": ["changes.md", "verification.md", "completion-approved.md"],
+            "verifier": ["verification.md", "completion-approved.md"]
+        }
+        
+        files_to_clean = phase_files.get(phase, [])
+        for filename in files_to_clean:
+            filepath = self.outputs_dir / filename
+            if filepath.exists():
+                filepath.unlink()
+                
+        task = self._get_current_task()
+        if task:
+            self._update_task_status(task, f"RESTARTING FROM {phase.upper()}")
+            
+    def _update_checklist(self, task, completed):
+        """Update task in checklist file"""
+        
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        
+        if not self.checklist_file.exists():
+            self.checklist_file.write_text("# Tasks Checklist\n\n")
+            
+        content = self.checklist_file.read_text()
+        lines = content.split('\n')
+        task_found = False
+        
+        for i, line in enumerate(lines):
+            if task[:50] in line and '- [ ]' in line:
+                if completed:
+                    lines[i] = "- [x] " + task + " (Completed: " + timestamp + ")"
+                else:
+                    lines[i] = "- [ ] " + task + " (Attempted: " + timestamp + ")"
+                task_found = True
+                break
+                
+        if not task_found and completed:
+            lines.append("- [x] " + task + " (Completed: " + timestamp + ")")
+        elif not task_found and not completed:
+            lines.append("- [ ] " + task + " (Attempted: " + timestamp + ")")
+            
+        self.checklist_file.write_text('\n'.join(lines))
+
 
 def main():
     """CLI interface for the extensible orchestrator"""
@@ -992,9 +1215,41 @@ def main():
         print(result)
         print("============================================================")
         
+    elif command == "complete":
+        orchestrator.mark_complete(success=True)
+        
+    elif command == "fail":
+        orchestrator.mark_complete(success=False)
+        
+    elif command == "modify-criteria":
+        # Get modification request from remaining arguments
+        if len(sys.argv) > 2:
+            modification_request = " ".join(sys.argv[2:])
+            orchestrator.modify_criteria(modification_request)
+        else:
+            orchestrator.modify_criteria()
+        
+    elif command == "retry-explorer":
+        orchestrator.retry_explorer()
+        
+    elif command == "approve-completion":
+        orchestrator.approve_completion()
+        
+    elif command == "retry-from-planner":
+        orchestrator.retry_from_planner()
+        
+    elif command == "retry-from-coder":
+        orchestrator.retry_from_coder()
+        
+    elif command == "bootstrap":
+        orchestrator.bootstrap_tasks()
+        
     else:
         print(f"Unknown command: {command}")
-        print("Available commands: start, continue, status, clean, approve-criteria, retry-from-verifier")
+        print("\nAvailable commands:")
+        print("  Workflow: start, continue, status, clean, complete, fail, bootstrap")
+        print("  Gates: approve-criteria, modify-criteria, retry-explorer")
+        print("         approve-completion, retry-from-planner, retry-from-coder, retry-from-verifier")
 
 
 if __name__ == "__main__":
