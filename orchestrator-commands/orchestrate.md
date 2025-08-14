@@ -1,6 +1,15 @@
 # Orchestrate
 Manage the orchestration workflow for tasks with human-in-the-loop gates.
 
+Available commands:
+- `bootstrap` - Generate initial tasks for your project
+- `start` - Start fresh workflow  
+- `continue` - Continue to next agent
+- `status` - Show current progress
+- `clean` - Reset outputs
+- `approve-criteria` - Accept criteria and continue
+- `modify-criteria "changes"` - Edit criteria based on feedback
+
 ## Setup
 To enable this slash command in Claude Code, copy this file to either:
 - `~/.claude/commands/orchestrate.md` (for global use across all projects)
@@ -20,7 +29,7 @@ fi
 # Run orchestrator and immediately show results
 echo "Running orchestrator command: $ARGUMENTS"
 echo "================================================"
-result=$(python orchestrate_claude.py $ARGUMENTS)
+result=$(python3 .claude/orchestrate.py $ARGUMENTS)
 echo "$result"
 echo "================================================"
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Enhanced Claude-Driven Orchestrator with Better Gate Visibility
 Addresses Claude Code's output truncation by using echo commands
@@ -230,17 +231,19 @@ class AgentFactory:
 class ClaudeDrivenOrchestrator:
     def __init__(self):
         self.project_root = Path.cwd()
+        self.claude_dir = self.project_root / ".claude"
         self.agents_dir = self.project_root / ".claude-agents"
         self.outputs_dir = self.project_root / ".agent-outputs"
         
-        # Task tracking files in root directory
-        self.tasks_file = self.project_root / "tasks.md"
-        self.checklist_file = self.project_root / "tasks-checklist.md"
+        # Task tracking files in .claude directory
+        self.tasks_file = self.claude_dir / "tasks.md"
+        self.checklist_file = self.claude_dir / "tasks-checklist.md"
         
         # Initialize agent factory
         self.agent_factory = AgentFactory(self)
         
         # Ensure directories exist
+        self.claude_dir.mkdir(exist_ok=True)
         self.agents_dir.mkdir(exist_ok=True)
         self.outputs_dir.mkdir(exist_ok=True)
 
@@ -687,6 +690,79 @@ class ClaudeDrivenOrchestrator:
         
         self.checklist_file.write_text('\n'.join(lines))
 
+    def bootstrap_tasks(self):
+        """Interactive bootstrap to help users generate initial tasks"""
+        
+        bootstrap_instructions = """
+BOOTSTRAP MODE: Help the user create initial tasks for their project
+
+TASK: Analyze the current project and guide the user through creating meaningful tasks
+
+YOUR RESPONSIBILITIES:
+1. Analyze the current codebase and project structure
+2. Ask the user about their goals and priorities  
+3. Suggest specific, actionable tasks based on the analysis
+4. Create both tasks.md and tasks-checklist.md files
+5. Explain the next steps for using the orchestrator
+
+ANALYSIS TO PERFORM:
+- Examine package.json, requirements.txt, or similar dependency files
+- Look at README.md and documentation
+- Identify main source code directories and files
+- Check for existing tests, build scripts, CI/CD
+- Note any obvious issues (missing tests, outdated deps, TODO comments)
+
+QUESTIONS TO ASK USER:
+1. "What are the main goals for this project?"
+2. "What problems are you currently facing?"
+3. "What would you like to work on first - bugs, features, or improvements?"
+4. "Are there any specific areas of the code that need attention?"
+
+TASK GENERATION APPROACH:
+- Create 3-5 specific, actionable tasks
+- Mix of different types: bug fixes, features, tests, docs, refactoring
+- Start with smaller tasks that can build momentum
+- Include acceptance criteria for each task
+
+OUTPUT FORMAT:
+Create both .claude/tasks.md and .claude/tasks-checklist.md with:
+
+tasks.md:
+```markdown
+# Project Tasks
+
+## Current Sprint
+- [ ] [Generated task 1 with clear acceptance criteria]
+- [ ] [Generated task 2 with clear acceptance criteria]
+
+## Backlog  
+- [ ] [Future task 1]
+- [ ] [Future task 2]
+
+## Completed
+[Empty initially]
+```
+
+tasks-checklist.md:
+```markdown
+# Tasks Checklist
+
+- [ ] [Same tasks as above but in simple checklist format]
+```
+
+FINAL STEP: 
+After creating the files, tell the user:
+"Bootstrap complete! Your tasks are ready. Run '/orchestrate start' to begin your first workflow."
+
+Begin by analyzing the current directory and asking the user about their goals.
+"""
+        
+        print("\n" + "="*60)
+        print("BOOTSTRAP MODE: Generating Initial Tasks")
+        print("="*60)
+        print(bootstrap_instructions)
+        print("="*60)
+
 
 def main():
     """CLI entry point - designed for Claude to run"""
@@ -756,10 +832,13 @@ def main():
     elif command == "retry-from-verifier":
         orchestrator.retry_from_verifier()
         
+    elif command == "bootstrap":
+        orchestrator.bootstrap_tasks()
+        
     else:
         print("Unknown command: " + command)
         print("\nAvailable commands:")
-        print("  Workflow: start, continue, status, clean, complete, fail")
+        print("  Workflow: start, continue, status, clean, complete, fail, bootstrap")
         print("  Gates: approve-criteria, modify-criteria, retry-explorer")
         print("         approve-completion, retry-from-planner, retry-from-coder, retry-from-verifier")
 

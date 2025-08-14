@@ -10,22 +10,44 @@ The key insight is separating the work phases (automated) from the decision poin
 
 ## Quick Start
 
-### Setup
-1. Copy `orchestrate.md` to your Claude Code commands directory:
-   ```bash
-   cp orchestrator-commands/orchestrate.md ~/.claude/commands/
-   ```
+### Installation
 
-2. Add tasks to `tasks-checklist.md`:
-   ```markdown
-   - [ ] Fix authentication bug
-   - [ ] Add user profile feature
-   ```
+Install Claude Orchestrator with a single command:
+
+```bash
+# Install in current directory (project-local slash command)
+curl -fsSL https://raw.githubusercontent.com/marcelo-alvarez/claude-orchestrator/main/install.sh | bash
+
+# Install in specific directory
+curl -fsSL https://raw.githubusercontent.com/marcelo-alvarez/claude-orchestrator/main/install.sh | bash -s -- --project-dir ~/my-project
+
+# Install with global slash command (available in all projects)
+curl -fsSL https://raw.githubusercontent.com/marcelo-alvarez/claude-orchestrator/main/install.sh | bash -s -- --project-dir ~/my-project --global
+```
+
+### Generate Initial Tasks
+
+Use the bootstrap command to analyze your project and generate initial tasks:
+```
+/orchestrate bootstrap
+```
+
+Claude will:
+1. Analyze your codebase and project structure
+2. Ask about your goals and priorities
+3. Generate specific, actionable tasks
+4. Create both `tasks.md` and `tasks-checklist.md` files
+
+Alternatively, manually add tasks to `.claude/tasks-checklist.md`:
+```markdown
+- [ ] Fix authentication bug
+- [ ] Add user profile feature
+```
 
 ### Usage
 Start a workflow in Claude Code:
 ```
-/orchestrate
+/orchestrate start
 ```
 
 Claude will work through the Explorer phase automatically, then pause at the Criteria Gate:
@@ -56,7 +78,9 @@ analyzes     USER APPROVES     creates   implements  verifies     USER APPROVES
 ## Commands
 
 **Workflow control:**
-- `/orchestrate` - Start fresh workflow  
+- `/orchestrate bootstrap` - Generate initial tasks for your project
+- `/orchestrate start` - Start fresh workflow  
+- `/orchestrate continue` - Continue to next agent
 - `/orchestrate status` - Show current progress
 - `/orchestrate clean` - Reset outputs
 
@@ -69,7 +93,7 @@ analyzes     USER APPROVES     creates   implements  verifies     USER APPROVES
 ## Architecture
 
 The orchestrator is a state machine where:
-- Python script (`orchestrate_claude.py`) manages workflow state and generates agent instructions
+- Python script (`.claude/orchestrate.py`) manages workflow state and generates agent instructions
 - Claude Code executes the instructions within the conversation
 - Files in `.agent-outputs/` provide context between isolated agent phases
 - Human input via slash commands controls workflow branching at decision points
@@ -77,16 +101,25 @@ The orchestrator is a state machine where:
 ## File Structure
 
 ```
+.claude/                 # Orchestrator files
+├── commands/
+│   └── orchestrate.md   # Slash command (if local install)
+├── orchestrate.py       # Workflow engine
+├── tasks.md            # Task status tracking
+└── tasks-checklist.md  # Task list (source of truth)
+
+.claude-agents/          # Agent templates
+├── explorer/CLAUDE.md
+├── planner/CLAUDE.md
+├── coder/CLAUDE.md
+└── verifier/CLAUDE.md
+
 .agent-outputs/          # Agent work products
 ├── exploration.md       # Task analysis and suggested criteria
 ├── success-criteria.md  # Approved success criteria  
 ├── plan.md             # Implementation plan
 ├── changes.md          # Code changes made
 └── verification.md     # Verification results
-
-tasks-checklist.md      # Task list (source of truth)
-tasks.md               # Task status tracking
-orchestrate_claude.py  # Workflow engine
 ```
 
 ## Design Principles
