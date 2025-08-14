@@ -41,7 +41,7 @@ Output format for exploration.md:
 - [Objective criterion 1 - e.g., specific files must exist]
 - [Objective criterion 2 - e.g., no hanging processes]
 - [Objective criterion 3 - e.g., specific output generated]""",
-        "primary_objective": "After completing exploration work, run /clear then use the slash command /orchestrate next to advance the workflow",
+        "primary_objective": "After completing exploration work, run /clear then use the slash command /orchestrate continue to advance the workflow",
         "completion_phrase": "EXPLORER COMPLETE"
     },
     
@@ -67,7 +67,7 @@ Output format for plan.md:
 ## Steps
 ## Files to Modify
 ## Success Criteria""",
-        "primary_objective": "After completing the plan, run /clear then use the slash command /orchestrate next to advance the workflow",
+        "primary_objective": "After completing the plan, run /clear then use the slash command /orchestrate continue to advance the workflow",
         "completion_phrase": "PLANNER COMPLETE"
     },
     
@@ -91,7 +91,7 @@ Output format for changes.md:
 ## Files Modified
 ## Changes Made
 ## Tests Updated""",
-        "primary_objective": "After completing implementation, run /clear then use the slash command /orchestrate next to advance the workflow",
+        "primary_objective": "After completing implementation, run /clear then use the slash command /orchestrate continue to advance the workflow",
         "completion_phrase": "CODER COMPLETE"
     },
     
@@ -121,7 +121,7 @@ Output format for verification.md:
 - Claim 1: PASS/FAIL with evidence
 - Claim 2: PASS/FAIL with evidence
 ## Overall Status: SUCCESS/FAILURE""",
-        "primary_objective": "After completing verification, run /clear then use the slash command /orchestrate next to advance the workflow",
+        "primary_objective": "After completing verification, run /clear then use the slash command /orchestrate continue to advance the workflow",
         "completion_phrase": "VERIFIER COMPLETE"
     }
 }
@@ -279,7 +279,7 @@ class ClaudeDrivenOrchestrator:
         work_instructions = "You are now the " + agent_name.upper() + " agent.\n\n" + \
                            work_section + "\n\n" + \
                            "When complete, say \"" + completion_phrase + "\"\n\n" + \
-                           "Then execute: /orchestrate next"
+                           "Then execute: /orchestrate continue"
         
         work_file = self.outputs_dir / (agent_name + "-instructions.md")
         work_file.write_text(work_instructions)
@@ -313,15 +313,15 @@ class ClaudeDrivenOrchestrator:
         self._clean_from_phase(phase_name)
         print("Restarting from " + display_name + " phase")
         
-        # Continue to next agent
-        agent, instructions = self.get_next_agent()
+        # Continue to continue agent
+        agent, instructions = self.get_continue_agent()
         print("\n" + "="*60)
         print("RESTARTING FROM " + agent.upper())
         print("="*60)
         print(instructions)
         print("="*60)
         
-    def get_next_agent(self):
+    def get_continue_agent(self):
         """Get the next agent to run and its instructions"""
         
         # Check what outputs exist to determine next phase
@@ -436,8 +436,8 @@ class ClaudeDrivenOrchestrator:
             
             print("Success criteria approved and saved")
             
-            # Continue to next agent
-            agent, instructions = self.get_next_agent()
+            # Continue to continue agent
+            agent, instructions = self.get_continue_agent()
             print("\n" + "="*60)
             print("CRITERIA APPROVED - CONTINUING TO " + agent.upper())
             print("="*60)
@@ -476,7 +476,7 @@ class ClaudeDrivenOrchestrator:
                       "# Approved Success Criteria\n\n" + \
                       "[Your modified criteria here - apply the modification request to the original suggestions]\n\n" + \
                       "When complete, say \"CRITERIA MODIFICATION COMPLETE\"\n\n" + \
-                      "FINAL STEP: Run /clear to reset context, then run: /orchestrate next"
+                      "FINAL STEP: Run /clear to reset context, then run: /orchestrate continue"
         
         print("\n" + "="*60)
         print("CRITERIA MODIFICATION TASK READY")
@@ -506,7 +506,7 @@ class ClaudeDrivenOrchestrator:
             print("Task marked complete: " + task)
             print("Updated tasks.md and tasks-checklist.md")
             print("Check .agent-outputs/verification.md for final results")
-            print("Run /orchestrate clean to prepare for next task")
+            print("Run /orchestrate clean to prepare for continue task")
             print("="*60)
             
     def retry_from_planner(self):
@@ -611,7 +611,7 @@ class ClaudeDrivenOrchestrator:
         self._write_and_display(status_info, "current-status.md", "status")
             
     def _get_current_task(self):
-        """Extract next uncompleted task from tasks-checklist.md"""
+        """Extract continue uncompleted task from tasks-checklist.md"""
         
         if self.checklist_file.exists():
             content = self.checklist_file.read_text()
@@ -702,15 +702,15 @@ def main():
     if command == "start":
         # Start fresh: clean outputs then begin
         orchestrator.clean_outputs()
-        agent, instructions = orchestrator.get_next_agent()
+        agent, instructions = orchestrator.get_continue_agent()
         print("\n" + "="*60)
         print("STARTING FRESH - AGENT: " + agent.upper())
         print("="*60)
         print(instructions)
         print("="*60)
         
-    elif command == "next":
-        agent, instructions = orchestrator.get_next_agent()
+    elif command == "continue":
+        agent, instructions = orchestrator.get_continue_agent()
         print("\n" + "="*60)
         print("AGENT: " + agent.upper())
         print("="*60)
@@ -759,7 +759,7 @@ def main():
     else:
         print("Unknown command: " + command)
         print("\nAvailable commands:")
-        print("  Workflow: start, next, status, clean, complete, fail")
+        print("  Workflow: start, continue, status, clean, complete, fail")
         print("  Gates: approve-criteria, modify-criteria, retry-explorer")
         print("         approve-completion, retry-from-planner, retry-from-coder, retry-from-verifier")
 
