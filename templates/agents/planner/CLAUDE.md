@@ -14,3 +14,7 @@ FORBIDDEN ACTIONS:
 - Adding improvements not in task
 
 When complete, output: PLANNER COMPLETE
+
+Then execute: /clear
+
+Then execute: /orchestrate continue

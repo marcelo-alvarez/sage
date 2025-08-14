@@ -1,20 +1,266 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Enhanced Claude-Driven Orchestrator with Better Gate Visibility
-Addresses Claude Code's output truncation by using echo commands
+Extensible Claude-Driven Orchestrator (Version 2)
+Implements configurable agent types and workflow sequences
 """
 
 import json
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, List
+from dataclasses import dataclass
 import re
 import sys
 
 
-# AGENT PROMPT TEMPLATES
-AGENT_PROMPTS = {
+@dataclass
+class AgentTemplate:
+    """Template for agent definitions"""
+    name: str
+    work_section: str
+    completion_phrase: str
+    primary_objective: str
+    auto_continue: bool = True
+    variables: List[str] = None
+    description: str = ""
+    capabilities: List[str] = None
+    requirements: List[str] = None
+    
+    def __post_init__(self):
+        if self.variables is None:
+            self.variables = []
+        if self.capabilities is None:
+            self.capabilities = []
+        if self.requirements is None:
+            self.requirements = []
+
+
+@dataclass
+class AgentRole:
+    """Role-based agent framework"""
+    template: AgentTemplate
+    context: Dict[str, Any] = None
+    
+    def __post_init__(self):
+        if self.context is None:
+            self.context = {}
+            
+    def validate_requirements(self) -> bool:
+        """Validate that all requirements are met"""
+        # Basic validation - can be extended
+        return True
+        
+    def substitute_variables(self, **kwargs) -> str:
+        """Substitute template variables with provided values"""
+        work_section = self.template.work_section
+        for var_name, var_value in kwargs.items():
+            # Handle both {var} and {{var}} formats
+            work_section = work_section.replace('{{' + var_name + '}}', str(var_value))
+            work_section = work_section.replace('{' + var_name + '}', str(var_value))
+        return work_section
+
+
+class AgentConfig:
+    """Configuration manager for agent definitions"""
+    
+    def __init__(self, config_path: Path = None):
+        self.config_path = config_path or Path('.claude/agent-config.json')
+        self.templates_dir = Path('templates/agents')
+        self.agents = {}
+        self._load_config()
+        
+    def _load_config(self):
+        """Load agent configuration from JSON file and template files"""
+        if self.config_path.exists():
+            try:
+                with open(self.config_path, 'r') as f:
+                    config_data = json.load(f)
+                    self._parse_config(config_data)
+                # Always load template files in addition to config file
+                self._load_from_templates()
+            except Exception as e:
+                print(f"Warning: Failed to load agent config: {e}")
+                self._load_defaults()
+        else:
+            self._load_defaults()
+            
+    def _parse_config(self, config_data: Dict[str, Any]):
+        """Parse configuration data into AgentTemplate objects"""
+        agents_data = config_data.get('agents', {})
+        
+        for agent_name, agent_data in agents_data.items():
+            template = AgentTemplate(
+                name=agent_name,
+                work_section=agent_data.get('work_section', ''),
+                completion_phrase=agent_data.get('completion_phrase', f'{agent_name.upper()} COMPLETE'),
+                primary_objective=agent_data.get('primary_objective', ''),
+                auto_continue=agent_data.get('auto_continue', True),
+                variables=agent_data.get('variables', []),
+                description=agent_data.get('description', ''),
+                capabilities=agent_data.get('capabilities', []),
+                requirements=agent_data.get('requirements', [])
+            )
+            self.agents[agent_name] = template
+            
+    def _load_defaults(self):
+        """Load default agent configurations as fallback"""
+        # Load from template files if available
+        self._load_from_templates()
+        
+    def _load_from_templates(self):
+        """Load agent definitions from template files"""
+        # Scan all subdirectories in templates/agents/ for custom agents
+        if self.templates_dir.exists():
+            for agent_dir in self.templates_dir.iterdir():
+                if agent_dir.is_dir():
+                    agent_type = agent_dir.name
+                    template_path = agent_dir / 'CLAUDE.md'
+                    if template_path.exists():
+                        try:
+                            content = template_path.read_text()
+                            template = self._parse_template_file(agent_type, content)
+                            # Validate template before adding
+                            if self.validate_template(template):
+                                # Only add if not already loaded from config file (config takes precedence)
+                                if agent_type not in self.agents:
+                                    self.agents[agent_type] = template
+                                else:
+                                    print(f"Info: Skipping template {agent_type} - already loaded from config")
+                            else:
+                                print(f"Warning: Template validation failed for {agent_type}")
+                        except Exception as e:
+                            print(f"Warning: Failed to load template for {agent_type}: {e}")
+                    
+    def _parse_template_file(self, agent_name: str, content: str) -> AgentTemplate:
+        """Parse template file content into AgentTemplate"""
+        # Extract all variables from template content using regex
+        variables = []
+        import re
+        
+        # Find all {{variable}} patterns
+        double_brace_vars = re.findall(r'\{\{([^}]+)\}\}', content)
+        # Find all {variable} patterns (excluding double braces)
+        single_brace_vars = re.findall(r'(?<!\{)\{([^{}]+)\}(?!\})', content)
+        
+        # Combine and deduplicate variables
+        all_vars = list(set(double_brace_vars + single_brace_vars))
+        variables = [var.strip() for var in all_vars if var.strip()]
+            
+        # Extract completion phrase if present - look for multiple patterns
+        completion_phrase = f'{agent_name.upper()} COMPLETE'
+        for line in content.split('\n'):
+            line_lower = line.lower()
+            # Look for "When complete, output:" or "When complete, say"
+            if ('complete' in line_lower and ('output:' in line_lower or 'say' in line_lower)):
+                # Extract completion phrase from lines like "When complete, output: EXPLORER COMPLETE"
+                if ':' in line:
+                    parts = line.split(':', 1)
+                    if len(parts) > 1:
+                        phrase = parts[1].strip().strip('"').strip("'")
+                        if phrase:
+                            completion_phrase = phrase
+                            break
+                    
+        return AgentTemplate(
+            name=agent_name,
+            work_section=content,
+            completion_phrase=completion_phrase,
+            primary_objective=f"After completing {agent_name} work, run /clear then use the slash command /orchestrate continue to advance the workflow",
+            auto_continue=True,
+            variables=variables,
+            description=f"{agent_name.title()} agent for orchestrated workflows",
+            capabilities=[f"{agent_name}_operations"],
+            requirements=[]
+        )
+        
+    def validate_template(self, template: AgentTemplate) -> bool:
+        """Validate that template has required fields and proper structure"""
+        try:
+            # Check required fields are not empty
+            if not template.name or not template.name.strip():
+                print(f"Template validation failed: Missing agent name")
+                return False
+                
+            if not template.work_section or not template.work_section.strip():
+                print(f"Template validation failed: Missing work_section for {template.name}")
+                return False
+                
+            if not template.completion_phrase or not template.completion_phrase.strip():
+                print(f"Template validation failed: Missing completion_phrase for {template.name}")
+                return False
+            
+            # Check that work_section contains some basic structure
+            work_section = template.work_section.lower()
+            if 'responsibilities' not in work_section and 'responsibility' not in work_section:
+                print(f"Warning: Template for {template.name} may be missing responsibilities section")
+            
+            # Check for forbidden actions section (good practice but not required)
+            if 'forbidden' not in work_section:
+                print(f"Info: Template for {template.name} doesn't specify forbidden actions")
+            
+            # Validate completion phrase format
+            if template.completion_phrase.upper() != template.completion_phrase:
+                print(f"Warning: Completion phrase for {template.name} should be uppercase: {template.completion_phrase}")
+            
+            return True
+            
+        except Exception as e:
+            print(f"Template validation error for {template.name}: {e}")
+            return False
+        
+    def get_agent_template(self, agent_type: str) -> Optional[AgentTemplate]:
+        """Get agent template by type"""
+        return self.agents.get(agent_type)
+        
+    def get_available_agents(self) -> List[str]:
+        """Get list of available agent types"""
+        return list(self.agents.keys())
+        
+    def save_config(self):
+        """Save current configuration to JSON file"""
+        config_data = {
+            'agents': {}
+        }
+        
+        for agent_name, template in self.agents.items():
+            config_data['agents'][agent_name] = {
+                'work_section': template.work_section,
+                'completion_phrase': template.completion_phrase,
+                'primary_objective': template.primary_objective,
+                'auto_continue': template.auto_continue,
+                'variables': template.variables,
+                'description': template.description,
+                'capabilities': template.capabilities,
+                'requirements': template.requirements
+            }
+            
+        # Ensure directory exists
+        self.config_path.parent.mkdir(exist_ok=True)
+        
+        with open(self.config_path, 'w') as f:
+            json.dump(config_data, f, indent=2)
+
+
+# Legacy gate options - can be made configurable in future
+GATE_OPTIONS = {
+    "criteria": [
+        "/orchestrate approve-criteria    - Accept and continue",
+        "/orchestrate modify-criteria     - Modify criteria first",  
+        "/orchestrate retry-explorer      - Restart exploration"
+    ],
+    
+    "completion": [
+        "/orchestrate approve-completion     - Mark complete",
+        "/orchestrate retry-explorer         - Restart all",
+        "/orchestrate retry-from-planner     - Restart from Planner",  
+        "/orchestrate retry-from-coder       - Restart from Coder",
+        "/orchestrate retry-from-verifier    - Re-verify only"
+    ]
+}
+
+# Legacy agent prompts as fallback
+LEGACY_AGENT_PROMPTS = {
     "explorer": {
         "work_section": """Then execute as EXPLORER agent:
 
@@ -127,47 +373,55 @@ Output format for verification.md:
     }
 }
 
-GATE_OPTIONS = {
-    "criteria": [
-        "/orchestrate approve-criteria    - Accept and continue",
-        "/orchestrate modify-criteria     - Modify criteria first",  
-        "/orchestrate retry-explorer      - Restart exploration"
-    ],
-    
-    "completion": [
-        "/orchestrate approve-completion     - Mark complete",
-        "/orchestrate retry-explorer         - Restart all",
-        "/orchestrate retry-from-planner     - Restart from Planner",  
-        "/orchestrate retry-from-coder       - Restart from Coder",
-        "/orchestrate retry-from-verifier    - Re-verify only"
-    ]
-}
-
 
 class AgentDefinitions:
-    """Centralized agent role definitions using external prompts"""
+    """Centralized agent role definitions using external configuration"""
     
-    @staticmethod
-    def get_work_agent_role(agent_type, **kwargs):
-        """Generic method for work agents (explorer, planner, coder, verifier)"""
-        prompt = AGENT_PROMPTS[agent_type]
-        
-        # Handle template variables (like {task} for explorer)
-        work_section = prompt["work_section"]
-        if kwargs:
-            work_section = work_section.format(**kwargs)
-        
-        return {
-            "name": agent_type.upper(),
-            "status": "🔄 " + agent_type.upper(),
-            "completion_phrase": prompt["completion_phrase"],
-            "primary_objective": prompt["primary_objective"],
-            "work_section": work_section,
-            "auto_continue": True
-        }
+    def __init__(self, agent_config: AgentConfig):
+        self.agent_config = agent_config
     
-    @staticmethod
-    def get_gate_role(gate_type, content):
+    def get_work_agent_role(self, agent_type, **kwargs):
+        """Generic method for work agents using configuration"""
+        # Try to get from configuration first
+        template = self.agent_config.get_agent_template(agent_type)
+        
+        if template:
+            # Use configuration-based template
+            role = AgentRole(template=template, context=kwargs)
+            work_section = role.substitute_variables(**kwargs)
+            
+            return {
+                "name": agent_type.upper(),
+                "status": "🔄 " + agent_type.upper(),
+                "completion_phrase": template.completion_phrase,
+                "primary_objective": template.primary_objective,
+                "work_section": work_section,
+                "auto_continue": template.auto_continue
+            }
+        else:
+            # Fallback to legacy prompts
+            if agent_type in LEGACY_AGENT_PROMPTS:
+                prompt = LEGACY_AGENT_PROMPTS[agent_type]
+                work_section = prompt["work_section"]
+                if kwargs:
+                    # Handle both {task} and {{task}} formats
+                    for key, value in kwargs.items():
+                        work_section = work_section.replace('{{' + key + '}}', str(value))
+                        work_section = work_section.replace('{' + key + '}', str(value))
+                
+                return {
+                    "name": agent_type.upper(),
+                    "status": "🔄 " + agent_type.upper(),
+                    "completion_phrase": prompt["completion_phrase"],
+                    "primary_objective": prompt["primary_objective"],
+                    "work_section": work_section,
+                    "auto_continue": True
+                }
+            else:
+                # Unknown agent type
+                return None
+    
+    def get_gate_role(self, gate_type, content):
         """Generic method for gate agents"""
         return {
             "name": gate_type.upper() + "_GATE",
@@ -179,30 +433,55 @@ class AgentDefinitions:
 
 
 class AgentFactory:
-    """Factory for creating agent instructions"""
+    """Factory for creating agent instructions with extensible agent support"""
     
-    def __init__(self, orchestrator):
+    def __init__(self, orchestrator, agent_config: AgentConfig):
         self.orchestrator = orchestrator
+        self.agent_config = agent_config
+        self.agent_definitions = AgentDefinitions(agent_config)
+        
+    def get_available_agents(self) -> List[str]:
+        """Get list of all available agent types"""
+        config_agents = self.agent_config.get_available_agents()
+        legacy_agents = list(LEGACY_AGENT_PROMPTS.keys())
+        gate_agents = ["criteria_gate", "completion_gate"]
+        
+        # Combine and deduplicate
+        all_agents = list(set(config_agents + legacy_agents + gate_agents))
+        return sorted(all_agents)
+        
+    def validate_agent_type(self, agent_type: str) -> bool:
+        """Validate if agent type is supported"""
+        return agent_type in self.get_available_agents()
         
     def create_agent(self, agent_type, **kwargs):
-        """Create agent instructions based on type"""
+        """Create agent instructions based on type with validation"""
         
-        if agent_type in ["explorer", "planner", "coder", "verifier"]:
-            role = AgentDefinitions.get_work_agent_role(agent_type, **kwargs)
+        # Validate agent type
+        if not self.validate_agent_type(agent_type):
+            available = ", ".join(self.get_available_agents())
+            return "error", f"Unknown agent type: {agent_type}. Available types: {available}"
+        
+        # Handle work agents (explorer, planner, coder, verifier, and any custom agents)
+        if agent_type in self.agent_config.get_available_agents() or agent_type in LEGACY_AGENT_PROMPTS:
+            role = self.agent_definitions.get_work_agent_role(agent_type, **kwargs)
+            
+            if role is None:
+                return "error", f"Failed to create agent role for type: {agent_type}"
             
         elif agent_type == "criteria_gate":
             criteria_text = kwargs.get("criteria_text", "")
             content = "Success criteria suggested (see .agent-outputs/exploration.md for details):\n" + \
                      (criteria_text[:200] + ('...' if len(criteria_text) > 200 else ''))
-            role = AgentDefinitions.get_gate_role("criteria", content)
+            role = self.agent_definitions.get_gate_role("criteria", content)
             
         elif agent_type == "completion_gate":
             status_line = kwargs.get("status_line", "")
             content = "Verification: " + status_line + "\n(Full details in .agent-outputs/verification.md)"
-            role = AgentDefinitions.get_gate_role("completion", content)
+            role = self.agent_definitions.get_gate_role("completion", content)
             
         else:
-            return "error", "Unknown agent type: " + agent_type
+            return "error", f"Unsupported agent type: {agent_type}"
         
         # Update task status
         self.orchestrator._update_task_status(
@@ -211,7 +490,7 @@ class AgentFactory:
         )
         
         # Build instructions based on agent type
-        if role["auto_continue"]:
+        if role.get("auto_continue", True):
             instructions = self.orchestrator._build_agent_instructions(
                 role["name"].lower(),
                 role["primary_objective"], 
@@ -228,7 +507,100 @@ class AgentFactory:
         return role["name"].lower(), instructions
 
 
-class ClaudeDrivenOrchestrator:
+class WorkflowConfig:
+    """Configuration manager for workflow definitions"""
+    
+    def __init__(self, config_path: Path = None):
+        self.config_path = config_path or Path('.claude/workflow-config.json')
+        self.sequence = ["explorer", "criteria_gate", "planner", "coder", "scribe", "verifier", "completion_gate"]
+        self.gates = {
+            "criteria": {
+                "after": "explorer",
+                "options": [
+                    "/orchestrate approve-criteria - Accept and continue",
+                    "/orchestrate modify-criteria - Modify criteria first",
+                    "/orchestrate retry-explorer - Restart exploration"
+                ]
+            },
+            "completion": {
+                "after": "verifier",
+                "options": [
+                    "/orchestrate approve-completion - Mark complete",
+                    "/orchestrate retry-explorer - Restart all",
+                    "/orchestrate retry-from-planner - Restart from Planner",
+                    "/orchestrate retry-from-coder - Restart from Coder",
+                    "/orchestrate retry-from-verifier - Re-verify only"
+                ]
+            }
+        }
+        self._load_config()
+        
+    def _load_config(self):
+        """Load workflow configuration from JSON file"""
+        if self.config_path.exists():
+            try:
+                with open(self.config_path, 'r') as f:
+                    config_data = json.load(f)
+                    self.sequence = config_data.get('sequence', self.sequence)
+                    self.gates = config_data.get('gates', self.gates)
+            except Exception as e:
+                print(f"Warning: Failed to load workflow config: {e}")
+                
+    def get_next_agent(self, current_outputs: Dict[str, bool]) -> Optional[str]:
+        """Get next agent in sequence based on current outputs"""
+        for agent_type in self.sequence:
+            if agent_type.endswith('_gate'):
+                gate_name = agent_type.replace('_gate', '')
+                if gate_name in self.gates:
+                    # Check if prerequisite is complete but gate not approved
+                    prerequisite = self.gates[gate_name].get('after')
+                    if prerequisite:
+                        # Map agent type to output file
+                        prereq_file = self._get_output_file(prerequisite)
+                        if current_outputs.get(prereq_file, False):
+                            approval_file = f"{gate_name}-approved.md" if gate_name == "completion" else "success-criteria.md"
+                            if not current_outputs.get(approval_file, False):
+                                return agent_type
+            else:
+                # Regular agent - check if output file exists
+                output_file = self._get_output_file(agent_type)
+                if not current_outputs.get(output_file, False):
+                    return agent_type
+                    
+        return None  # All complete
+        
+    def _get_output_file(self, agent_type: str) -> str:
+        """Map agent type to its output file"""
+        if agent_type == "explorer":
+            return "exploration.md"
+        elif agent_type == "planner":
+            return "plan.md"
+        elif agent_type == "coder":
+            return "changes.md"
+        elif agent_type == "scribe":
+            return "documentation.md"
+        elif agent_type == "verifier":
+            return "verification.md"
+        else:
+            return f"{agent_type}.md"
+        
+    def save_config(self):
+        """Save current configuration to JSON file"""
+        config_data = {
+            'sequence': self.sequence,
+            'gates': self.gates
+        }
+        
+        # Ensure directory exists
+        self.config_path.parent.mkdir(exist_ok=True)
+        
+        with open(self.config_path, 'w') as f:
+            json.dump(config_data, f, indent=2)
+
+
+class ExtensibleClaudeDrivenOrchestrator:
+    """Extensible version of the Claude-Driven Orchestrator"""
+    
     def __init__(self):
         self.project_root = Path.cwd()
         self.claude_dir = self.project_root / ".claude"
@@ -239,13 +611,30 @@ class ClaudeDrivenOrchestrator:
         self.tasks_file = self.claude_dir / "tasks.md"
         self.checklist_file = self.claude_dir / "tasks-checklist.md"
         
-        # Initialize agent factory
-        self.agent_factory = AgentFactory(self)
+        # Initialize configuration systems
+        self.agent_config = AgentConfig()
+        self.workflow_config = WorkflowConfig()
+        
+        # Initialize agent factory with configuration
+        self.agent_factory = AgentFactory(self, self.agent_config)
         
         # Ensure directories exist
         self.claude_dir.mkdir(exist_ok=True)
         self.agents_dir.mkdir(exist_ok=True)
         self.outputs_dir.mkdir(exist_ok=True)
+        
+        # Generate default configuration files if they don't exist
+        self._ensure_config_files()
+
+    def _ensure_config_files(self):
+        """Generate default configuration files if they don't exist"""
+        # Generate agent configuration
+        if not self.agent_config.config_path.exists():
+            self.agent_config.save_config()
+            
+        # Generate workflow configuration  
+        if not self.workflow_config.config_path.exists():
+            self.workflow_config.save_config()
 
     def _display_file_contents(self, filepath, description="file"):
         """Helper method to display file contents without truncation"""
@@ -309,119 +698,46 @@ class ClaudeDrivenOrchestrator:
                "STOP: I must wait for the human to choose one of the options displayed above. " + \
                "I will not provide commentary, analysis, or summaries. The human will select an option."
 
-    def _retry_from_phase(self, phase_name, display_name=None):
-        """Generic retry method for any phase"""
-        if not display_name:
-            display_name = phase_name.title()
-            
-        self._clean_from_phase(phase_name)
-        print("Restarting from " + display_name + " phase")
-        
-        # Continue to continue agent
-        agent, instructions = self.get_continue_agent()
-        print("\n" + "="*60)
-        print("RESTARTING FROM " + agent.upper())
-        print("="*60)
-        print(instructions)
-        print("="*60)
-        
     def get_continue_agent(self):
-        """Get the next agent to run and its instructions"""
+        """Get the next agent to run and its instructions using configurable workflow"""
         
         # Check what outputs exist to determine next phase
-        exploration_exists = (self.outputs_dir / "exploration.md").exists()
-        criteria_approved = (self.outputs_dir / "success-criteria.md").exists()
-        plan_exists = (self.outputs_dir / "plan.md").exists()
-        changes_exists = (self.outputs_dir / "changes.md").exists()
-        verification_exists = (self.outputs_dir / "verification.md").exists()
-        completion_approved = (self.outputs_dir / "completion-approved.md").exists()
+        current_outputs = {
+            "exploration.md": (self.outputs_dir / "exploration.md").exists(),
+            "success-criteria.md": (self.outputs_dir / "success-criteria.md").exists(),
+            "plan.md": (self.outputs_dir / "plan.md").exists(),
+            "changes.md": (self.outputs_dir / "changes.md").exists(),
+            "verification.md": (self.outputs_dir / "verification.md").exists(),
+            "completion-approved.md": (self.outputs_dir / "completion-approved.md").exists()
+        }
         
-        # Workflow: Explorer → Criteria Gate → Planner → Coder → Verifier → Completion Gate → Complete
-        if not exploration_exists:
-            return self._prepare_explorer()
-        elif exploration_exists and not criteria_approved:
-            return self._prepare_criteria_gate()
-        elif not plan_exists:
-            return self._prepare_planner()
-        elif not changes_exists:
-            return self._prepare_coder()
-        elif not verification_exists:
-            return self._prepare_verifier()
-        elif verification_exists and not completion_approved:
-            return self._prepare_completion_gate()
-        else:
+        # Use workflow configuration to determine next agent
+        next_agent = self.workflow_config.get_next_agent(current_outputs)
+        
+        if next_agent is None:
             return "complete", "All agents have completed successfully. Task marked complete."
-            
-    def _prepare_explorer(self):
-        """Prepare explorer agent instructions"""
-        task = self._get_current_task()
-        if not task:
-            return "error", "No task found in tasks-checklist.md"
-        return self.agent_factory.create_agent("explorer", task=task)
         
-    def _prepare_criteria_gate(self):
-        """Prepare criteria approval gate"""
-        exploration_file = self.outputs_dir / "exploration.md"
-        if not exploration_file.exists():
-            return "error", "No exploration.md found for criteria approval"
-        
-        exploration_content = exploration_file.read_text()
-        
-        # Extract suggested criteria from exploration.md
-        lines = exploration_content.split('\n')
-        criteria_section = []
-        in_criteria = False
-        
-        for line in lines:
-            if "## Suggested Success Criteria" in line:
-                in_criteria = True
-                continue
-            elif in_criteria and line.strip().startswith('##') and not line.strip().startswith('###'):
-                break
-            elif in_criteria:
-                criteria_section.append(line)
-        
-        criteria_text = '\n'.join(criteria_section) if criteria_section else "No criteria found in exploration.md"
-        return self.agent_factory.create_agent("criteria_gate", criteria_text=criteria_text)
-        
-    def _prepare_planner(self):
-        """Prepare planner agent instructions"""
-        return self.agent_factory.create_agent("planner")
-        
-    def _prepare_coder(self):
-        """Prepare coder agent instructions"""
-        return self.agent_factory.create_agent("coder")
-        
-    def _prepare_verifier(self):
-        """Prepare verifier agent instructions"""
-        return self.agent_factory.create_agent("verifier")
-        
-    def _prepare_completion_gate(self):
-        """Prepare completion approval gate"""
-        verification_file = self.outputs_dir / "verification.md"
-        if not verification_file.exists():
-            return "error", "No verification.md found for completion approval"
-        
-        verification_content = verification_file.read_text()
-        
-        # Extract overall status
-        status_line = "Status not found"
-        for line in verification_content.split('\n'):
-            if "Overall Status:" in line:
-                status_line = line.strip()
-                break
-        
-        return self.agent_factory.create_agent("completion_gate", status_line=status_line)
+        # Prepare the next agent using dynamic preparation
+        return self._prepare_work_agent(next_agent)
 
-    # GATE APPROVAL COMMANDS
-    
-    def approve_criteria(self):
-        """Approve criteria and continue to Planner"""
-        # Extract criteria from exploration.md and save
-        exploration_file = self.outputs_dir / "exploration.md"
-        if exploration_file.exists():
-            content = exploration_file.read_text()
-            lines = content.split('\n')
+    def _prepare_work_agent(self, agent_type: str):
+        """Dynamic agent preparation based on agent type"""
+        
+        if agent_type == "explorer":
+            task = self._get_current_task()
+            if not task:
+                return "error", "No task found in tasks-checklist.md"
+            return self.agent_factory.create_agent("explorer", task=task)
+            
+        elif agent_type == "criteria_gate":
+            exploration_file = self.outputs_dir / "exploration.md"
+            if not exploration_file.exists():
+                return "error", "No exploration.md found for criteria approval"
+            
+            exploration_content = exploration_file.read_text()
+            
+            # Extract suggested criteria from exploration.md
+            lines = exploration_content.split('\n')
             criteria_section = []
             in_criteria = False
             
@@ -434,186 +750,29 @@ class ClaudeDrivenOrchestrator:
                 elif in_criteria:
                     criteria_section.append(line)
             
-            criteria_text = '\n'.join(criteria_section)
-            criteria_file = self.outputs_dir / "success-criteria.md"
-            criteria_file.write_text("# Approved Success Criteria\n\n" + criteria_text + "\n")
+            criteria_text = '\n'.join(criteria_section) if criteria_section else "No criteria found in exploration.md"
+            return self.agent_factory.create_agent("criteria_gate", criteria_text=criteria_text)
             
-            print("Success criteria approved and saved")
+        elif agent_type == "completion_gate":
+            verification_file = self.outputs_dir / "verification.md"
+            if not verification_file.exists():
+                return "error", "No verification.md found for completion approval"
             
-            # Continue to continue agent
-            agent, instructions = self.get_continue_agent()
-            print("\n" + "="*60)
-            print("CRITERIA APPROVED - CONTINUING TO " + agent.upper())
-            print("="*60)
-            print(instructions)
-            print("="*60)
+            verification_content = verification_file.read_text()
             
-    def modify_criteria(self, modification_request=None):
-        """Set up criteria modification task for Claude and continue workflow"""
-        if not modification_request:
-            print("No modification request provided")
-            print("Usage: /orchestrate modify-criteria \"your modification instructions\"")
-            return
+            # Extract overall status
+            status_line = "Status not found"
+            for line in verification_content.split('\n'):
+                if "Overall Status:" in line:
+                    status_line = line.strip()
+                    break
             
-        # Read the current exploration results
-        exploration_file = self.outputs_dir / "exploration.md"
-        if not exploration_file.exists():
-            print("No exploration.md found. Run the Explorer first.")
-            return
+            return self.agent_factory.create_agent("completion_gate", status_line=status_line)
             
-        # Save the modification request for Claude to process
-        modification_file = self.outputs_dir / "criteria-modification-request.md"
-        modification_file.write_text("# Criteria Modification Request\n\n" + modification_request + "\n")
-        
-        # Set up a special "criteria modifier" agent task
-        task = self._get_current_task()
-        self._update_task_status(task, "MODIFYING CRITERIA")
-        
-        instructions = "FIRST: Run /clear to reset context\n\n" + \
-                      "CRITERIA MODIFICATION TASK:\n\n" + \
-                      "1. Read .agent-outputs/exploration.md to see the original suggested criteria\n" + \
-                      "2. Read .agent-outputs/criteria-modification-request.md for the modification request\n" + \
-                      "3. Apply the requested modifications to create updated success criteria\n" + \
-                      "4. Write the final modified criteria to .agent-outputs/success-criteria.md\n\n" + \
-                      "MODIFICATION REQUEST: " + modification_request + "\n\n" + \
-                      "Output format for success-criteria.md:\n" + \
-                      "# Approved Success Criteria\n\n" + \
-                      "[Your modified criteria here - apply the modification request to the original suggestions]\n\n" + \
-                      "When complete, say \"CRITERIA MODIFICATION COMPLETE\"\n\n" + \
-                      "FINAL STEP: Run /clear to reset context, then run: /orchestrate continue"
-        
-        print("\n" + "="*60)
-        print("CRITERIA MODIFICATION TASK READY")
-        print("="*60)
-        print(instructions)
-        print("="*60)
-        
-        return "criteria_modifier", instructions
-        
-    def retry_explorer(self):
-        """Restart from Explorer phase"""
-        self._retry_from_phase("explorer")
-        
-    def approve_completion(self):
-        """Approve completion and mark task done"""
-        task = self._get_current_task()
-        if task:
-            self._update_task_status(task, "COMPLETE")
-            self._update_checklist(task, completed=True)
-            approval_file = self.outputs_dir / "completion-approved.md"
-            approval_file.write_text("# Task Completion Approved\n\nTask: " + task + 
-                                    "\nApproved at: " + datetime.now().isoformat() + "\n")
-            
-            print("\n" + "="*60)
-            print("TASK COMPLETED SUCCESSFULLY!")
-            print("="*60)
-            print("Task marked complete: " + task)
-            print("Updated tasks.md and tasks-checklist.md")
-            print("Check .agent-outputs/verification.md for final results")
-            print("Run /orchestrate clean to prepare for continue task")
-            print("="*60)
-            
-    def retry_from_planner(self):
-        """Restart from Planner phase (keep criteria)"""
-        self._retry_from_phase("planner", "Planner (keeping criteria)")
-        
-    def retry_from_coder(self):
-        """Restart from Coder phase (keep plan)"""
-        self._retry_from_phase("coder", "Coder (keeping plan)")
-        
-    def retry_from_verifier(self):
-        """Restart just Verifier phase (keep changes)"""
-        self._retry_from_phase("verifier", "Verifier (keeping changes)")
-        
-    # UTILITY METHODS
-    
-    def _clean_from_phase(self, phase):
-        """Clean outputs from specified phase onwards"""
-        
-        phase_files = {
-            "explorer": ["exploration.md", "success-criteria.md", "plan.md", "changes.md", "verification.md", "completion-approved.md"],
-            "planner": ["plan.md", "changes.md", "verification.md", "completion-approved.md"],
-            "coder": ["changes.md", "verification.md", "completion-approved.md"],
-            "verifier": ["verification.md", "completion-approved.md"]
-        }
-        
-        files_to_clean = phase_files.get(phase, [])
-        for filename in files_to_clean:
-            filepath = self.outputs_dir / filename
-            if filepath.exists():
-                filepath.unlink()
-                
-        task = self._get_current_task()
-        if task:
-            self._update_task_status(task, "RETRY FROM " + phase.upper())
-        
-    def mark_complete(self, success=True):
-        """Mark current task as complete or failed"""
-        
-        task = self._get_current_task()
-        if not task:
-            return
-            
-        if success:
-            self._update_task_status(task, "COMPLETE")
-            self._update_checklist(task, completed=True)
-            print("\nTask marked complete: " + task)
         else:
-            self._update_task_status(task, "NEEDS REVIEW")
-            print("\nTask needs review: " + task)
-            
-    def clean_outputs(self):
-        """Clean output directory for fresh run"""
-        
-        # Only clean known orchestrator files
-        orchestrator_files = [
-            "exploration.md",
-            "success-criteria.md", 
-            "plan.md",
-            "changes.md", 
-            "verification.md",
-            "completion-approved.md",
-            "criteria-modification-request.md"
-        ]
-        
-        cleaned_count = 0
-        for filename in orchestrator_files:
-            filepath = self.outputs_dir / filename
-            if filepath.exists():
-                filepath.unlink()
-                cleaned_count += 1
-                
-        print("Cleaned " + str(cleaned_count) + " orchestrator files from .agent-outputs/")
-        
-    def status(self):
-        """Show current orchestration status by writing to file and commanding display"""
-        
-        status_info = "# Orchestration Status\n\n"
-        
-        files = [
-            ("exploration.md", "Explorer"),
-            ("success-criteria.md", "Criteria Gate"),
-            ("plan.md", "Planner"),
-            ("changes.md", "Coder"),
-            ("verification.md", "Verifier"),
-            ("completion-approved.md", "Completion Gate")
-        ]
-        
-        for filename, agent in files:
-            filepath = self.outputs_dir / filename
-            if filepath.exists():
-                size = filepath.stat().st_size
-                status_info += "✓ " + agent.ljust(15) + " complete (" + str(size) + " bytes)\n"
-            else:
-                status_info += "⏳ " + agent.ljust(15) + " pending\n"
-                
-        current_task = self._get_current_task()
-        if current_task:
-            status_info += "\nCurrent task: " + current_task[:60] + "\n"
-            
-        # Write and display status
-        self._write_and_display(status_info, "current-status.md", "status")
-            
+            # Generic agent preparation for work agents
+            return self.agent_factory.create_agent(agent_type)
+
     def _get_current_task(self):
         """Extract continue uncompleted task from tasks-checklist.md"""
         
@@ -660,188 +819,60 @@ class ClaudeDrivenOrchestrator:
             lines.append("- [ ] " + task + " - " + status)
             
         self.tasks_file.write_text('\n'.join(lines))
+
+    def status(self):
+        """Show current orchestration status"""
         
-    def _update_checklist(self, task, completed):
-        """Update task in checklist file"""
+        status_info = "# Extensible Orchestration Status\n\n"
         
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        files = [
+            ("exploration.md", "Explorer"),
+            ("success-criteria.md", "Criteria Gate"),
+            ("plan.md", "Planner"),
+            ("changes.md", "Coder"),
+            ("verification.md", "Verifier"),
+            ("completion-approved.md", "Completion Gate")
+        ]
         
-        if not self.checklist_file.exists():
-            self.checklist_file.write_text("# Tasks Checklist\n\n")
-            
-        content = self.checklist_file.read_text()
-        lines = content.split('\n')
-        task_found = False
-        
-        for i, line in enumerate(lines):
-            if task[:50] in line and '- [ ]' in line:
-                if completed:
-                    lines[i] = "- [x] " + task + " (Completed: " + timestamp + ")"
-                else:
-                    lines[i] = "- [ ] " + task + " (Attempted: " + timestamp + ")"
-                task_found = True
-                break
-        
-        if not task_found:
-            if completed:
-                new_line = "- [x] " + task + " (Completed: " + timestamp + ")"
+        for filename, agent in files:
+            filepath = self.outputs_dir / filename
+            if filepath.exists():
+                size = filepath.stat().st_size
+                status_info += "✓ " + agent.ljust(15) + " complete (" + str(size) + " bytes)\n"
             else:
-                new_line = "- [ ] " + task + " (Attempted: " + timestamp + ")"
-            lines.append(new_line)
-        
-        self.checklist_file.write_text('\n'.join(lines))
-
-    def bootstrap_tasks(self):
-        """Interactive bootstrap to help users generate initial tasks"""
-        
-        bootstrap_instructions = """
-BOOTSTRAP MODE: Help the user create initial tasks for their project
-
-TASK: Analyze the current project and guide the user through creating meaningful tasks
-
-YOUR RESPONSIBILITIES:
-1. Analyze the current codebase and project structure
-2. Ask the user about their goals and priorities  
-3. Suggest specific, actionable tasks based on the analysis
-4. Create both tasks.md and tasks-checklist.md files
-5. Explain the next steps for using the orchestrator
-
-ANALYSIS TO PERFORM:
-- Examine package.json, requirements.txt, or similar dependency files
-- Look at README.md and documentation
-- Identify main source code directories and files
-- Check for existing tests, build scripts, CI/CD
-- Note any obvious issues (missing tests, outdated deps, TODO comments)
-
-QUESTIONS TO ASK USER:
-1. "What are the main goals for this project?"
-2. "What problems are you currently facing?"
-3. "What would you like to work on first - bugs, features, or improvements?"
-4. "Are there any specific areas of the code that need attention?"
-
-TASK GENERATION APPROACH:
-- Create 3-5 specific, actionable tasks
-- Mix of different types: bug fixes, features, tests, docs, refactoring
-- Start with smaller tasks that can build momentum
-- Include acceptance criteria for each task
-
-OUTPUT FORMAT:
-Create both .claude/tasks.md and .claude/tasks-checklist.md with:
-
-tasks.md:
-```markdown
-# Project Tasks
-
-## Current Sprint
-- [ ] [Generated task 1 with clear acceptance criteria]
-- [ ] [Generated task 2 with clear acceptance criteria]
-
-## Backlog  
-- [ ] [Future task 1]
-- [ ] [Future task 2]
-
-## Completed
-[Empty initially]
-```
-
-tasks-checklist.md:
-```markdown
-# Tasks Checklist
-
-- [ ] [Same tasks as above but in simple checklist format]
-```
-
-FINAL STEP: 
-After creating the files, tell the user:
-"Bootstrap complete! Your tasks are ready. Run '/orchestrate start' to begin your first workflow."
-
-Begin by analyzing the current directory and asking the user about their goals.
-"""
-        
-        print("\n" + "="*60)
-        print("BOOTSTRAP MODE: Generating Initial Tasks")
-        print("="*60)
-        print(bootstrap_instructions)
-        print("="*60)
+                status_info += "⏳ " + agent.ljust(15) + " pending\n"
+                
+        current_task = self._get_current_task()
+        if current_task:
+            status_info += "\nCurrent task: " + current_task[:60] + "\n"
+            
+        # Add configuration info
+        status_info += f"\nAvailable agents: {', '.join(self.agent_factory.get_available_agents())}\n"
+        status_info += f"Workflow sequence: {' → '.join(self.workflow_config.sequence)}\n"
+            
+        # Write and display status
+        self._write_and_display(status_info, "extensible-status.md", "status")
 
 
 def main():
-    """CLI entry point - designed for Claude to run"""
+    """Test the extensible orchestrator"""
     
-    orchestrator = ClaudeDrivenOrchestrator()
+    orchestrator = ExtensibleClaudeDrivenOrchestrator()
     
-    if len(sys.argv) < 2:
-        command = "start"  # Default to start when no arguments provided
-    else:
-        command = sys.argv[1]
+    # Test configuration loading
+    print("Testing Extensible Orchestrator")
+    print("=" * 50)
+    print(f"Available agents: {orchestrator.agent_factory.get_available_agents()}")
+    print(f"Workflow sequence: {orchestrator.workflow_config.sequence}")
     
-    # Basic workflow commands
-    if command == "start":
-        # Start fresh: clean outputs then begin
-        orchestrator.clean_outputs()
-        agent, instructions = orchestrator.get_continue_agent()
-        print("\n" + "="*60)
-        print("STARTING FRESH - AGENT: " + agent.upper())
-        print("="*60)
-        print(instructions)
-        print("="*60)
-        
-    elif command == "continue":
-        agent, instructions = orchestrator.get_continue_agent()
-        print("\n" + "="*60)
-        print("AGENT: " + agent.upper())
-        print("="*60)
-        print(instructions)
-        print("="*60)
-        
-    elif command == "status":
-        orchestrator.status()
-        
-    elif command == "clean":
-        orchestrator.clean_outputs()
-        
-    elif command == "complete":
-        orchestrator.mark_complete(success=True)
-        
-    elif command == "fail":
-        orchestrator.mark_complete(success=False)
-        
-    # Gate approval commands
-    elif command == "approve-criteria":
-        orchestrator.approve_criteria()
-        
-    elif command == "modify-criteria":
-        # Get modification request from remaining arguments
-        if len(sys.argv) > 2:
-            modification_request = " ".join(sys.argv[2:])
-            orchestrator.modify_criteria(modification_request)
-        else:
-            orchestrator.modify_criteria()
-        
-    elif command == "retry-explorer":
-        orchestrator.retry_explorer()
-        
-    elif command == "approve-completion":
-        orchestrator.approve_completion()
-        
-    elif command == "retry-from-planner":
-        orchestrator.retry_from_planner()
-        
-    elif command == "retry-from-coder":
-        orchestrator.retry_from_coder()
-        
-    elif command == "retry-from-verifier":
-        orchestrator.retry_from_verifier()
-        
-    elif command == "bootstrap":
-        orchestrator.bootstrap_tasks()
-        
-    else:
-        print("Unknown command: " + command)
-        print("\nAvailable commands:")
-        print("  Workflow: start, continue, status, clean, complete, fail, bootstrap")
-        print("  Gates: approve-criteria, modify-criteria, retry-explorer")
-        print("         approve-completion, retry-from-planner, retry-from-coder, retry-from-verifier")
+    # Test agent validation
+    test_agents = ["explorer", "custom_agent", "invalid_agent"]
+    for agent in test_agents:
+        valid = orchestrator.agent_factory.validate_agent_type(agent)
+        print(f"Agent '{agent}' validation: {valid}")
+    
+    print("=" * 50)
+    print("Extensible orchestrator test complete!")
 
 
 if __name__ == "__main__":

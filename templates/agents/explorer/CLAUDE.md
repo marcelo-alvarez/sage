@@ -16,3 +16,7 @@ FORBIDDEN ACTIONS:
 - Making implementation decisions
 
 When complete, output: EXPLORER COMPLETE
+
+Then execute: /clear
+
+Then execute: /orchestrate continue

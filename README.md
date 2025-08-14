@@ -131,3 +131,72 @@ The orchestrator is a state machine where:
 **File-based communication:** Agents pass information through structured files rather than conversation history.
 
 **Human control:** Decision gates prevent runaway automation and ensure human oversight of critical choices.
+
+## Custom Agent Creation
+
+The orchestrator supports custom agent types beyond the built-in ones (explorer, planner, coder, verifier). You can create specialized agents for your specific workflows.
+
+### Creating a Custom Agent
+
+1. **Create the agent directory:**
+   ```bash
+   mkdir -p templates/agents/my-custom-agent
+   ```
+
+2. **Create the agent template file:**
+   ```bash
+   # templates/agents/my-custom-agent/CLAUDE.md
+   ```
+
+3. **Define the agent template:**
+   ```markdown
+   You are the MY-CUSTOM-AGENT agent.
+
+   TASK: {{task}}
+
+   YOUR ONLY RESPONSIBILITIES:
+   1. Perform specialized analysis
+   2. Generate custom reports
+   3. Write findings to .agent-outputs/custom-analysis.md
+
+   FORBIDDEN ACTIONS:
+   - Modifying source code
+   - Making implementation decisions
+   - Creating unrelated files
+
+   When complete, output: MY-CUSTOM-AGENT COMPLETE
+
+   Then execute: /clear
+
+   Then execute: /orchestrate continue
+   ```
+
+### Template Format Requirements
+
+**Required Elements:**
+- **Work section:** Description of agent responsibilities and tasks
+- **Completion phrase:** Must be in format "AGENT-NAME COMPLETE"
+- **Variables:** Use `{{variable}}` format for substitution (e.g., `{{task}}`)
+
+**Best Practices:**
+- Define clear responsibilities section
+- Specify forbidden actions to maintain focus
+- Use uppercase completion phrases
+- Include /clear and /orchestrate continue commands
+
+### Variable Substitution
+
+Custom agents support variable substitution:
+- `{{task}}` - The current task being worked on
+- `{{custom_var}}` - Any custom variables you define
+
+Variables are automatically detected and can be passed when creating agent instances.
+
+### Integration with Workflows
+
+Custom agents are automatically discovered and can be:
+- Listed in available agents (`orchestrator.agent_factory.get_available_agents()`)
+- Integrated into workflow sequences
+- Used in orchestration commands
+
+The system validates custom templates to ensure they have required fields and proper structure.
