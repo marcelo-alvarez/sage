@@ -261,22 +261,22 @@ class ClaudeDrivenOrchestrator:
         self._display_file_contents(filepath, description)
         
     def _write_and_execute_command(self, command, description=""):
-        """Write a command to file and instruct Claude to execute it"""
+        """Write instructions to file and instruct Claude to follow them"""
         command_file = self.outputs_dir / "next-command.txt"
         command_file.write_text(command)
         
         print("INSTRUCTION TO CLAUDE:")
         print("Read the file .agent-outputs/next-command.txt")
-        print("Then type and execute the command it contains.")
+        print("Then follow the instructions it contains exactly.")
         if description:
             print("Purpose: " + description)
-        print("Do not analyze or explain. Just execute the command from the file.")
+        print("Do not analyze or explain. Just follow the instructions from the file.")
 
     def _build_agent_instructions(self, agent_name, primary_objective, work_section, completion_phrase):
         """Build standardized agent instructions with primary objective framing"""
         
-        # Build complete instructions including /clear and work instructions
-        complete_instructions = "/clear\n\n" + \
+        # Build complete instructions with /clear as part of natural language instructions
+        complete_instructions = "Clear your context with /clear, then:\n\n" + \
                                "You are now the " + agent_name.upper() + " agent.\n\n" + \
                                work_section + "\n\n" + \
                                "When complete, say \"" + completion_phrase + "\"\n\n" + \
