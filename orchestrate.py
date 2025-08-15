@@ -166,7 +166,7 @@ class AgentConfig:
             name=agent_name,
             work_section=content,
             completion_phrase=completion_phrase,
-            primary_objective=f"After completing {agent_name} work, use the slash-command `/clear` then use the slash-command `/orchestrate continue` to advance the workflow",
+            primary_objective=f"Complete {agent_name} work according to responsibilities",
             auto_continue=True,
             variables=variables,
             description=f"{agent_name.title()} agent for orchestrated workflows",
@@ -259,119 +259,6 @@ GATE_OPTIONS = {
     ]
 }
 
-# Legacy agent prompts as fallback
-LEGACY_AGENT_PROMPTS = {
-    "explorer": {
-        "work_section": """Then execute as EXPLORER agent:
-
-TASK: {task}
-
-YOUR ONLY RESPONSIBILITIES:
-1. Understand what needs to be done
-2. Read relevant files (maximum 7)
-3. Identify patterns and dependencies
-4. Write findings to .agent-outputs/exploration.md
-5. Suggest objective success criteria for this task
-
-FORBIDDEN ACTIONS:
-- Writing code
-- Modifying files
-- Creating tests
-
-Output format for exploration.md:
-# Task Exploration
-## Task Understanding
-## Relevant Files
-## Current Implementation
-## Constraints & Risks
-## Suggested Success Criteria
-- [Objective criterion 1 - e.g., specific files must exist]
-- [Objective criterion 2 - e.g., no hanging processes]
-- [Objective criterion 3 - e.g., specific output generated]""",
-        "primary_objective": "After completing exploration work, run /clear then use the slash command /orchestrate continue to advance the workflow",
-        "completion_phrase": "EXPLORER COMPLETE"
-    },
-    
-    "planner": {
-        "work_section": """Then execute as PLANNER agent:
-
-Read .agent-outputs/exploration.md to understand the task.
-Read .agent-outputs/success-criteria.md for the approved success criteria.
-
-YOUR ONLY RESPONSIBILITIES:
-1. Create step-by-step implementation plan
-2. List exact files to modify
-3. Define success criteria (from approved criteria)
-4. Write plan to .agent-outputs/plan.md
-
-FORBIDDEN ACTIONS:
-- Reading source code files directly
-- Writing implementation code
-- Adding unrequested features
-
-Output format for plan.md:
-# Implementation Plan
-## Steps
-## Files to Modify
-## Success Criteria""",
-        "primary_objective": "After completing the plan, run /clear then use the slash command /orchestrate continue to advance the workflow",
-        "completion_phrase": "PLANNER COMPLETE"
-    },
-    
-    "coder": {
-        "work_section": """Then execute as CODER agent:
-
-Read .agent-outputs/plan.md to understand what to implement.
-
-YOUR ONLY RESPONSIBILITIES:
-1. Implement EXACTLY what the plan specifies
-2. Modify only listed files
-3. Document changes in .agent-outputs/changes.md
-
-FORBIDDEN ACTIONS:
-- Exceeding plan scope
-- Refactoring unrelated code
-- Adding unrequested features
-
-Output format for changes.md:
-# Implementation Changes
-## Files Modified
-## Changes Made
-## Tests Updated""",
-        "primary_objective": "After completing implementation, run /clear then use the slash command /orchestrate continue to advance the workflow",
-        "completion_phrase": "CODER COMPLETE"
-    },
-    
-    "verifier": {
-        "work_section": """Then execute as VERIFIER agent with fresh perspective:
-
-Read .agent-outputs/changes.md to see what was supposedly done.
-Read .agent-outputs/success-criteria.md for the approved success criteria.
-
-YOUR ONLY RESPONSIBILITIES:
-1. Verify all claimed changes actually exist
-2. Check if implementation matches plan
-3. CHECK OBJECTIVE SUCCESS CRITERIA FIRST - These are mandatory
-4. Run tests if applicable
-5. Write results to .agent-outputs/verification.md
-
-Be skeptical. Check everything. Trust nothing.
-SUCCESS CRITERIA MUST BE MET - No partial credit for "progress" or "breakthroughs".
-
-Output format for verification.md:
-# Verification Report
-## Success Criteria Verification
-- Criterion 1: PASS/FAIL with evidence
-- Criterion 2: PASS/FAIL with evidence
-- Criterion 3: PASS/FAIL with evidence
-## Code Changes Verification
-- Claim 1: PASS/FAIL with evidence
-- Claim 2: PASS/FAIL with evidence
-## Overall Status: SUCCESS/FAILURE""",
-        "primary_objective": "After completing verification, run /clear then use the slash command /orchestrate continue to advance the workflow",
-        "completion_phrase": "VERIFIER COMPLETE"
-    }
-}
 
 
 class AgentDefinitions:
@@ -399,27 +286,8 @@ class AgentDefinitions:
                 "auto_continue": template.auto_continue
             }
         else:
-            # Fallback to legacy prompts
-            if agent_type in LEGACY_AGENT_PROMPTS:
-                prompt = LEGACY_AGENT_PROMPTS[agent_type]
-                work_section = prompt["work_section"]
-                if kwargs:
-                    # Handle both {task} and {{task}} formats
-                    for key, value in kwargs.items():
-                        work_section = work_section.replace('{{' + key + '}}', str(value))
-                        work_section = work_section.replace('{' + key + '}', str(value))
-                
-                return {
-                    "name": agent_type.upper(),
-                    "status": "🔄 " + agent_type.upper(),
-                    "completion_phrase": prompt["completion_phrase"],
-                    "primary_objective": prompt["primary_objective"],
-                    "work_section": work_section,
-                    "auto_continue": True
-                }
-            else:
-                # Unknown agent type
-                return None
+            # Unknown agent type
+            return None
     
     def get_gate_role(self, gate_type, content):
         """Generic method for gate agents"""
@@ -443,11 +311,10 @@ class AgentFactory:
     def get_available_agents(self) -> List[str]:
         """Get list of all available agent types"""
         config_agents = self.agent_config.get_available_agents()
-        legacy_agents = list(LEGACY_AGENT_PROMPTS.keys())
         gate_agents = ["criteria_gate", "completion_gate"]
         
         # Combine and deduplicate
-        all_agents = list(set(config_agents + legacy_agents + gate_agents))
+        all_agents = list(set(config_agents + gate_agents))
         return sorted(all_agents)
         
     def validate_agent_type(self, agent_type: str) -> bool:
@@ -463,7 +330,7 @@ class AgentFactory:
             return "error", f"Unknown agent type: {agent_type}. Available types: {available}"
         
         # Handle work agents (explorer, planner, coder, verifier, and any custom agents)
-        if agent_type in self.agent_config.get_available_agents() or agent_type in LEGACY_AGENT_PROMPTS:
+        if agent_type in self.agent_config.get_available_agents():
             role = self.agent_definitions.get_work_agent_role(agent_type, **kwargs)
             
             if role is None:
@@ -471,13 +338,13 @@ class AgentFactory:
             
         elif agent_type == "criteria_gate":
             criteria_text = kwargs.get("criteria_text", "")
-            content = "Success criteria suggested (see .agent-outputs/exploration.md for details):\n" + \
+            content = f"Success criteria suggested (see {self.outputs_dir}/exploration.md for details):\n" + \
                      (criteria_text[:200] + ('...' if len(criteria_text) > 200 else ''))
             role = self.agent_definitions.get_gate_role("criteria", content)
             
         elif agent_type == "completion_gate":
             status_line = kwargs.get("status_line", "")
-            content = "Verification: " + status_line + "\n(Full details in .agent-outputs/verification.md)"
+            content = "Verification: " + status_line + f"\n(Full details in {self.outputs_dir}/verification.md)"
             role = self.agent_definitions.get_gate_role("completion", content)
             
         else:
@@ -602,10 +469,20 @@ class ExtensibleClaudeDrivenOrchestrator:
     """Extensible version of the Claude-Driven Orchestrator"""
     
     def __init__(self):
+        # Check for meta mode
+        self.meta_mode = 'meta' in sys.argv
+        
         self.project_root = Path.cwd()
-        self.claude_dir = self.project_root / ".claude"
+        
+        # Set directories with -meta suffix if in meta mode
+        if self.meta_mode:
+            self.claude_dir = self.project_root / ".claude-meta"
+            self.outputs_dir = self.project_root / ".agent-outputs-meta"
+        else:
+            self.claude_dir = self.project_root / ".claude"
+            self.outputs_dir = self.project_root / ".agent-outputs"
+        
         self.agents_dir = Path.home() / ".claude-orchestrator" / "agents"
-        self.outputs_dir = self.project_root / ".agent-outputs"
         
         # Task tracking files in .claude directory
         self.tasks_file = self.claude_dir / "tasks.md"
@@ -655,7 +532,7 @@ class ExtensibleClaudeDrivenOrchestrator:
         command_file.write_text(command)
         
         print("INSTRUCTION TO CLAUDE:")
-        print("Read the file .agent-outputs/next-command.txt")
+        print("Read the file " + str(self.outputs_dir / "next-command.txt"))
         print("Then follow the instructions it contains exactly.")
         if description:
             print("Purpose: " + description)
@@ -664,12 +541,15 @@ class ExtensibleClaudeDrivenOrchestrator:
     def _build_agent_instructions(self, agent_name, primary_objective, work_section, completion_phrase):
         """Build standardized agent instructions with primary objective framing"""
         
+        # Add meta flag to continue command if in meta mode
+        meta_flag = ' meta' if self.meta_mode else ''
+        
         # Build complete instructions that work without requiring /clear execution by Claude
         complete_instructions = "You are now the " + agent_name.upper() + " agent.\n\n" + \
                                work_section + "\n\n" + \
                                "When complete, output: " + completion_phrase + "\n\n" + \
                                "Execute the slash-command `/clear`\n\n" + \
-                               "Execute the slash-command `/orchestrate continue`"
+                               "Execute the slash-command `/orchestrate continue" + meta_flag + "`"
         
         # Write complete instructions to next-command.txt
         self._write_and_execute_command(complete_instructions, "Reset context and start " + agent_name + " agent")
@@ -679,7 +559,7 @@ class ExtensibleClaudeDrivenOrchestrator:
         work_file.write_text(complete_instructions)
         
         return "AGENT ACTIVATED: " + agent_name.upper() + "\n\n" + \
-               "Complete instructions written to .agent-outputs/next-command.txt"
+               f"Complete instructions written to {self.outputs_dir}/next-command.txt"
 
     def _build_gate_instructions(self, gate_name, content, options):
         """Build standardized gate instructions with improved visibility"""
@@ -873,10 +753,10 @@ class ExtensibleClaudeDrivenOrchestrator:
         
         instructions = "FIRST: Execute the slash-command `/clear` to reset context\n\n" + \
                       "CRITERIA MODIFICATION TASK:\n\n" + \
-                      "1. Read .agent-outputs/exploration.md to see the original suggested criteria\n" + \
-                      "2. Read .agent-outputs/criteria-modification-request.md for the modification request\n" + \
+                      f"1. Read {self.outputs_dir}/exploration.md to see the original suggested criteria\n" + \
+                      f"2. Read {self.outputs_dir}/criteria-modification-request.md for the modification request\n" + \
                       "3. Apply the requested modifications to create updated success criteria\n" + \
-                      "4. Write the final modified criteria to .agent-outputs/success-criteria.md\n\n" + \
+                      f"4. Write the final modified criteria to {self.outputs_dir}/success-criteria.md\n\n" + \
                       "MODIFICATION REQUEST: " + modification_request + "\n\n" + \
                       "Output format for success-criteria.md:\n" + \
                       "# Approved Success Criteria\n\n" + \
@@ -942,7 +822,7 @@ class ExtensibleClaudeDrivenOrchestrator:
             print("="*60)
             print("Task marked complete: " + task)
             print("Updated tasks.md and tasks-checklist.md")
-            print("Check .agent-outputs/verification.md for final results")
+            print(f"Check {self.outputs_dir}/verification.md for final results")
             print("Execute the slash-command `/orchestrate clean` to prepare for continue task")
             print("="*60)
         
@@ -979,7 +859,7 @@ class ExtensibleClaudeDrivenOrchestrator:
                 filepath.unlink()
                 cleaned_count += 1
                 
-        print("Cleaned " + str(cleaned_count) + " orchestrator files from .agent-outputs/")
+        print(f"Cleaned {cleaned_count} orchestrator files from {self.outputs_dir}/")
         
     def mark_complete(self, success=True):
         """Mark current task as complete or failed"""
