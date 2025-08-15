@@ -166,7 +166,7 @@ class AgentConfig:
             name=agent_name,
             work_section=content,
             completion_phrase=completion_phrase,
-            primary_objective=f"After completing {agent_name} work, run /clear then use the slash command /orchestrate continue to advance the workflow",
+            primary_objective=f"After completing {agent_name} work, use the slash-command `/clear` then use the slash-command `/orchestrate continue` to advance the workflow",
             auto_continue=True,
             variables=variables,
             description=f"{agent_name.title()} agent for orchestrated workflows",
@@ -245,17 +245,17 @@ class AgentConfig:
 # Legacy gate options - can be made configurable in future
 GATE_OPTIONS = {
     "criteria": [
-        "/orchestrate approve-criteria    - Accept and continue",
-        "/orchestrate modify-criteria     - Modify criteria first",  
-        "/orchestrate retry-explorer      - Restart exploration"
+        "Execute the slash-command `/orchestrate approve-criteria` - Accept and continue",
+        "Execute the slash-command `/orchestrate modify-criteria` - Modify criteria first",  
+        "Execute the slash-command `/orchestrate retry-explorer` - Restart exploration"
     ],
     
     "completion": [
-        "/orchestrate approve-completion     - Mark complete",
-        "/orchestrate retry-explorer         - Restart all",
-        "/orchestrate retry-from-planner     - Restart from Planner",  
-        "/orchestrate retry-from-coder       - Restart from Coder",
-        "/orchestrate retry-from-verifier    - Re-verify only"
+        "Execute the slash-command `/orchestrate approve-completion` - Mark complete",
+        "Execute the slash-command `/orchestrate retry-explorer` - Restart all",
+        "Execute the slash-command `/orchestrate retry-from-planner` - Restart from Planner",  
+        "Execute the slash-command `/orchestrate retry-from-coder` - Restart from Coder",
+        "Execute the slash-command `/orchestrate retry-from-verifier` - Re-verify only"
     ]
 }
 
@@ -517,19 +517,19 @@ class WorkflowConfig:
             "criteria": {
                 "after": "explorer",
                 "options": [
-                    "/orchestrate approve-criteria - Accept and continue",
-                    "/orchestrate modify-criteria - Modify criteria first",
-                    "/orchestrate retry-explorer - Restart exploration"
+                    "Execute the slash-command `/orchestrate approve-criteria` - Accept and continue",
+                    "Execute the slash-command `/orchestrate modify-criteria` - Modify criteria first",
+                    "Execute the slash-command `/orchestrate retry-explorer` - Restart exploration"
                 ]
             },
             "completion": {
                 "after": "verifier",
                 "options": [
-                    "/orchestrate approve-completion - Mark complete",
-                    "/orchestrate retry-explorer - Restart all",
-                    "/orchestrate retry-from-planner - Restart from Planner",
-                    "/orchestrate retry-from-coder - Restart from Coder",
-                    "/orchestrate retry-from-verifier - Re-verify only"
+                    "Execute the slash-command `/orchestrate approve-completion` - Mark complete",
+                    "Execute the slash-command `/orchestrate retry-explorer` - Restart all",
+                    "Execute the slash-command `/orchestrate retry-from-planner` - Restart from Planner",
+                    "Execute the slash-command `/orchestrate retry-from-coder` - Restart from Coder",
+                    "Execute the slash-command `/orchestrate retry-from-verifier` - Re-verify only"
                 ]
             }
         }
@@ -604,7 +604,7 @@ class ExtensibleClaudeDrivenOrchestrator:
     def __init__(self):
         self.project_root = Path.cwd()
         self.claude_dir = self.project_root / ".claude"
-        self.agents_dir = self.project_root / ".claude-agents"
+        self.agents_dir = Path.home() / ".claude-orchestrator" / "agents"
         self.outputs_dir = self.project_root / ".agent-outputs"
         
         # Task tracking files in .claude directory
@@ -664,12 +664,12 @@ class ExtensibleClaudeDrivenOrchestrator:
     def _build_agent_instructions(self, agent_name, primary_objective, work_section, completion_phrase):
         """Build standardized agent instructions with primary objective framing"""
         
-        # Build complete instructions with /clear as part of natural language instructions
-        complete_instructions = "Clear your context with /clear, then:\n\n" + \
-                               "You are now the " + agent_name.upper() + " agent.\n\n" + \
+        # Build complete instructions that work without requiring /clear execution by Claude
+        complete_instructions = "You are now the " + agent_name.upper() + " agent.\n\n" + \
                                work_section + "\n\n" + \
-                               "When complete, say \"" + completion_phrase + "\"\n\n" + \
-                               "Then execute: /orchestrate continue"
+                               "When complete, output: " + completion_phrase + "\n\n" + \
+                               "Execute the slash-command `/clear`\n\n" + \
+                               "Execute the slash-command `/orchestrate continue`"
         
         # Write complete instructions to next-command.txt
         self._write_and_execute_command(complete_instructions, "Reset context and start " + agent_name + " agent")
@@ -707,6 +707,7 @@ class ExtensibleClaudeDrivenOrchestrator:
             "success-criteria.md": (self.outputs_dir / "success-criteria.md").exists(),
             "plan.md": (self.outputs_dir / "plan.md").exists(),
             "changes.md": (self.outputs_dir / "changes.md").exists(),
+            "documentation.md": (self.outputs_dir / "documentation.md").exists(),
             "verification.md": (self.outputs_dir / "verification.md").exists(),
             "completion-approved.md": (self.outputs_dir / "completion-approved.md").exists()
         }
@@ -853,7 +854,7 @@ class ExtensibleClaudeDrivenOrchestrator:
         """Set up criteria modification task for Claude and continue workflow"""
         if not modification_request:
             print("No modification request provided")
-            print("Usage: /orchestrate modify-criteria \"your modification instructions\"")
+            print("Usage: Execute the slash-command `/orchestrate modify-criteria` \"your modification instructions\"")
             return
             
         # Read the current exploration results
@@ -870,7 +871,7 @@ class ExtensibleClaudeDrivenOrchestrator:
         task = self._get_current_task()
         self._update_task_status(task, "MODIFYING CRITERIA")
         
-        instructions = "FIRST: Run /clear to reset context\n\n" + \
+        instructions = "FIRST: Execute the slash-command `/clear` to reset context\n\n" + \
                       "CRITERIA MODIFICATION TASK:\n\n" + \
                       "1. Read .agent-outputs/exploration.md to see the original suggested criteria\n" + \
                       "2. Read .agent-outputs/criteria-modification-request.md for the modification request\n" + \
@@ -881,7 +882,7 @@ class ExtensibleClaudeDrivenOrchestrator:
                       "# Approved Success Criteria\n\n" + \
                       "[Your modified criteria here - apply the modification request to the original suggestions]\n\n" + \
                       "When complete, say \"CRITERIA MODIFICATION COMPLETE\"\n\n" + \
-                      "FINAL STEP: Run /clear to reset context, then run: /orchestrate continue"
+                      "FINAL STEP: Execute the slash-command `/clear` to reset context, then execute the slash-command `/orchestrate continue`"
         
         print("\n" + "="*60)
         print("CRITERIA MODIFICATION TASK READY")
@@ -942,7 +943,7 @@ class ExtensibleClaudeDrivenOrchestrator:
             print("Task marked complete: " + task)
             print("Updated tasks.md and tasks-checklist.md")
             print("Check .agent-outputs/verification.md for final results")
-            print("Run /orchestrate clean to prepare for continue task")
+            print("Execute the slash-command `/orchestrate clean` to prepare for continue task")
             print("="*60)
         
     def retry_from_planner(self):
@@ -1057,7 +1058,7 @@ tasks-checklist.md:
 
 FINAL STEP: 
 After creating the files, tell the user:
-"Bootstrap complete! Your tasks are ready. Run '/orchestrate start' to begin your first workflow."
+"Bootstrap complete! Your tasks are ready. Execute the slash-command `/orchestrate start` to begin your first workflow."
 
 Begin by analyzing the current directory and asking the user about their goals.
 """

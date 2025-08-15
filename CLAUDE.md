@@ -58,6 +58,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **RATIONALE**: Checklist completion represents official project progress. Only the user has authority to determine when work meets completion criteria.
 
+## FORBIDDEN FILE MODIFICATIONS
+
+NEVER modify, create, or write to any files in:
+- .claude/ directory (ANY files)
+- .agent-outputs/ directory
+
 ## PROJECT-SPECIFIC GUIDELINES
 
 [Add any project-specific conventions, patterns, or requirements here]
