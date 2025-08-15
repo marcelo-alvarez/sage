@@ -235,14 +235,22 @@ install_slash_command() {
     # Create commands directory
     mkdir -p "$commands_dir"
     
-    # Copy slash command and update the script path
-    cp "$TEMP_DIR/orchestrator-commands/orchestrate.md" "$commands_dir/orchestrate.md"
+    # Build command files from template
+    print_info "Building slash command files from template..."
+    cd "$TEMP_DIR"
+    ./build-commands.sh
     
-    # Update the script path in the slash command to use global runtime
+    # Copy generated slash commands
+    cp "$TEMP_DIR/orchestrator-commands/orchestrate.md"  "$commands_dir/orchestrate.md"
+    cp "$TEMP_DIR/orchestrator-commands/morchestrate.md" "$commands_dir/morchestrate.md"
+    
+    # Update the script path in the slash commands to use global runtime (if needed)
     sed -i.bak 's|python orchestrate_claude\.py|python3 ~/.claude-orchestrator/orchestrate.py|g' "$commands_dir/orchestrate.md"
     rm -f "$commands_dir/orchestrate.md.bak"
+    sed -i.bak 's|python orchestrate_claude\.py|python3 ~/.claude-orchestrator/orchestrate.py|g' "$commands_dir/morchestrate.md"
+    rm -f "$commands_dir/morchestrate.md.bak"
     
-    print_success "Slash command installed"
+    print_success "Slash commands installed"
 }
 
 # Make scripts executable

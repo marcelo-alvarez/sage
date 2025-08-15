@@ -3,7 +3,7 @@ Manage the orchestration workflow for tasks with human-in-the-loop gates.
 
 Available commands:
 - `bootstrap` - Generate initial tasks for your project
-- `start` - Start fresh workflow  
+- `start` - Start fresh workflow
 - `continue` - Continue to next agent
 - `status` - Show current progress
 - `clean` - Reset outputs
@@ -19,7 +19,7 @@ To enable this slash command in Claude Code, copy this file to either:
 Execute the orchestration command with enhanced visibility:
 
 ```bash
-# Source environment and run orchestrator with immediate output visibility
+# Source environment and run orchestrator
 if [ -f ".orchestrator.env" ]; then
     source .orchestrator.env
 elif [ -f "load_env.sh" ]; then

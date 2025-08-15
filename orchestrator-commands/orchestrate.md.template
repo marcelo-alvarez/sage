@@ -1,0 +1,46 @@
+# {{COMMAND_NAME_TITLE}}
+{{COMMAND_DESCRIPTION}}
+
+Available commands:
+- `bootstrap` - Generate initial tasks for your project
+- `start` - Start fresh workflow{{MODE_SUFFIX}}
+- `continue` - Continue to next agent{{MODE_SUFFIX}}
+- `status` - Show current progress{{MODE_SUFFIX}}
+- `clean` - Reset{{MODE_OUTPUTS}}
+- `approve-criteria` - Accept criteria and continue{{MODE_SUFFIX}}
+- `modify-criteria "changes"` - Edit criteria based on feedback{{MODE_SUFFIX}}
+
+{{MODE_SECTION}}## Setup
+To enable this slash command in Claude Code, copy this file to either:
+- `~/.claude/commands/{{COMMAND_NAME}}.md` (for global use across all projects)
+- `./.claude/commands/{{COMMAND_NAME}}.md` (for project-specific use)
+
+## Instructions
+Execute the {{MODE_ADJECTIVE}}orchestration command with enhanced visibility:
+
+```bash
+# Source environment and run orchestrator{{META_COMMENT}}
+if [ -f ".orchestrator.env" ]; then
+    source .orchestrator.env
+elif [ -f "load_env.sh" ]; then
+    source load_env.sh
+fi
+
+# Run orchestrator{{META_COMMENT}} and immediately show results
+echo "Running {{MODE_ADJECTIVE}}orchestrator command: $ARGUMENTS"
+echo "================================================"
+result=$(python3 ~/.claude-orchestrator/orchestrate.py $ARGUMENTS{{META_FLAG}})
+echo "$result"
+echo "================================================"
+
+# If this is a gate command, ensure options are visible
+if [[ "$result" == *"GATE"* && "$result" == *"OPTIONS:"* ]]; then
+    echo ""
+    echo "GATE DETECTED - OPTIONS AVAILABLE ABOVE"
+    echo "Choose one of the /{{COMMAND_NAME}} commands listed above"
+    echo ""
+fi
+```
+
+## Configuration
+To configure environment loading, create `.orchestrator.env` in your project root with any required environment setup commands.
