@@ -29,7 +29,7 @@ fi
 # Run orchestrator and immediately show results
 echo "Running orchestrator command: $ARGUMENTS"
 echo "================================================"
-result=$(python3 .claude/orchestrate.py $ARGUMENTS)
+result=$(python3 ~/.claude-orchestrator/orchestrate.py $ARGUMENTS)
 echo "$result"
 echo "================================================"
 
