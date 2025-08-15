@@ -10,8 +10,3 @@ YOUR ONLY RESPONSIBILITIES:
 
 Be skeptical. Check everything.
 
-When complete, output: VERIFIER COMPLETE
-
-Then execute: /clear
-
-Then execute: /orchestrate continue

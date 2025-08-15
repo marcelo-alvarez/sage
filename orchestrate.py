@@ -1153,11 +1153,10 @@ def main():
     
     # Basic workflow commands
     if command == "start":
-        # Start fresh: clean outputs then begin
-        orchestrator.clean_outputs()
+        # Start workflow with existing state
         agent, instructions = orchestrator.get_continue_agent()
         print("\n" + "="*60)
-        print("STARTING FRESH - AGENT: " + agent.upper())
+        print("STARTING - AGENT: " + agent.upper())
         print("="*60)
         print(instructions)
         print("="*60)

@@ -30,8 +30,3 @@ When documenting findings, use this structure:
 ## Constraints and Risks
 ## Next Steps
 
-When complete, output: EXAMPLE-CUSTOM COMPLETE
-
-Then execute: /clear
-
-Then execute: /orchestrate continue
