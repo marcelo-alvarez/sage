@@ -13,6 +13,8 @@ import sys
 import signal
 import threading
 import time
+import subprocess
+import os
 
 
 class StatusReader:
@@ -21,7 +23,8 @@ class StatusReader:
     def __init__(self):
         self.status_emoji_map = {
             '⏳': 'pending',
-            '✅': 'completed', 
+            '✅': 'completed',
+            '✓': 'completed',
             '🔄': 'in-progress'
         }
         
@@ -173,6 +176,23 @@ class StatusHandler(BaseHTTPRequestHandler):
         else:
             self._send_error(404, 'Not Found')
     
+    def do_POST(self):
+        """Handle POST requests"""
+        parsed_url = urlparse(self.path)
+        
+        if parsed_url.path == '/api/gate-decision':
+            self._handle_gate_decision_request(parsed_url)
+        else:
+            self._send_error(404, 'Not Found')
+    
+    def do_OPTIONS(self):
+        """Handle CORS preflight requests"""
+        self.send_response(200)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.end_headers()
+    
     def _handle_status_request(self, parsed_url):
         """Handle /api/status endpoint"""
         try:
@@ -202,7 +222,7 @@ class StatusHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.send_header('Content-Length', str(len(response_body)))
         self.end_headers()
@@ -221,6 +241,103 @@ class StatusHandler(BaseHTTPRequestHandler):
         self.end_headers()
         
         self.wfile.write(response_body)
+    
+    def _handle_gate_decision_request(self, parsed_url):
+        """Handle /api/gate-decision endpoint"""
+        try:
+            # Parse query parameters for mode
+            query_params = parse_qs(parsed_url.query)
+            mode = query_params.get('mode', ['regular'])[0]
+            
+            # Validate mode parameter
+            if mode not in ['regular', 'meta']:
+                self._send_error(400, 'Invalid mode parameter. Use "regular" or "meta".')
+                return
+            
+            # Read request body
+            content_length = int(self.headers.get('Content-Length', 0))
+            if content_length == 0:
+                self._send_error(400, 'Missing request body')
+                return
+            
+            request_body = self.rfile.read(content_length).decode('utf-8')
+            
+            # Parse JSON body
+            try:
+                decision_data = json.loads(request_body)
+            except json.JSONDecodeError:
+                self._send_error(400, 'Invalid JSON in request body')
+                return
+            
+            # Validate required fields
+            decision_type = decision_data.get('decision_type')
+            if not decision_type:
+                self._send_error(400, 'Missing required field: decision_type')
+                return
+            
+            # Validate decision type
+            valid_decisions = ['approve-criteria', 'modify-criteria', 'retry-explorer']
+            if decision_type not in valid_decisions:
+                self._send_error(400, f'Invalid decision_type. Must be one of: {", ".join(valid_decisions)}')
+                return
+            
+            # Process the gate decision
+            result = self._process_gate_decision(decision_type, mode, decision_data)
+            
+            if result['success']:
+                self._send_json_response(result)
+            else:
+                self._send_error(500, result['error'])
+            
+        except Exception as e:
+            print(f"Error handling gate decision request: {e}")
+            self._send_error(500, 'Internal Server Error')
+    
+    def _process_gate_decision(self, decision_type, mode, decision_data):
+        """Process gate decision by calling orchestrate.py"""
+        try:
+            # Build command
+            orchestrate_path = os.path.expanduser('~/.claude-orchestrator/orchestrate.py')
+            cmd = ['python3', orchestrate_path, decision_type]
+            
+            if mode == 'meta':
+                cmd.append('meta')
+            
+            # Add modification text if provided
+            if decision_type == 'modify-criteria' and 'modifications' in decision_data:
+                cmd.append(decision_data['modifications'])
+            
+            # Execute command
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            
+            if result.returncode == 0:
+                # Read updated status after decision processing
+                status_data = self.status_reader.read_status(mode)
+                
+                return {
+                    'success': True,
+                    'decision_type': decision_type,
+                    'mode': mode,
+                    'message': 'Gate decision processed successfully',
+                    'workflow_state': status_data,
+                    'orchestrator_output': result.stdout.strip()
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': f'Orchestrator command failed: {result.stderr.strip() or result.stdout.strip()}'
+                }
+        
+        except subprocess.TimeoutExpired:
+            return {
+                'success': False,
+                'error': 'Gate decision processing timed out'
+            }
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f'Error processing gate decision: {str(e)}'
+            }
     
     def log_message(self, format, *args):
         """Override to customize logging"""
@@ -245,6 +362,7 @@ class OrchestratorAPIServer:
             
             print(f"Starting Claude Code Orchestrator API server on {self.host}:{self.port}")
             print(f"Status endpoint: http://{self.host}:{self.port}/api/status")
+            print(f"Gate decision endpoint: http://{self.host}:{self.port}/api/gate-decision")
             print(f"With meta mode: http://{self.host}:{self.port}/api/status?mode=meta")
             print("Press Ctrl+C to stop the server")
             
