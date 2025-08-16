@@ -549,7 +549,7 @@ class ExtensibleClaudeDrivenOrchestrator:
                                "You are now the " + agent_name.upper() + " agent.\n\n" + \
                                work_section + "\n\n" + \
                                "When complete, output: " + completion_phrase + "\n\n" + \
-                               "FINAL STEP: Run /clear to reset context, then run:\n" + \
+                               "FINAL STEP: Run the claude code command `/clear` to reset context, then run:\n" + \
                                "python3 ~/.claude-orchestrator/orchestrate.py continue" + meta_flag
         
         # Write complete instructions to next-command.txt
