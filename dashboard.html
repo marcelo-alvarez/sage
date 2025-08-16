@@ -543,9 +543,49 @@
 
         let currentMode = 'regular';
         let simulationStep = 0;
+        let realTimeData = null;
+        let useRealAPI = true;
 
         // Initialize dashboard
         function initDashboard() {
+            if (useRealAPI) {
+                fetchRealStatus();
+            } else {
+                renderMockData();
+            }
+        }
+
+        // Fetch real status from API
+        async function fetchRealStatus() {
+            try {
+                const apiUrl = `http://localhost:8000/api/status?mode=${currentMode}`;
+                const response = await fetch(apiUrl);
+                
+                if (response.ok) {
+                    realTimeData = await response.json();
+                    renderRealData();
+                } else {
+                    throw new Error(`API responded with status ${response.status}`);
+                }
+            } catch (error) {
+                console.log('API not available, falling back to mock data:', error.message);
+                useRealAPI = false;
+                renderMockData();
+            }
+        }
+
+        // Render data from real API
+        function renderRealData() {
+            if (!realTimeData) return;
+            
+            renderWorkflowTimeline(realTimeData.workflow);
+            renderAgentsGrid(realTimeData.agents);
+            updateCurrentTask(realTimeData.currentTask);
+            updateLastUpdated();
+        }
+
+        // Render mock data (fallback)
+        function renderMockData() {
             renderWorkflowTimeline();
             renderAgentsGrid();
             updateCurrentTask();
@@ -559,9 +599,9 @@
         });
 
         // Render workflow timeline
-        function renderWorkflowTimeline() {
+        function renderWorkflowTimeline(workflowData) {
             const timeline = document.getElementById('workflowTimeline');
-            const workflow = mockStatusData[currentMode].workflow;
+            const workflow = workflowData || mockStatusData[currentMode].workflow;
             
             timeline.innerHTML = '';
             
@@ -605,9 +645,9 @@
         }
 
         // Render agents grid
-        function renderAgentsGrid() {
+        function renderAgentsGrid(agentsData) {
             const grid = document.getElementById('agentsGrid');
-            const agents = mockStatusData[currentMode].agents;
+            const agents = agentsData || mockStatusData[currentMode].agents;
             
             grid.innerHTML = '';
             
@@ -628,8 +668,9 @@
         }
 
         // Update current task display
-        function updateCurrentTask() {
-            document.getElementById('currentTask').textContent = mockStatusData[currentMode].currentTask;
+        function updateCurrentTask(taskText) {
+            const currentTask = taskText || mockStatusData[currentMode].currentTask;
+            document.getElementById('currentTask').textContent = currentTask;
         }
 
         // Update last updated time
@@ -638,11 +679,14 @@
             document.getElementById('updateTime').textContent = now.toLocaleTimeString();
         }
 
-        // Refresh status (simulated)
+        // Refresh status
         function refreshStatus() {
-            updateLastUpdated();
-            // In a real implementation, this would read from actual .agent-outputs/ files
-            console.log(`Refreshing status from .agent-outputs${currentMode === 'meta' ? '-meta' : ''}/`);
+            if (useRealAPI) {
+                fetchRealStatus();
+            } else {
+                updateLastUpdated();
+                console.log(`Using mock data for .agent-outputs${currentMode === 'meta' ? '-meta' : ''}/`);
+            }
         }
 
         // Simulate progress for demonstration
