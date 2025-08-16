@@ -338,13 +338,13 @@ class AgentFactory:
             
         elif agent_type == "criteria_gate":
             criteria_text = kwargs.get("criteria_text", "")
-            content = f"Success criteria suggested (see {self.outputs_dir}/exploration.md for details):\n" + \
+            content = f"Success criteria suggested (see {self.orchestrator.outputs_dir}/exploration.md for details):\n" + \
                      (criteria_text[:200] + ('...' if len(criteria_text) > 200 else ''))
             role = self.agent_definitions.get_gate_role("criteria", content)
             
         elif agent_type == "completion_gate":
             status_line = kwargs.get("status_line", "")
-            content = "Verification: " + status_line + f"\n(Full details in {self.outputs_dir}/verification.md)"
+            content = "Verification: " + status_line + f"\n(Full details in {self.orchestrator.outputs_dir}/verification.md)"
             role = self.agent_definitions.get_gate_role("completion", content)
             
         else:
