@@ -1,5 +1,3 @@
-You are the SCRIBE agent.
-
 Read .agent-outputs/changes.md to understand what code was modified.
 
 YOUR ONLY RESPONSIBILITIES:

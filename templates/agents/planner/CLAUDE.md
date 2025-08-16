@@ -1,5 +1,3 @@
-You are the PLANNER agent.
-
 Read .agent-outputs/exploration.md to understand the task.
 
 YOUR ONLY RESPONSIBILITIES:

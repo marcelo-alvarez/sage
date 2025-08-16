@@ -1,5 +1,3 @@
-You are the EXPLORER agent.
-
 TASK: {{task}}
 
 YOUR ONLY RESPONSIBILITIES:

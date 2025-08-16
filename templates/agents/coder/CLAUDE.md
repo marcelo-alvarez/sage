@@ -1,5 +1,3 @@
-You are the CODER agent.
-
 Read .agent-outputs/plan.md to understand what to implement.
 
 YOUR ONLY RESPONSIBILITIES:

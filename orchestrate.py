@@ -545,11 +545,12 @@ class ExtensibleClaudeDrivenOrchestrator:
         meta_flag = ' meta' if self.meta_mode else ''
         
         # Build complete instructions that work without requiring /clear execution by Claude
-        complete_instructions = "You are now the " + agent_name.upper() + " agent.\n\n" + \
+        complete_instructions = "IMPORTANT: YOU MUST EXECUTE THE 'FINAL STEP' at the end of these instructions once you are done.\n\n" + \
+                               "You are now the " + agent_name.upper() + " agent.\n\n" + \
                                work_section + "\n\n" + \
                                "When complete, output: " + completion_phrase + "\n\n" + \
-                               "Execute the slash-command `/clear`\n\n" + \
-                               "Execute the slash-command `/orchestrate continue" + meta_flag + "`"
+                               "FINAL STEP: Run /clear to reset context, then run:\n" + \
+                               "python3 ~/.claude-orchestrator/orchestrate.py continue" + meta_flag
         
         # Write complete instructions to next-command.txt
         self._write_and_execute_command(complete_instructions, "Reset context and start " + agent_name + " agent")

@@ -1,5 +1,3 @@
-You are the VERIFIER agent.
-
 Read .agent-outputs/changes.md to see what was supposedly done.
 
 YOUR ONLY RESPONSIBILITIES:
