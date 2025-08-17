@@ -21,13 +21,27 @@ import socket
 
 def find_available_port(start_port: int, max_attempts: int = 20) -> int:
     """Find an available port starting from start_port"""
+    # Try the requested range first
     for port in range(start_port, start_port + max_attempts):
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 sock.bind(('localhost', port))
                 return port
         except OSError:
             continue
+    
+    # If no ports in requested range, try higher range for API server
+    if start_port == 8000:
+        for port in range(9000, 9020):
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    sock.bind(('localhost', port))
+                    return port
+            except OSError:
+                continue
+    
     raise OSError(f"No available port found in range {start_port}-{start_port + max_attempts - 1}")
 
 

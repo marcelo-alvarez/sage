@@ -22,13 +22,38 @@ import argparse
 
 def find_available_port(start_port: int, max_attempts: int = 20) -> int:
     """Find an available port starting from start_port"""
+    # Try the requested range first
     for port in range(start_port, start_port + max_attempts):
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 sock.bind(('localhost', port))
                 return port
         except OSError:
             continue
+    
+    # If no ports in requested range, try higher ranges
+    if start_port == 8000:
+        # Try higher range for API server
+        for port in range(9000, 9020):
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    sock.bind(('localhost', port))
+                    return port
+            except OSError:
+                continue
+    elif start_port == 5678:
+        # Try higher range for dashboard server
+        for port in range(6000, 6020):
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    sock.bind(('localhost', port))
+                    return port
+            except OSError:
+                continue
+    
     raise OSError(f"No available port found in range {start_port}-{start_port + max_attempts - 1}")
 
 
@@ -124,6 +149,7 @@ class AgentConfig:
         self.dashboard_process = None
         self.api_process = None
         self.dashboard = None
+        self.dashboard_available = False
         self._load_config()
         
         if self.enable_dashboard:
@@ -309,7 +335,9 @@ class AgentConfig:
                 self.api_port = find_available_port(self.api_port)
                 self.dashboard_port = find_available_port(self.dashboard_port)
             except OSError as e:
-                print(f"Error finding available ports: {e}")
+                print(f"Warning: Dashboard unavailable - {e}")
+                print("Orchestrator will continue without web dashboard")
+                self.dashboard_available = False
                 return
                 
             # Start API server as subprocess (without --background since subprocess IS the background)
@@ -337,6 +365,7 @@ class AgentConfig:
             if api_running and dashboard_running:
                 # Always display dashboard URL
                 print(f"Dashboard: http://localhost:{self.dashboard_port}/dashboard/index.html")
+                self.dashboard_available = True
                 
                 # Open dashboard in browser if not suppressed
                 if not self.no_browser:
@@ -349,14 +378,28 @@ class AgentConfig:
                 atexit.register(self.stop_dashboard)
                 
             else:
-                print("One or more servers failed to start properly")
+                print("Warning: Dashboard servers failed to start properly")
+                print("Orchestrator will continue without web dashboard")
+                self.dashboard_available = False
                 if not api_running:
-                    print(f"API server failed - stderr: {self.api_process.stderr.read()}")
+                    # Non-blocking stderr read with timeout
+                    try:
+                        stderr_output = self.api_process.stderr.read(1000) if self.api_process.stderr else "No stderr"
+                        print(f"API server failed - stderr: {stderr_output}")
+                    except Exception as e:
+                        print(f"API server failed - Could not read stderr: {e}")
                 if not dashboard_running:
-                    print(f"Dashboard server failed - stderr: {self.dashboard_process.stderr.read()}")
+                    # Non-blocking stderr read with timeout  
+                    try:
+                        stderr_output = self.dashboard_process.stderr.read(1000) if self.dashboard_process.stderr else "No stderr"
+                        print(f"Dashboard server failed - stderr: {stderr_output}")
+                    except Exception as e:
+                        print(f"Dashboard server failed - Could not read stderr: {e}")
                 
         except Exception as e:
-            print(f"Error starting dashboard: {e}")
+            print(f"Warning: Dashboard startup failed - {e}")
+            print("Orchestrator will continue without web dashboard")
+            self.dashboard_available = False
     
     def stop_dashboard(self):
         """Stop dashboard and API server subprocesses"""
@@ -505,6 +548,9 @@ class AgentFactory:
             role["status"]
         )
         
+        # Update status file to reflect current workflow state
+        self.orchestrator._update_status_file()
+        
         # Build instructions based on agent type
         if role.get("auto_continue", True):
             instructions = self.orchestrator._build_agent_instructions(
@@ -647,16 +693,15 @@ class ExtensibleClaudeDrivenOrchestrator:
         self.dashboard = None
         
         # Initialize configuration systems
-        self.agent_config = AgentConfig()
+        self.agent_config = AgentConfig(enable_dashboard=self.enable_dashboard, dashboard_port=self.dashboard_port, api_port=self.api_port, no_browser=self.no_browser)
         self.workflow_config = WorkflowConfig()
         
         # Initialize agent factory with configuration
         self.agent_factory = AgentFactory(self, self.agent_config)
         
-        # Initialize dashboard if enabled
-        if self.enable_dashboard:
-            self.dashboard = OrchestratorDashboard()
-            self.start_dashboard()
+        # Dashboard is initialized through AgentConfig if enabled
+        self.dashboard = self.agent_config.dashboard
+        self.dashboard_available = getattr(self.agent_config, 'dashboard_available', False)
         
         # Ensure directories exist
         self.claude_dir.mkdir(exist_ok=True)
@@ -665,95 +710,6 @@ class ExtensibleClaudeDrivenOrchestrator:
         
         # Generate default configuration files if they don't exist
         self._ensure_config_files()
-
-    def start_dashboard(self):
-        """Start dashboard and API servers as subprocesses"""
-        try:
-            # Find available ports
-            try:
-                self.api_port = find_available_port(self.api_port)
-                self.dashboard_port = find_available_port(self.dashboard_port)
-            except OSError as e:
-                print(f"Error finding available ports: {e}")
-                return
-                
-            # Start API server as subprocess (without --background since subprocess IS the background)
-            self.api_process = subprocess.Popen([
-                sys.executable, 'api_server.py', 
-                '--port', str(self.api_port)
-            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            
-            print(f"API server started as subprocess (PID: {self.api_process.pid}) on port {self.api_port}")
-            
-            # Start dashboard server as subprocess
-            self.dashboard_process = subprocess.Popen([
-                sys.executable, 'test_dashboard_server.py', str(self.dashboard_port)
-            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            
-            print(f"Dashboard server started as subprocess (PID: {self.dashboard_process.pid}) on port {self.dashboard_port}")
-            
-            # Give servers time to start
-            time.sleep(2)
-            
-            # Check if processes are still running
-            api_running = self.api_process.poll() is None
-            dashboard_running = self.dashboard_process.poll() is None
-            
-            if api_running and dashboard_running:
-                # Always display dashboard URL
-                print(f"Dashboard: http://localhost:{self.dashboard_port}/dashboard/index.html")
-                
-                # Open dashboard in browser if not suppressed
-                if not self.no_browser:
-                    try:
-                        webbrowser.open(f'http://localhost:{self.dashboard_port}/dashboard/index.html')
-                    except Exception as e:
-                        print(f"Failed to open dashboard in browser: {e}")
-                    
-                # Register cleanup
-                atexit.register(self.stop_dashboard)
-                
-            else:
-                print("One or more servers failed to start properly")
-                if not api_running:
-                    print(f"API server failed - stderr: {self.api_process.stderr.read()}")
-                if not dashboard_running:
-                    print(f"Dashboard server failed - stderr: {self.dashboard_process.stderr.read()}")
-                
-        except Exception as e:
-            print(f"Error starting dashboard: {e}")
-    
-    def stop_dashboard(self):
-        """Stop dashboard and API server subprocesses"""
-        try:
-            if self.dashboard_process:
-                try:
-                    self.dashboard_process.terminate()
-                    self.dashboard_process.wait(timeout=5)
-                    print("Dashboard server stopped")
-                except:
-                    try:
-                        self.dashboard_process.kill()
-                        print("Dashboard server force-killed")
-                    except:
-                        pass
-                self.dashboard_process = None
-                
-            if self.api_process:
-                try:
-                    self.api_process.terminate()
-                    self.api_process.wait(timeout=5)
-                    print("API server stopped")
-                except:
-                    try:
-                        self.api_process.kill()
-                        print("API server force-killed")
-                    except:
-                        pass
-                self.api_process = None
-                
-        except Exception as e:
-            print(f"Error stopping servers: {e}")
 
     def _test_api_endpoint(self):
         """Test if API server HTTP endpoint is responding"""
@@ -887,8 +843,8 @@ class ExtensibleClaudeDrivenOrchestrator:
         gate_filename = "current-" + gate_name.lower() + "-gate.md"
         self._write_and_display(gate_content, gate_filename, "gate options")
         
-        # Set dashboard gate information if dashboard is enabled
-        if self.dashboard:
+        # Set dashboard gate information if dashboard is available
+        if self.dashboard and getattr(self.agent_config, 'dashboard_available', False):
             self.dashboard.set_gate(gate_name, content, options)
         
         return gate_name.upper() + " GATE: Human Review Required\n\n" + \
@@ -913,7 +869,12 @@ class ExtensibleClaudeDrivenOrchestrator:
         next_agent = self.workflow_config.get_next_agent(current_outputs)
         
         if next_agent is None:
+            # Update status before returning completion
+            self._update_status_file()
             return "complete", "All agents have completed successfully. Task marked complete."
+        
+        # Update status to reflect current workflow state
+        self._update_status_file()
         
         # Prepare the next agent using dynamic preparation
         return self._prepare_work_agent(next_agent)
@@ -1094,6 +1055,35 @@ class ExtensibleClaudeDrivenOrchestrator:
         # Write and display status
         self._write_and_display(status_info, "current-status.md", "status")
 
+    def _update_status_file(self):
+        """Update current-status.md file immediately without displaying"""
+        status_info = "# Orchestration Status\n\n"
+        
+        files = [
+            ("exploration.md", "Explorer"),
+            ("success-criteria.md", "Criteria Gate"),
+            ("plan.md", "Planner"),
+            ("changes.md", "Coder"),
+            ("verification.md", "Verifier"),
+            ("completion-approved.md", "Completion Gate")
+        ]
+        
+        for filename, agent in files:
+            filepath = self.outputs_dir / filename
+            if filepath.exists():
+                size = filepath.stat().st_size
+                status_info += "✓ " + agent.ljust(15) + " complete (" + str(size) + " bytes)\n"
+            else:
+                status_info += "⏳ " + agent.ljust(15) + " pending\n"
+                
+        current_task = self._get_current_task()
+        if current_task:
+            status_info += "\nCurrent task: " + current_task[:60] + "\n"
+            
+        # Write status to file without displaying
+        status_filepath = self.outputs_dir / "current-status.md"
+        status_filepath.write_text(status_info)
+
     def modify_criteria(self, modification_request=None):
         """Set up criteria modification task for Claude and continue workflow"""
         if not modification_request:
@@ -1163,6 +1153,9 @@ class ExtensibleClaudeDrivenOrchestrator:
             
             print("Success criteria approved and saved")
             
+            # Update status file after criteria approval
+            self._update_status_file()
+            
             # Continue to continue agent
             agent, instructions = self.get_continue_agent()
             print("\n" + "="*60)
@@ -1180,6 +1173,9 @@ class ExtensibleClaudeDrivenOrchestrator:
             approval_file = self.outputs_dir / "completion-approved.md"
             approval_file.write_text("# Task Completion Approved\n\nTask: " + task + 
                                     "\nApproved at: " + datetime.now().isoformat() + "\n")
+            
+            # Update status file after completion approval
+            self._update_status_file()
             
             print("\n" + "="*60)
             print("TASK COMPLETED SUCCESSFULLY!")
@@ -1333,6 +1329,9 @@ Begin by analyzing the current directory and asking the user about their goals.
             
         self._clean_from_phase(phase_name)
         print("Restarting from " + display_name + " phase")
+        
+        # Update status file after cleaning phase
+        self._update_status_file()
         
         # Continue to continue agent
         next_agent_result = self.get_continue_agent()
