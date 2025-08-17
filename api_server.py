@@ -348,9 +348,10 @@ class StatusHandler(BaseHTTPRequestHandler):
 class OrchestratorAPIServer:
     """Main API server class"""
     
-    def __init__(self, port=8000, host='localhost'):
+    def __init__(self, port=8000, host='localhost', setup_signals=True):
         self.port = port
         self.host = host
+        self.setup_signals = setup_signals
         self.server = None
         self.server_thread = None
         self._running = False
@@ -367,9 +368,10 @@ class OrchestratorAPIServer:
             print(f"With meta mode: http://{self.host}:{self.port}/api/status?mode=meta")
             print("Press Ctrl+C to stop the server")
             
-            # Set up signal handlers for graceful shutdown
-            signal.signal(signal.SIGINT, self._signal_handler)
-            signal.signal(signal.SIGTERM, self._signal_handler)
+            # Set up signal handlers for graceful shutdown (only in main thread)
+            if self.setup_signals:
+                signal.signal(signal.SIGINT, self._signal_handler)
+                signal.signal(signal.SIGTERM, self._signal_handler)
             
             # Open dashboard in browser
             try:
@@ -396,18 +398,34 @@ class OrchestratorAPIServer:
             print("Server is already running")
             return True
             
-        self.server_thread = threading.Thread(target=self.start, daemon=True)
+        # Create a separate start method for background that doesn't use signals
+        def start_without_signals():
+            try:
+                self.server = HTTPServer((self.host, self.port), StatusHandler)
+                self._running = True
+                
+                print(f"Starting Claude Code Orchestrator API server on {self.host}:{self.port}")
+                print(f"Status endpoint: http://{self.host}:{self.port}/api/status")
+                print(f"Gate decision endpoint: http://{self.host}:{self.port}/api/gate-decision")
+                print(f"With meta mode: http://{self.host}:{self.port}/api/status?mode=meta")
+                
+                # Start server without signal handlers (background mode)
+                self.server.serve_forever()
+                
+            except OSError as e:
+                print(f"Error starting server: {e}")
+                if "Address already in use" in str(e):
+                    print(f"Port {self.port} is already in use. Try a different port.")
+                self._running = False
+            except Exception as e:
+                print(f"Server error: {e}")
+                self._running = False
+            
+        self.server_thread = threading.Thread(target=start_without_signals, daemon=True)
         self.server_thread.start()
         
         # Give server time to start
         time.sleep(0.5)
-        
-        # Open dashboard in browser after server is ready
-        if self._running:
-            try:
-                webbrowser.open('http://localhost:5678/dashboard/index.html')
-            except Exception as e:
-                print(f"Failed to open dashboard in browser: {e}")
         
         return self._running
     

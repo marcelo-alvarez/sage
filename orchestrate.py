@@ -12,6 +12,25 @@ from typing import Dict, Any, Optional, Tuple, List
 from dataclasses import dataclass
 import re
 import sys
+import atexit
+import subprocess
+import webbrowser
+import time
+
+
+class OrchestratorDashboard:
+    """Web dashboard for workflow visualization and gate control"""
+    
+    def __init__(self):
+        self.current_gate = None
+        
+    def set_gate(self, gate_name: str, content: str, options: List[str]):
+        """Set current gate information for dashboard display"""
+        self.current_gate = {
+            'gate_name': gate_name,
+            'content': content,
+            'options': options
+        }
 
 
 @dataclass
@@ -64,11 +83,21 @@ class AgentRole:
 class AgentConfig:
     """Configuration manager for agent definitions"""
     
-    def __init__(self, config_path: Path = None):
+    def __init__(self, config_path: Path = None, enable_dashboard: bool = True, dashboard_port: int = 5678, api_port: int = 8000):
         self.config_path = config_path or Path('.claude/agent-config.json')
         self.templates_dir = Path('templates/agents')
         self.agents = {}
+        self.enable_dashboard = enable_dashboard
+        self.dashboard_port = dashboard_port
+        self.api_port = api_port
+        self.dashboard_process = None
+        self.api_process = None
+        self.dashboard = None
         self._load_config()
+        
+        if self.enable_dashboard:
+            self.dashboard = OrchestratorDashboard()
+            self.start_dashboard()
         
     def _load_config(self):
         """Load agent configuration from JSON file and template files"""
@@ -240,6 +269,84 @@ class AgentConfig:
         
         with open(self.config_path, 'w') as f:
             json.dump(config_data, f, indent=2)
+    
+    def start_dashboard(self):
+        """Start dashboard and API servers as subprocesses"""
+        try:
+            # Start API server as subprocess (without --background since subprocess IS the background)
+            self.api_process = subprocess.Popen([
+                sys.executable, 'api_server.py', 
+                '--port', str(self.api_port)
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            
+            print(f"API server started as subprocess (PID: {self.api_process.pid}) on port {self.api_port}")
+            
+            # Start dashboard server as subprocess
+            self.dashboard_process = subprocess.Popen([
+                sys.executable, 'test_dashboard_server.py', str(self.dashboard_port)
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            
+            print(f"Dashboard server started as subprocess (PID: {self.dashboard_process.pid}) on port {self.dashboard_port}")
+            
+            # Give servers time to start
+            time.sleep(2)
+            
+            # Check if processes are still running
+            api_running = self.api_process.poll() is None
+            dashboard_running = self.dashboard_process.poll() is None
+            
+            if api_running and dashboard_running:
+                # Open dashboard in browser
+                try:
+                    webbrowser.open(f'http://localhost:{self.dashboard_port}/dashboard.html')
+                    print(f"Dashboard opened in browser at http://localhost:{self.dashboard_port}/dashboard.html")
+                except Exception as e:
+                    print(f"Failed to open dashboard in browser: {e}")
+                    
+                # Register cleanup
+                atexit.register(self.stop_dashboard)
+                
+            else:
+                print("One or more servers failed to start properly")
+                if not api_running:
+                    print(f"API server failed - stderr: {self.api_process.stderr.read()}")
+                if not dashboard_running:
+                    print(f"Dashboard server failed - stderr: {self.dashboard_process.stderr.read()}")
+                
+        except Exception as e:
+            print(f"Error starting dashboard: {e}")
+    
+    def stop_dashboard(self):
+        """Stop dashboard and API server subprocesses"""
+        try:
+            if self.dashboard_process:
+                try:
+                    self.dashboard_process.terminate()
+                    self.dashboard_process.wait(timeout=5)
+                    print("Dashboard server stopped")
+                except:
+                    try:
+                        self.dashboard_process.kill()
+                        print("Dashboard server force-killed")
+                    except:
+                        pass
+                self.dashboard_process = None
+                
+            if self.api_process:
+                try:
+                    self.api_process.terminate()
+                    self.api_process.wait(timeout=5)
+                    print("API server stopped")
+                except:
+                    try:
+                        self.api_process.kill()
+                        print("API server force-killed")
+                    except:
+                        pass
+                self.api_process = None
+                
+        except Exception as e:
+            print(f"Error stopping servers: {e}")
 
 
 # Legacy gate options - can be made configurable in future
@@ -588,6 +695,10 @@ class ExtensibleClaudeDrivenOrchestrator:
         
         gate_filename = "current-" + gate_name.lower() + "-gate.md"
         self._write_and_display(gate_content, gate_filename, "gate options")
+        
+        # Set dashboard gate information if dashboard is enabled
+        if self.dashboard:
+            self.dashboard.set_gate(gate_name, content, options)
         
         return gate_name.upper() + " GATE: Human Review Required\n\n" + \
                "STOP: I must wait for the human to choose one of the options displayed above. " + \
