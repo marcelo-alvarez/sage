@@ -34,17 +34,28 @@ class StatusReader:
         outputs_dir = '.agent-outputs-meta' if mode == 'meta' else '.agent-outputs'
         status_file = Path(outputs_dir) / 'current-status.md'
         
+        print(f"[StatusReader] Reading status for mode '{mode}' from {status_file}")
+        
         try:
             if not status_file.exists():
+                print(f"[StatusReader] Status file does not exist: {status_file}")
                 return self._get_default_status()
                 
             with open(status_file, 'r', encoding='utf-8') as f:
                 content = f.read()
+            
+            print(f"[StatusReader] Read {len(content)} characters from status file")
+            
+            if not content.strip():
+                print(f"[StatusReader] Status file is empty, using default status")
+                return self._get_default_status()
                 
-            return self._parse_status_content(content)
+            parsed_status = self._parse_status_content(content)
+            print(f"[StatusReader] Successfully parsed status with {len(parsed_status.get('workflow', []))} workflow items")
+            return parsed_status
             
         except Exception as e:
-            print(f"Error reading status file: {e}")
+            print(f"[StatusReader] Error reading status file {status_file}: {e}")
             return self._get_default_status()
     
     def _parse_status_content(self, content):
@@ -165,7 +176,13 @@ class StatusHandler(BaseHTTPRequestHandler):
     """HTTP request handler for status endpoint"""
     
     def __init__(self, *args, **kwargs):
-        self.status_reader = StatusReader()
+        try:
+            self.status_reader = StatusReader()
+            print(f"[API] StatusHandler initialized successfully")
+        except Exception as e:
+            print(f"[API] Error initializing StatusReader: {e}")
+            # Create a minimal fallback reader
+            self.status_reader = None
         super().__init__(*args, **kwargs)
     
     def do_GET(self):
@@ -199,18 +216,34 @@ class StatusHandler(BaseHTTPRequestHandler):
     def _handle_status_request(self, parsed_url):
         """Handle /api/status endpoint"""
         try:
+            print(f"[API] Processing status request: {parsed_url.path}?{parsed_url.query}")
+            
+            # Check if status reader is available
+            if self.status_reader is None:
+                self._send_error(500, 'StatusReader not initialized. Server may have startup issues.')
+                return
+            
             # Parse query parameters
             query_params = parse_qs(parsed_url.query)
             mode = query_params.get('mode', ['regular'])[0]
             
             # Validate mode parameter
             if mode not in ['regular', 'meta']:
+                print(f"[API] Invalid mode parameter: {mode}")
                 self._send_error(400, 'Invalid mode parameter. Use "regular" or "meta".')
                 return
             
             # Read status data
+            print(f"[API] Reading status data for mode: {mode}")
             status_data = self.status_reader.read_status(mode)
             
+            # Validate response data
+            if not status_data or not isinstance(status_data, dict):
+                print(f"[API] Invalid status data returned: {type(status_data)}")
+                self._send_error(500, 'Failed to read valid status data')
+                return
+            
+            print(f"[API] Sending status response with {len(status_data)} fields")
             # Send JSON response
             self._send_json_response(status_data)
             
@@ -466,7 +499,15 @@ class OrchestratorAPIServer:
     def start(self):
         """Start the API server"""
         try:
+            print(f"[API Server] Initializing HTTPServer on {self.host}:{self.port}")
             self.server = HTTPServer((self.host, self.port), StatusHandler)
+            
+            # Validate server was created successfully
+            if not self.server:
+                print(f"[API Server] Failed to create HTTPServer instance")
+                return False
+            
+            print(f"[API Server] HTTPServer created successfully")
             self._running = True
             
             print(f"Starting Claude Code Orchestrator API server on {self.host}:{self.port}")
@@ -487,12 +528,18 @@ class OrchestratorAPIServer:
                 print(f"Failed to open dashboard in browser: {e}")
             
             # Start server
+            print(f"[API Server] Starting serve_forever() on {self.host}:{self.port}")
             self.server.serve_forever()
             
         except OSError as e:
-            print(f"Error starting server: {e}")
+            print(f"[API Server] OSError starting server: {e}")
             if "Address already in use" in str(e):
                 print(f"Port {self.port} is already in use. Try a different port.")
+            self._running = False
+            return False
+        except Exception as e:
+            print(f"[API Server] Unexpected error starting server: {e}")
+            self._running = False
             return False
         except KeyboardInterrupt:
             self.stop()
@@ -508,7 +555,16 @@ class OrchestratorAPIServer:
         # Create a separate start method for background that doesn't use signals
         def start_without_signals():
             try:
+                print(f"[API Server Background] Initializing HTTPServer on {self.host}:{self.port}")
                 self.server = HTTPServer((self.host, self.port), StatusHandler)
+                
+                # Validate server was created successfully
+                if not self.server:
+                    print(f"[API Server Background] Failed to create HTTPServer instance")
+                    self._running = False
+                    return
+                
+                print(f"[API Server Background] HTTPServer created successfully")
                 self._running = True
                 
                 print(f"Starting Claude Code Orchestrator API server on {self.host}:{self.port}")
@@ -517,15 +573,16 @@ class OrchestratorAPIServer:
                 print(f"With meta mode: http://{self.host}:{self.port}/api/status?mode=meta")
                 
                 # Start server without signal handlers (background mode)
+                print(f"[API Server Background] Starting serve_forever() on {self.host}:{self.port}")
                 self.server.serve_forever()
                 
             except OSError as e:
-                print(f"Error starting server: {e}")
+                print(f"[API Server Background] OSError starting server: {e}")
                 if "Address already in use" in str(e):
                     print(f"Port {self.port} is already in use. Try a different port.")
                 self._running = False
             except Exception as e:
-                print(f"Server error: {e}")
+                print(f"[API Server Background] Unexpected error starting server: {e}")
                 self._running = False
             
         self.server_thread = threading.Thread(target=start_without_signals, daemon=True)

@@ -717,6 +717,52 @@ class ExtensibleClaudeDrivenOrchestrator:
         except Exception as e:
             print(f"Error stopping servers: {e}")
 
+    def _test_api_endpoint(self):
+        """Test if API server HTTP endpoint is responding"""
+        try:
+            import urllib.request
+            import urllib.error
+            
+            url = f'http://localhost:{self.api_port}/api/status?mode=meta'
+            print(f"[Orchestrator] Testing API endpoint: {url}")
+            
+            with urllib.request.urlopen(url, timeout=5) as response:
+                if response.status == 200:
+                    print(f"[Orchestrator] API endpoint test passed")
+                    return True
+                else:
+                    print(f"[Orchestrator] API endpoint returned status {response.status}")
+                    return False
+        except urllib.error.URLError as e:
+            print(f"[Orchestrator] API endpoint test failed: {e}")
+            return False
+        except Exception as e:
+            print(f"[Orchestrator] API endpoint test error: {e}")
+            return False
+    
+    def _test_dashboard_endpoint(self):
+        """Test if dashboard server HTTP endpoint is responding"""
+        try:
+            import urllib.request
+            import urllib.error
+            
+            url = f'http://localhost:{self.dashboard_port}/dashboard.html'
+            print(f"[Orchestrator] Testing dashboard endpoint: {url}")
+            
+            with urllib.request.urlopen(url, timeout=5) as response:
+                if response.status == 200:
+                    print(f"[Orchestrator] Dashboard endpoint test passed")
+                    return True
+                else:
+                    print(f"[Orchestrator] Dashboard endpoint returned status {response.status}")
+                    return False
+        except urllib.error.URLError as e:
+            print(f"[Orchestrator] Dashboard endpoint test failed: {e}")
+            return False
+        except Exception as e:
+            print(f"[Orchestrator] Dashboard endpoint test error: {e}")
+            return False
+
     def _ensure_config_files(self):
         """Generate default configuration files if they don't exist"""
         # Generate agent configuration
