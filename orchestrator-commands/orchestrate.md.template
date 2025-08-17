@@ -2,13 +2,30 @@
 {{COMMAND_DESCRIPTION}}
 
 Available commands:
+
+**Workflow Control:**
 - `bootstrap` - Generate initial tasks for your project
 - `start` - Start fresh workflow{{MODE_SUFFIX}}
 - `continue` - Continue to next agent{{MODE_SUFFIX}}
 - `status` - Show current progress{{MODE_SUFFIX}}
 - `clean` - Reset{{MODE_OUTPUTS}}
+- `complete` - Mark current task as complete
+- `fail` - Mark current task as failed
+
+**Gate Decisions:**
 - `approve-criteria` - Accept criteria and continue{{MODE_SUFFIX}}
 - `modify-criteria "changes"` - Edit criteria based on feedback{{MODE_SUFFIX}}
+- `approve-completion` - Mark workflow complete and approve results
+- `retry-explorer` - Restart from Explorer phase
+
+**Selective Retry:**
+- `retry-from-planner` - Restart from Planner phase (keep criteria)
+- `retry-from-coder` - Restart from Coder phase (keep plan)
+- `retry-from-verifier` - Re-run Verifier only (keep changes)
+
+**Mode Control:**
+- `unsupervised` - Enable automatic gate approval
+- `supervised` - Disable automatic gate approval (default)
 
 {{MODE_SECTION}}## Setup
 To enable this slash command in Claude Code, copy this file to either:

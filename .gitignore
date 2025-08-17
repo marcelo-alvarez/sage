@@ -7,3 +7,9 @@ __pycache__/
 # Generated orchestrator files (can be recreated with installer)
 .claude/
 .claude-agents/
+.agent-outputs-meta/
+.claude-meta/
+
+# Generated slash command files (built from template)
+orchestrator-commands/orchestrate.md
+orchestrator-commands/morchestrate.md
