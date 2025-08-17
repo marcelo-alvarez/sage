@@ -15,6 +15,7 @@ import threading
 import time
 import subprocess
 import os
+import webbrowser
 
 
 class StatusReader:
@@ -370,6 +371,12 @@ class OrchestratorAPIServer:
             signal.signal(signal.SIGINT, self._signal_handler)
             signal.signal(signal.SIGTERM, self._signal_handler)
             
+            # Open dashboard in browser
+            try:
+                webbrowser.open('http://localhost:5678/dashboard/index.html')
+            except Exception as e:
+                print(f"Failed to open dashboard in browser: {e}")
+            
             # Start server
             self.server.serve_forever()
             
@@ -394,6 +401,14 @@ class OrchestratorAPIServer:
         
         # Give server time to start
         time.sleep(0.5)
+        
+        # Open dashboard in browser after server is ready
+        if self._running:
+            try:
+                webbrowser.open('http://localhost:5678/dashboard/index.html')
+            except Exception as e:
+                print(f"Failed to open dashboard in browser: {e}")
+        
         return self._running
     
     def stop(self):

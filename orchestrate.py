@@ -566,10 +566,24 @@ class ExtensibleClaudeDrivenOrchestrator:
         """Build standardized gate instructions with improved visibility"""
         options_text = '\n'.join('• ' + option for option in options)
         
+        # Determine mode for API integration
+        mode = 'meta' if self.meta_mode else 'regular'
+        
+        # Add API integration section
+        api_section = f"\nPROGRAMMATIC OPTIONS (via Dashboard API):\n" + \
+                     f"POST http://localhost:8000/api/gate-decision?mode={mode}\n" + \
+                     "Content-Type: application/json\n\n" + \
+                     "Request format:\n" + \
+                     '{\n' + \
+                     '  "decision_type": "approve-criteria|modify-criteria|retry-explorer",\n' + \
+                     '  "modifications": "text for modify-criteria only"\n' + \
+                     '}\n\n' + \
+                     "Dashboard can poll status and make decisions programmatically.\n"
+        
         # Write gate info to file for display
         gate_content = gate_name.upper() + " GATE: Human Review Required\n\n" + \
                       content + "\n\n" + \
-                      "AVAILABLE OPTIONS:\n" + options_text + "\n\n" + \
+                      "AVAILABLE OPTIONS:\n" + options_text + api_section + "\n" + \
                       "WORKFLOW PAUSED - Choose an option above\n"
         
         gate_filename = "current-" + gate_name.lower() + "-gate.md"
@@ -616,6 +630,40 @@ class ExtensibleClaudeDrivenOrchestrator:
             if not exploration_file.exists():
                 return "error", "No exploration.md found for criteria approval"
             
+            # Check for unsupervised mode
+            unsupervised_file = self.claude_dir / "unsupervised"
+            if unsupervised_file.exists():
+                exploration_content = exploration_file.read_text()
+                # Extract suggested criteria from exploration.md
+                lines = exploration_content.split('\n')
+                criteria_section = []
+                in_criteria = False
+                
+                for line in lines:
+                    if "## Suggested Success Criteria" in line:
+                        in_criteria = True
+                        continue
+                    elif in_criteria and line.strip().startswith('##') and not line.strip().startswith('###'):
+                        break
+                    elif in_criteria:
+                        criteria_section.append(line)
+                
+                if criteria_section:
+                    # Auto-approve criteria in unsupervised mode
+                    criteria_text = '\n'.join(criteria_section)
+                    criteria_file = self.outputs_dir / "success-criteria.md"
+                    criteria_file.write_text("# Approved Success Criteria\n\n" + criteria_text + "\n")
+                    print("Unsupervised mode: Auto-approved criteria")
+                    
+                    # Continue to next agent
+                    agent, instructions = self.get_continue_agent()
+                    print("\n" + "="*60)
+                    print("AUTO-CONTINUING TO " + agent.upper())
+                    print("="*60)
+                    print(instructions)
+                    print("="*60)
+                    return agent, instructions
+            
             exploration_content = exploration_file.read_text()
             
             # Extract suggested criteria from exploration.md
@@ -639,6 +687,19 @@ class ExtensibleClaudeDrivenOrchestrator:
             verification_file = self.outputs_dir / "verification.md"
             if not verification_file.exists():
                 return "error", "No verification.md found for completion approval"
+            
+            # Check for unsupervised mode
+            unsupervised_file = self.claude_dir / "unsupervised"
+            if unsupervised_file.exists():
+                verification_content = verification_file.read_text()
+                
+                # Check if verification recommends approval
+                verification_lower = verification_content.lower()
+                if "recommend approval" in verification_lower or "ready for approval" in verification_lower or "approve" in verification_lower:
+                    # Auto-approve completion in unsupervised mode
+                    print("Unsupervised mode: Auto-approved completion")
+                    self.approve_completion()
+                    return "complete", "Task automatically completed in unsupervised mode"
             
             verification_content = verification_file.read_text()
             
@@ -824,8 +885,21 @@ class ExtensibleClaudeDrivenOrchestrator:
             print("Task marked complete: " + task)
             print("Updated tasks.md and tasks-checklist.md")
             print(f"Check {self.outputs_dir}/verification.md for final results")
-            print("Execute the slash-command `/orchestrate clean` to prepare for continue task")
-            print("="*60)
+            
+            # Check for unsupervised mode and auto-continue
+            unsupervised_file = self.claude_dir / "unsupervised"
+            if unsupervised_file.exists():
+                print("Unsupervised mode detected - auto-continuing workflow")
+                self.clean_outputs()
+                agent, instructions = self.get_continue_agent()
+                print("\n" + "="*60)
+                print("AUTO-STARTING - AGENT: " + agent.upper())
+                print("="*60)
+                print(instructions)
+                print("="*60)
+            else:
+                print("Execute the slash-command `/orchestrate clean` to prepare for continue task")
+                print("="*60)
         
     def retry_from_planner(self):
         """Restart from Planner phase (keep criteria)"""
@@ -1020,6 +1094,21 @@ Begin by analyzing the current directory and asking the user about their goals.
             lines.append("- [ ] " + task + " (Attempted: " + timestamp + ")")
             
         self.checklist_file.write_text('\n'.join(lines))
+    
+    def enable_unsupervised_mode(self):
+        """Enable unsupervised mode by creating .claude/unsupervised file"""
+        unsupervised_file = self.claude_dir / "unsupervised"
+        unsupervised_file.write_text("# Unsupervised Mode Active\n\nAutomatically approves gates when criteria are met.\n")
+        print(f"Unsupervised mode enabled - created {unsupervised_file}")
+        
+    def disable_unsupervised_mode(self):
+        """Disable unsupervised mode by removing .claude/unsupervised file"""
+        unsupervised_file = self.claude_dir / "unsupervised"
+        if unsupervised_file.exists():
+            unsupervised_file.unlink()
+            print(f"Supervised mode enabled - removed {unsupervised_file}")
+        else:
+            print("Already in supervised mode - no unsupervised file found")
 
 
 def main():
@@ -1092,12 +1181,19 @@ def main():
     elif command == "bootstrap":
         orchestrator.bootstrap_tasks()
         
+    elif command == "unsupervised":
+        orchestrator.enable_unsupervised_mode()
+        
+    elif command == "supervised":
+        orchestrator.disable_unsupervised_mode()
+        
     else:
         print("Unknown command: " + command)
         print("\nAvailable commands:")
         print("  Workflow: start, continue, status, clean, complete, fail, bootstrap")
         print("  Gates: approve-criteria, modify-criteria, retry-explorer")
         print("         approve-completion, retry-from-planner, retry-from-coder, retry-from-verifier")
+        print("  Mode: unsupervised, supervised")
 
 
 if __name__ == "__main__":
