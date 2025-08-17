@@ -23,6 +23,7 @@ class OrchestratorDashboard:
     
     def __init__(self):
         self.current_gate = None
+        self.gate_decision = None
         
     def set_gate(self, gate_name: str, content: str, options: List[str]):
         """Set current gate information for dashboard display"""
@@ -31,6 +32,21 @@ class OrchestratorDashboard:
             'content': content,
             'options': options
         }
+    
+    def set_gate_decision(self, decision):
+        """Set the gate decision value"""
+        self.gate_decision = decision
+    
+    def wait_for_gate_decision(self, timeout=30):
+        """Poll for gate decision with timeout"""
+        start_time = time.time()
+        
+        while time.time() - start_time < timeout:
+            if self.gate_decision is not None:
+                return self.gate_decision
+            time.sleep(1)
+        
+        return None
 
 
 @dataclass

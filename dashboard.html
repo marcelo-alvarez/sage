@@ -358,6 +358,103 @@
             margin-top: 20px;
         }
 
+        /* Gate Decision Controls */
+        .gate-controls {
+            background: #fff3cd;
+            border: 2px solid #ffc107;
+            border-radius: 12px;
+            padding: 25px;
+            margin: 30px 0;
+            display: none;
+        }
+
+        .gate-controls.active {
+            display: block;
+        }
+
+        .gate-title {
+            font-size: 1.4em;
+            font-weight: 600;
+            color: #856404;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+
+        .gate-content {
+            color: #856404;
+            margin-bottom: 20px;
+            line-height: 1.5;
+            text-align: center;
+        }
+
+        .gate-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .btn-gate {
+            background: #ffc107;
+            color: #212529;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.9em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            min-width: 140px;
+        }
+
+        .btn-gate:hover {
+            background: #e0a800;
+            transform: translateY(-2px);
+        }
+
+        .btn-gate:disabled {
+            background: #d6d6d6;
+            color: #6c757d;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .gate-feedback {
+            text-align: center;
+            font-size: 0.9em;
+            margin-top: 15px;
+            min-height: 20px;
+        }
+
+        .gate-feedback.loading {
+            color: #007bff;
+        }
+
+        .gate-feedback.success {
+            color: #28a745;
+        }
+
+        .gate-feedback.error {
+            color: #dc3545;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #007bff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 8px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
         /* Responsive Design */
         @media (max-width: 768px) {
             .header {
@@ -390,6 +487,16 @@
             .controls {
                 flex-direction: column;
                 align-items: center;
+            }
+
+            .gate-buttons {
+                flex-direction: column;
+                align-items: center;
+            }
+
+            .btn-gate {
+                width: 100%;
+                max-width: 200px;
             }
         }
 
@@ -446,6 +553,16 @@
                     <!-- Agent cards will be dynamically generated -->
                 </div>
             </section>
+
+            <!-- Gate Decision Controls -->
+            <div class="gate-controls" id="gateControls">
+                <div class="gate-title" id="gateTitle">Gate Decision Required</div>
+                <div class="gate-content" id="gateContent">Please choose an action to continue the workflow.</div>
+                <div class="gate-buttons" id="gateButtons">
+                    <!-- Gate decision buttons will be dynamically generated -->
+                </div>
+                <div class="gate-feedback" id="gateFeedback"></div>
+            </div>
 
             <div class="controls">
                 <button class="btn btn-primary" onclick="refreshStatus()">Refresh Status</button>
@@ -545,6 +662,24 @@
         let simulationStep = 0;
         let realTimeData = null;
         let useRealAPI = true;
+        let currentGateState = null;
+        let isProcessingDecision = false;
+
+        // Gate decision mappings
+        const gateDecisionLabels = {
+            'approve-criteria': 'Approve Criteria',
+            'modify-criteria': 'Modify Criteria',
+            'retry-explorer': 'Retry Explorer',
+            'approve-completion': 'Approve Completion',
+            'retry-from-planner': 'Retry from Planner',
+            'retry-from-coder': 'Retry from Coder',
+            'retry-from-verifier': 'Retry from Verifier'
+        };
+
+        const gateTypeDecisions = {
+            'Criteria Gate': ['approve-criteria', 'modify-criteria', 'retry-explorer'],
+            'Completion Gate': ['approve-completion', 'retry-from-planner', 'retry-from-coder', 'retry-from-verifier']
+        };
 
         // Initialize dashboard
         function initDashboard() {
@@ -581,6 +716,7 @@
             renderWorkflowTimeline(realTimeData.workflow);
             renderAgentsGrid(realTimeData.agents);
             updateCurrentTask(realTimeData.currentTask);
+            renderGateControls(realTimeData.workflow);
             updateLastUpdated();
         }
 
@@ -589,6 +725,7 @@
             renderWorkflowTimeline();
             renderAgentsGrid();
             updateCurrentTask();
+            renderGateControls();
             updateLastUpdated();
         }
 
@@ -725,8 +862,122 @@
             refreshStatus();
         }, 30000);
 
+        // Render gate decision controls
+        function renderGateControls(workflowData) {
+            const workflow = workflowData || mockStatusData[currentMode].workflow;
+            const gateControls = document.getElementById('gateControls');
+            const gateTitle = document.getElementById('gateTitle');
+            const gateContent = document.getElementById('gateContent');
+            const gateButtons = document.getElementById('gateButtons');
+            const gateFeedback = document.getElementById('gateFeedback');
+            
+            // Find active gate
+            const activeGate = workflow.find(step => 
+                step.type === 'gate' && step.status === 'pending'
+            );
+            
+            if (activeGate && !isProcessingDecision) {
+                // Show gate controls
+                gateControls.classList.add('active');
+                gateTitle.textContent = `${activeGate.name} Decision Required`;
+                gateContent.textContent = `Please choose an action to continue the workflow past the ${activeGate.name}.`;
+                
+                // Get available decisions for this gate type
+                const availableDecisions = gateTypeDecisions[activeGate.name] || 
+                    Object.keys(gateDecisionLabels);
+                
+                // Generate buttons
+                gateButtons.innerHTML = '';
+                availableDecisions.forEach(decisionType => {
+                    const button = document.createElement('button');
+                    button.className = 'btn-gate';
+                    button.textContent = gateDecisionLabels[decisionType];
+                    button.onclick = () => makeGateDecision(decisionType);
+                    gateButtons.appendChild(button);
+                });
+                
+                // Clear feedback
+                gateFeedback.textContent = '';
+                gateFeedback.className = 'gate-feedback';
+                
+                currentGateState = activeGate;
+            } else {
+                // Hide gate controls
+                gateControls.classList.remove('active');
+                currentGateState = null;
+            }
+        }
+
+        // Make gate decision
+        async function makeGateDecision(decisionType) {
+            if (isProcessingDecision) return;
+            
+            isProcessingDecision = true;
+            const gateButtons = document.getElementById('gateButtons');
+            const gateFeedback = document.getElementById('gateFeedback');
+            
+            // Disable all buttons and show loading
+            const buttons = gateButtons.querySelectorAll('.btn-gate');
+            buttons.forEach(btn => btn.disabled = true);
+            
+            gateFeedback.className = 'gate-feedback loading';
+            gateFeedback.innerHTML = '<span class="loading-spinner"></span>Processing decision...';
+            
+            try {
+                // Use existing OrchestratorAPI if available, otherwise direct fetch
+                let result;
+                if (window.OrchestratorAPI && window.OrchestratorAPI.makeDecision) {
+                    result = await window.OrchestratorAPI.makeDecision(decisionType, { mode: currentMode });
+                } else {
+                    // Fallback to direct API call
+                    const response = await fetch(`http://localhost:8000/api/gate-decision?mode=${currentMode}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ decision_type: decisionType })
+                    });
+                    result = await response.json();
+                }
+                
+                if (result.error) {
+                    throw new Error(result.error);
+                }
+                
+                // Show success message
+                gateFeedback.className = 'gate-feedback success';
+                gateFeedback.textContent = `✓ Decision processed: ${gateDecisionLabels[decisionType]}`;
+                
+                // Refresh status after short delay
+                setTimeout(() => {
+                    refreshStatus();
+                    isProcessingDecision = false;
+                }, 1500);
+                
+            } catch (error) {
+                // Show error message
+                gateFeedback.className = 'gate-feedback error';
+                gateFeedback.textContent = `✗ Error: ${error.message}`;
+                
+                // Re-enable buttons
+                buttons.forEach(btn => btn.disabled = false);
+                isProcessingDecision = false;
+            }
+        }
+
+        // Include external API if available
+        function loadExternalAPI() {
+            const script = document.createElement('script');
+            script.src = 'dashboard/app.js';
+            script.onerror = () => {
+                console.log('External API not available, using fallback methods');
+            };
+            document.head.appendChild(script);
+        }
+
         // Initialize dashboard on page load
-        window.addEventListener('DOMContentLoaded', initDashboard);
+        window.addEventListener('DOMContentLoaded', () => {
+            loadExternalAPI();
+            initDashboard();
+        });
     </script>
 </body>
 </html>
