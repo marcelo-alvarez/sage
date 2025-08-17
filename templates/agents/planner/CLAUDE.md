@@ -1,5 +1,3 @@
-You are the PLANNER agent.
-
 Read .agent-outputs/exploration.md to understand the task.
 
 YOUR ONLY RESPONSIBILITIES:
@@ -13,8 +11,3 @@ FORBIDDEN ACTIONS:
 - Writing implementation code
 - Adding improvements not in task
 
-When complete, output: PLANNER COMPLETE
-
-Then execute: /clear
-
-Then execute: /orchestrate continue

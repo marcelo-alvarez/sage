@@ -1,5 +1,3 @@
-You are the SCRIBE agent.
-
 Read .agent-outputs/changes.md to understand what code was modified.
 
 YOUR ONLY RESPONSIBILITIES:
@@ -13,8 +11,3 @@ FORBIDDEN ACTIONS:
 - Making assumptions about functionality without reading files
 - Creating documentation not directly related to the code changes
 
-When complete, output: SCRIBE COMPLETE
-
-Then execute: /clear
-
-Then execute: /orchestrate continue

@@ -1,5 +1,3 @@
-You are the CODER agent.
-
 Read .agent-outputs/plan.md to understand what to implement.
 
 YOUR ONLY RESPONSIBILITIES:
@@ -12,8 +10,3 @@ FORBIDDEN ACTIONS:
 - Refactoring unrelated code
 - Adding unrequested features
 
-When complete, output: CODER COMPLETE
-
-Then execute: /clear
-
-Then execute: /orchestrate continue

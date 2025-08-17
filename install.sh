@@ -7,8 +7,9 @@ set -e
 
 # Default values
 PROJECT_DIR=""
-GLOBAL_INSTALL=false
+LOCAL_COMMAND_ONLY=false
 TEMP_DIR=""
+BRANCH="main"
 
 # Colors for output
 RED='\033[0;31m'
@@ -50,19 +51,28 @@ show_usage() {
     echo "Usage: $0 [OPTIONS]"
     echo ""
     echo "Options:"
-    echo "  --project-dir DIR    Install to specific directory (default: current directory)"
-    echo "  --global            Install slash command globally (~/.claude/commands/)"
+    echo "  --project-dir DIR    Initialize project files in specific directory (default: current directory)"
+    echo "  --branch BRANCH      Install from specific branch (default: main)"
+    echo "  --local-command      Install slash command locally in project instead of globally"
     echo "  --help              Show this help message"
     echo ""
+    echo "Installation behavior:"
+    echo "  - Runtime files always install to ~/.claude-orchestrator/"
+    echo "  - Slash command installs globally to ~/.claude/commands/ by default"
+    echo "  - Only task files (.claude/tasks*.md) are created in project directory"
+    echo ""
     echo "Examples:"
-    echo "  # Install in current directory (local slash command)"
+    echo "  # Install globally (recommended)"
     echo "  curl -fsSL https://raw.githubusercontent.com/marcelo-alvarez/claude-orchestrator/main/install.sh | bash"
     echo ""
-    echo "  # Install in specific directory"
+    echo "  # Initialize specific project"
     echo "  curl -fsSL https://raw.githubusercontent.com/marcelo-alvarez/claude-orchestrator/main/install.sh | bash -s -- --project-dir ~/my-project"
     echo ""
-    echo "  # Install with global slash command"
-    echo "  curl -fsSL https://raw.githubusercontent.com/marcelo-alvarez/claude-orchestrator/main/install.sh | bash -s -- --project-dir ~/my-project --global"
+    echo "  # Install with local slash command (project-specific)"
+    echo "  curl -fsSL https://raw.githubusercontent.com/marcelo-alvarez/claude-orchestrator/main/install.sh | bash -s -- --local-command"
+    echo ""
+    echo "  # Install from specific branch"
+    echo "  ./install.sh --branch feature/web-dashboard"
 }
 
 # Parse command line arguments
@@ -72,8 +82,12 @@ while [[ $# -gt 0 ]]; do
             PROJECT_DIR="$2"
             shift 2
             ;;
-        --global)
-            GLOBAL_INSTALL=true
+        --branch)
+            BRANCH="$2"
+            shift 2
+            ;;
+        --local-command)
+            LOCAL_COMMAND_ONLY=true
             shift
             ;;
         --help)
@@ -134,48 +148,66 @@ validate_target_directory() {
 
 # Clone repository to temporary directory
 clone_repository() {
-    print_info "Downloading Claude Orchestrator..."
+    print_info "Downloading Claude Orchestrator from branch: $BRANCH"
     
     TEMP_DIR=$(mktemp -d)
-    git clone --quiet https://github.com/marcelo-alvarez/claude-orchestrator.git "$TEMP_DIR" || {
-        print_error "Failed to clone repository"
+    git clone --quiet --branch "$BRANCH" https://github.com/marcelo-alvarez/claude-orchestrator.git "$TEMP_DIR" || {
+        print_error "Failed to clone repository from branch: $BRANCH"
         exit 1
     }
     
     print_success "Repository downloaded to temporary directory"
 }
 
-# Install orchestrator files
-install_orchestrator() {
-    print_info "Installing orchestrator files to: $PROJECT_DIR"
+# Install orchestrator runtime globally
+install_orchestrator_runtime() {
+    local runtime_dir="$HOME/.claude-orchestrator"
+    print_info "Installing orchestrator runtime to: $runtime_dir"
     
-    cd "$PROJECT_DIR"
-    
-    # Create .claude directory structure
-    mkdir -p .claude
+    # Create runtime directory structure
+    mkdir -p "$runtime_dir"/{agents,config}
     
     # Copy main orchestrator script
-    cp "$TEMP_DIR/orchestrate.py" .claude/orchestrate.py
+    cp "$TEMP_DIR/orchestrate.py" "$runtime_dir/orchestrate.py"
     
-    # Update paths in orchestrate.py for .claude/ directory structure
-    sed -i.bak 's|self\.outputs_dir = Path("\.agent-outputs")|self.outputs_dir = Path(".agent-outputs")|g' .claude/orchestrate.py
-    sed -i.bak 's|self\.tasks_file = Path("tasks\.md")|self.tasks_file = Path(".claude/tasks.md")|g' .claude/orchestrate.py
-    sed -i.bak 's|self\.checklist_file = Path("tasks-checklist\.md")|self.checklist_file = Path(".claude/tasks-checklist.md")|g' .claude/orchestrate.py
-    rm -f .claude/orchestrate.py.bak
+    # The orchestrate.py file is already configured for global installation
+    # No path modifications needed
     
-    # Create other required directories
-    mkdir -p .claude-agents/{explorer,planner,coder,verifier}
+    # Copy agent templates to global location
+    cp -r "$TEMP_DIR/templates/agents/"* "$runtime_dir/agents/"
+    
+    # Copy default config files
+    if [ -f "$TEMP_DIR/templates/agent-config.json" ]; then
+        cp "$TEMP_DIR/templates/agent-config.json" "$runtime_dir/config/"
+    fi
+    
+    if [ -f "$TEMP_DIR/templates/workflow-config.json" ]; then
+        cp "$TEMP_DIR/templates/workflow-config.json" "$runtime_dir/config/"
+    fi
+    
+    print_success "Orchestrator runtime installed globally"
+}
+
+# Initialize project files
+initialize_project() {
+    if [ -n "$PROJECT_DIR" ]; then
+        print_info "Initializing project files in: $PROJECT_DIR"
+        cd "$PROJECT_DIR"
+    else
+        print_info "Initializing project files in current directory"
+        PROJECT_DIR="$(pwd)"
+    fi
+    
+    # Create minimal project structure
+    mkdir -p .claude
     mkdir -p .agent-outputs
     
-    # Copy agent templates
-    cp -r "$TEMP_DIR/templates/agents/"* .claude-agents/
-    
-    # Copy template files to .claude directory
-    if [ -f "$TEMP_DIR/templates/tasks.md" ]; then
+    # Copy template task files if they don't exist
+    if [ ! -f ".claude/tasks.md" ] && [ -f "$TEMP_DIR/templates/tasks.md" ]; then
         cp "$TEMP_DIR/templates/tasks.md" .claude/tasks.md
     fi
     
-    if [ -f "$TEMP_DIR/templates/tasks-checklist.md" ]; then
+    if [ ! -f ".claude/tasks-checklist.md" ] && [ -f "$TEMP_DIR/templates/tasks-checklist.md" ]; then
         cp "$TEMP_DIR/templates/tasks-checklist.md" .claude/tasks-checklist.md
     fi
     
@@ -185,45 +217,47 @@ install_orchestrator() {
         print_info "Created CLAUDE.md from template - please customize the PROJECT OVERVIEW section"
     fi
     
-    print_success "Orchestrator files installed"
+    print_success "Project files initialized"
 }
 
 # Install slash command
 install_slash_command() {
     local commands_dir
     
-    if [ "$GLOBAL_INSTALL" = true ]; then
-        commands_dir="$HOME/.claude/commands"
-        print_info "Installing slash command globally to: $commands_dir"
-    else
+    if [ "$LOCAL_COMMAND_ONLY" = true ]; then
         commands_dir="$PROJECT_DIR/.claude/commands"
         print_info "Installing slash command locally to: $commands_dir"
+    else
+        commands_dir="$HOME/.claude/commands"
+        print_info "Installing slash command globally to: $commands_dir"
     fi
     
     # Create commands directory
     mkdir -p "$commands_dir"
     
-    # Copy slash command and update the script path
-    cp "$TEMP_DIR/orchestrator-commands/orchestrate.md" "$commands_dir/orchestrate.md"
+    # Build command files from template
+    print_info "Building slash command files from template..."
+    cd "$TEMP_DIR"
+    ./build-commands.sh
     
-    # Update the script path in the slash command to use .claude/orchestrate.py with python3
-    if [ "$GLOBAL_INSTALL" = true ]; then
-        # For global install, use relative path from any project
-        sed -i.bak 's|python orchestrate_claude\.py|python3 .claude/orchestrate.py|g' "$commands_dir/orchestrate.md"
-    else
-        # For local install, use relative path
-        sed -i.bak 's|python orchestrate_claude\.py|python3 .claude/orchestrate.py|g' "$commands_dir/orchestrate.md"
-    fi
+    # Copy generated slash commands
+    cp "$TEMP_DIR/orchestrator-commands/orchestrate.md"  "$commands_dir/orchestrate.md"
+    cp "$TEMP_DIR/orchestrator-commands/morchestrate.md" "$commands_dir/morchestrate.md"
+    
+    # Update the script path in the slash commands to use global runtime (if needed)
+    sed -i.bak 's|python orchestrate_claude\.py|python3 ~/.claude-orchestrator/orchestrate.py|g' "$commands_dir/orchestrate.md"
     rm -f "$commands_dir/orchestrate.md.bak"
+    sed -i.bak 's|python orchestrate_claude\.py|python3 ~/.claude-orchestrator/orchestrate.py|g' "$commands_dir/morchestrate.md"
+    rm -f "$commands_dir/morchestrate.md.bak"
     
-    print_success "Slash command installed"
+    print_success "Slash commands installed"
 }
 
 # Make scripts executable
 make_executable() {
     print_info "Making scripts executable..."
     
-    chmod +x "$PROJECT_DIR/.claude/orchestrate.py" 2>/dev/null || true
+    chmod +x "$HOME/.claude-orchestrator/orchestrate.py" 2>/dev/null || true
     
     print_success "Scripts made executable"
 }
@@ -233,41 +267,50 @@ print_summary() {
     echo ""
     echo "🎉 Claude Orchestrator installed successfully!"
     echo ""
-    echo "📁 Installation directory: $PROJECT_DIR"
+    echo "📋 Installation structure:"
+    echo "   ~/.claude-orchestrator/         # Runtime files (global)"
+    echo "   ├── orchestrate.py             # Main orchestrator script"
+    echo "   ├── agents/                    # Agent templates"
+    echo "   └── config/                    # Default configurations"
     echo ""
-    echo "📋 Project structure created:"
-    echo "   .claude/"
-    echo "   ├── orchestrate.py              # Main orchestrator script"
-    echo "   ├── tasks.md                    # Task tracking"
-    echo "   ├── tasks-checklist.md          # Task checklist"
-    echo "   └── commands/"
-    if [ "$GLOBAL_INSTALL" = true ]; then
-        echo "       └── (slash command installed globally)"
+    if [ "$LOCAL_COMMAND_ONLY" = true ]; then
+        echo "   $PROJECT_DIR/.claude/commands/  # Slash command (local)"
     else
-        echo "       └── orchestrate.md          # Slash command (local)"
+        echo "   ~/.claude/commands/            # Slash command (global)"
     fi
-    echo "   .claude-agents/                 # Agent templates"
-    echo "   .agent-outputs/                 # Agent work products"
     echo ""
+    if [ -n "$PROJECT_DIR" ]; then
+        echo "📁 Project initialized: $PROJECT_DIR"
+        echo "   .claude/"
+        echo "   ├── tasks.md                   # Task tracking"
+        echo "   └── tasks-checklist.md         # Task checklist"
+        echo "   .agent-outputs/                # Agent work products"
+        echo ""
+    fi
     
-    if [ "$GLOBAL_INSTALL" = true ]; then
-        print_info "Slash command installed globally - available in all Claude Code projects"
-    else
+    if [ "$LOCAL_COMMAND_ONLY" = true ]; then
         print_info "Slash command installed locally - available only in this project"
+    else
+        print_info "Slash command installed globally - available in all Claude Code projects"
     fi
     
     echo ""
     echo "🚀 Quick Start:"
-    echo "1. Add tasks to .claude/tasks-checklist.md"
+    if [ -n "$PROJECT_DIR" ]; then
+        echo "1. Add tasks to $PROJECT_DIR/.claude/tasks-checklist.md"
+    else
+        echo "1. Navigate to your project and add tasks to .claude/tasks-checklist.md"
+    fi
     echo "2. In Claude Code, run: /orchestrate start"
     echo ""
     echo "📖 Commands:"
+    echo "   /orchestrate bootstrap   # Generate initial tasks"
     echo "   /orchestrate start       # Start fresh workflow"
     echo "   /orchestrate continue    # Continue workflow"
     echo "   /orchestrate status      # Show current progress"
     echo "   /orchestrate clean       # Reset outputs"
     echo ""
-    echo "For more information, see the README.md in the project directory."
+    echo "💡 The orchestrator runtime is now completely separate from your project files!"
 }
 
 # Main installation process
@@ -277,9 +320,14 @@ main() {
     echo ""
     
     check_dependencies
-    validate_target_directory
+    if [ -n "$PROJECT_DIR" ]; then
+        validate_target_directory
+    fi
     clone_repository
-    install_orchestrator
+    install_orchestrator_runtime
+    if [ -n "$PROJECT_DIR" ]; then
+        initialize_project
+    fi
     install_slash_command
     make_executable
     print_summary
