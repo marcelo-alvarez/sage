@@ -2,13 +2,30 @@
 Manage orchestration workflows in meta mode (isolated from main orchestration sessions).
 
 Available commands:
+
+**Workflow Control:**
 - `bootstrap` - Generate initial tasks for your project
 - `start` - Start fresh workflow in meta mode
 - `continue` - Continue to next agent in meta mode
 - `status` - Show current progress in meta mode
 - `clean` - Reset meta mode outputs
+- `complete` - Mark current task as complete
+- `fail` - Mark current task as failed
+
+**Gate Decisions:**
 - `approve-criteria` - Accept criteria and continue in meta mode
 - `modify-criteria "changes"` - Edit criteria based on feedback in meta mode
+- `approve-completion` - Mark workflow complete and approve results
+- `retry-explorer` - Restart from Explorer phase
+
+**Selective Retry:**
+- `retry-from-planner` - Restart from Planner phase (keep criteria)
+- `retry-from-coder` - Restart from Coder phase (keep plan)
+- `retry-from-verifier` - Re-run Verifier only (keep changes)
+
+**Mode Control:**
+- `unsupervised` - Enable automatic gate approval
+- `supervised` - Disable automatic gate approval (default)
 
 ## Purpose
 The `/morchestrate` command is identical to `/orchestrate` but runs in "meta mode":
