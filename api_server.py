@@ -174,6 +174,8 @@ class StatusHandler(BaseHTTPRequestHandler):
         
         if parsed_url.path == '/api/status':
             self._handle_status_request(parsed_url)
+        elif parsed_url.path.startswith('/api/outputs/'):
+            self._handle_outputs_request(parsed_url)
         else:
             self._send_error(404, 'Not Found')
     
@@ -277,7 +279,10 @@ class StatusHandler(BaseHTTPRequestHandler):
                 return
             
             # Validate decision type
-            valid_decisions = ['approve-criteria', 'modify-criteria', 'retry-explorer']
+            valid_decisions = [
+                'approve-criteria', 'modify-criteria', 'retry-explorer',
+                'approve-completion', 'retry-from-planner', 'retry-from-coder', 'retry-from-verifier'
+            ]
             if decision_type not in valid_decisions:
                 self._send_error(400, f'Invalid decision_type. Must be one of: {", ".join(valid_decisions)}')
                 return
@@ -339,6 +344,108 @@ class StatusHandler(BaseHTTPRequestHandler):
                 'success': False,
                 'error': f'Error processing gate decision: {str(e)}'
             }
+    
+    def _handle_outputs_request(self, parsed_url):
+        """Handle /api/outputs/{filename} endpoint"""
+        try:
+            # Extract filename from path
+            path_parts = parsed_url.path.split('/')
+            if len(path_parts) != 4 or path_parts[3] == '':
+                self._send_error(400, 'Invalid URL format. Use /api/outputs/{filename}')
+                return
+            
+            filename = path_parts[3]
+            
+            # Validate filename
+            if not self._validate_output_filename(filename):
+                self._send_error(400, 'Invalid filename. Only allowed agent output files can be accessed.')
+                return
+            
+            # Parse query parameters for mode
+            query_params = parse_qs(parsed_url.query)
+            mode = query_params.get('mode', ['regular'])[0]
+            
+            # Validate mode parameter
+            if mode not in ['regular', 'meta']:
+                self._send_error(400, 'Invalid mode parameter. Use "regular" or "meta".')
+                return
+            
+            # Get appropriate outputs directory
+            outputs_dir = self._get_outputs_directory(mode)
+            file_path = outputs_dir / filename
+            
+            # Check if file exists
+            if not file_path.exists():
+                self._send_error(404, f'File "{filename}" not found')
+                return
+            
+            # Read file content
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                
+                # Send markdown response
+                self._send_markdown_response(content)
+                
+            except Exception as e:
+                print(f"Error reading file {file_path}: {e}")
+                self._send_error(500, 'Error reading file')
+            
+        except Exception as e:
+            print(f"Error handling outputs request: {e}")
+            self._send_error(500, 'Internal Server Error')
+    
+    def _validate_output_filename(self, filename):
+        """Validate that filename is safe and allowed"""
+        # Check for path separators and relative path components
+        if '/' in filename or '\\' in filename or '..' in filename:
+            return False
+        
+        # Check for absolute paths or hidden files
+        if filename.startswith('/') or filename.startswith('.'):
+            return False
+        
+        # Define allowlist of permitted agent output files
+        allowed_files = {
+            'exploration.md',
+            'plan.md', 
+            'changes.md',
+            'verification.md',
+            'current-status.md',
+            'documentation.md',
+            'success-criteria.md'
+        }
+        
+        # Check if file is in allowlist
+        if filename in allowed_files:
+            return True
+        
+        # Check for instructions files pattern
+        if filename.endswith('-instructions.md'):
+            return True
+        
+        return False
+    
+    def _get_outputs_directory(self, mode):
+        """Get appropriate outputs directory based on mode"""
+        if mode == 'meta':
+            return Path('.agent-outputs-meta')
+        else:
+            return Path('.agent-outputs')
+    
+    def _send_markdown_response(self, content):
+        """Send markdown content response with appropriate headers"""
+        response_body = content.encode('utf-8')
+        
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/markdown; charset=utf-8')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.send_header('Content-Length', str(len(response_body)))
+        self.end_headers()
+        
+        self.wfile.write(response_body)
     
     def log_message(self, format, *args):
         """Override to customize logging"""
