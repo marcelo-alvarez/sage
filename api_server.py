@@ -16,6 +16,19 @@ import time
 import subprocess
 import os
 import webbrowser
+import socket
+
+
+def find_available_port(start_port: int, max_attempts: int = 20) -> int:
+    """Find an available port starting from start_port"""
+    for port in range(start_port, start_port + max_attempts):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.bind(('localhost', port))
+                return port
+        except OSError:
+            continue
+    raise OSError(f"No available port found in range {start_port}-{start_port + max_attempts - 1}")
 
 
 class StatusReader:
@@ -499,6 +512,13 @@ class OrchestratorAPIServer:
     def start(self):
         """Start the API server"""
         try:
+            # Find available port
+            try:
+                self.port = find_available_port(self.port)
+            except OSError as e:
+                print(f"Error finding available port: {e}")
+                return False
+                
             print(f"[API Server] Initializing HTTPServer on {self.host}:{self.port}")
             self.server = HTTPServer((self.host, self.port), StatusHandler)
             

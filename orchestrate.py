@@ -16,6 +16,20 @@ import atexit
 import subprocess
 import webbrowser
 import time
+import socket
+import argparse
+
+
+def find_available_port(start_port: int, max_attempts: int = 20) -> int:
+    """Find an available port starting from start_port"""
+    for port in range(start_port, start_port + max_attempts):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.bind(('localhost', port))
+                return port
+        except OSError:
+            continue
+    raise OSError(f"No available port found in range {start_port}-{start_port + max_attempts - 1}")
 
 
 class OrchestratorDashboard:
@@ -99,13 +113,14 @@ class AgentRole:
 class AgentConfig:
     """Configuration manager for agent definitions"""
     
-    def __init__(self, config_path: Path = None, enable_dashboard: bool = True, dashboard_port: int = 5678, api_port: int = 8000):
+    def __init__(self, config_path: Path = None, enable_dashboard: bool = True, dashboard_port: int = 5678, api_port: int = 8000, no_browser: bool = False):
         self.config_path = config_path or Path('.claude/agent-config.json')
         self.templates_dir = Path('templates/agents')
         self.agents = {}
         self.enable_dashboard = enable_dashboard
         self.dashboard_port = dashboard_port
         self.api_port = api_port
+        self.no_browser = no_browser
         self.dashboard_process = None
         self.api_process = None
         self.dashboard = None
@@ -289,6 +304,14 @@ class AgentConfig:
     def start_dashboard(self):
         """Start dashboard and API servers as subprocesses"""
         try:
+            # Find available ports
+            try:
+                self.api_port = find_available_port(self.api_port)
+                self.dashboard_port = find_available_port(self.dashboard_port)
+            except OSError as e:
+                print(f"Error finding available ports: {e}")
+                return
+                
             # Start API server as subprocess (without --background since subprocess IS the background)
             self.api_process = subprocess.Popen([
                 sys.executable, 'api_server.py', 
@@ -312,12 +335,15 @@ class AgentConfig:
             dashboard_running = self.dashboard_process.poll() is None
             
             if api_running and dashboard_running:
-                # Open dashboard in browser
-                try:
-                    webbrowser.open(f'http://localhost:{self.dashboard_port}/dashboard.html')
-                    print(f"Dashboard opened in browser at http://localhost:{self.dashboard_port}/dashboard.html")
-                except Exception as e:
-                    print(f"Failed to open dashboard in browser: {e}")
+                # Always display dashboard URL
+                print(f"Dashboard: http://localhost:{self.dashboard_port}/dashboard/index.html")
+                
+                # Open dashboard in browser if not suppressed
+                if not self.no_browser:
+                    try:
+                        webbrowser.open(f'http://localhost:{self.dashboard_port}/dashboard/index.html')
+                    except Exception as e:
+                        print(f"Failed to open dashboard in browser: {e}")
                     
                 # Register cleanup
                 atexit.register(self.stop_dashboard)
@@ -591,7 +617,7 @@ class WorkflowConfig:
 class ExtensibleClaudeDrivenOrchestrator:
     """Extensible version of the Claude-Driven Orchestrator"""
     
-    def __init__(self, enable_dashboard: bool = True, dashboard_port: int = 5678, api_port: int = 8000):
+    def __init__(self, enable_dashboard: bool = True, dashboard_port: int = 5678, api_port: int = 8000, no_browser: bool = False):
         # Check for meta mode
         self.meta_mode = 'meta' in sys.argv
         
@@ -615,6 +641,7 @@ class ExtensibleClaudeDrivenOrchestrator:
         self.enable_dashboard = enable_dashboard
         self.dashboard_port = dashboard_port
         self.api_port = api_port
+        self.no_browser = no_browser
         self.dashboard_process = None
         self.api_process = None
         self.dashboard = None
@@ -642,6 +669,14 @@ class ExtensibleClaudeDrivenOrchestrator:
     def start_dashboard(self):
         """Start dashboard and API servers as subprocesses"""
         try:
+            # Find available ports
+            try:
+                self.api_port = find_available_port(self.api_port)
+                self.dashboard_port = find_available_port(self.dashboard_port)
+            except OSError as e:
+                print(f"Error finding available ports: {e}")
+                return
+                
             # Start API server as subprocess (without --background since subprocess IS the background)
             self.api_process = subprocess.Popen([
                 sys.executable, 'api_server.py', 
@@ -665,12 +700,15 @@ class ExtensibleClaudeDrivenOrchestrator:
             dashboard_running = self.dashboard_process.poll() is None
             
             if api_running and dashboard_running:
-                # Open dashboard in browser
-                try:
-                    webbrowser.open(f'http://localhost:{self.dashboard_port}/dashboard.html')
-                    print(f"Dashboard opened in browser at http://localhost:{self.dashboard_port}/dashboard.html")
-                except Exception as e:
-                    print(f"Failed to open dashboard in browser: {e}")
+                # Always display dashboard URL
+                print(f"Dashboard: http://localhost:{self.dashboard_port}/dashboard/index.html")
+                
+                # Open dashboard in browser if not suppressed
+                if not self.no_browser:
+                    try:
+                        webbrowser.open(f'http://localhost:{self.dashboard_port}/dashboard/index.html')
+                    except Exception as e:
+                        print(f"Failed to open dashboard in browser: {e}")
                     
                 # Register cleanup
                 atexit.register(self.stop_dashboard)
@@ -1378,12 +1416,18 @@ Begin by analyzing the current directory and asking the user about their goals.
 def main():
     """CLI entry point - designed for actual workflow operations"""
     
-    orchestrator = ExtensibleClaudeDrivenOrchestrator()
+    parser = argparse.ArgumentParser(description='Claude Code Orchestrator')
+    parser.add_argument('command', nargs='?', default='start',
+                       help='Command to execute (default: start)')
+    parser.add_argument('--no-browser', action='store_true',
+                       help='Suppress browser opening for CI/CD environments')
+    parser.add_argument('modification_text', nargs='*',
+                       help='Modification text for modify-criteria command')
     
-    if len(sys.argv) < 2:
-        command = "start"  # Default to start when no arguments provided
-    else:
-        command = sys.argv[1]
+    args = parser.parse_args()
+    command = args.command
+    
+    orchestrator = ExtensibleClaudeDrivenOrchestrator(no_browser=args.no_browser)
     
     # Basic workflow commands
     if command == "start":
@@ -1420,9 +1464,9 @@ def main():
         orchestrator.approve_criteria()
         
     elif command == "modify-criteria":
-        # Get modification request from remaining arguments
-        if len(sys.argv) > 2:
-            modification_request = " ".join(sys.argv[2:])
+        # Get modification request from parsed arguments
+        if args.modification_text:
+            modification_request = " ".join(args.modification_text)
             orchestrator.modify_criteria(modification_request)
         else:
             orchestrator.modify_criteria()
