@@ -6,6 +6,7 @@ Implements configurable agent types and workflow sequences
 """
 
 import json
+import os
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional, Tuple, List
@@ -569,6 +570,151 @@ class AgentFactory:
         return role["name"].lower(), instructions
 
 
+class AgentExecutor:
+    """Handles agent execution in both headless and prompt modes"""
+    
+    def __init__(self, orchestrator):
+        self.orchestrator = orchestrator
+        self.outputs_dir = orchestrator.outputs_dir
+        # Default to headless unless explicitly set to prompt
+        mode = os.getenv('CLAUDE_ORCHESTRATOR_MODE', 'headless')
+        self.use_prompt_mode = (mode == 'prompt')
+        
+    def execute_agent(self, agent_type, instructions):
+        """Routes to appropriate execution method"""
+        try:
+            if self.use_prompt_mode:
+                return self._execute_via_prompt(agent_type, instructions)
+            else:
+                return self._execute_headless(agent_type, instructions)
+        except FileNotFoundError:
+            print("Claude CLI not found, falling back to prompt mode")
+            return self._execute_via_prompt(agent_type, instructions)
+        except subprocess.TimeoutExpired:
+            return f"❌ {agent_type} timed out after 300 seconds"
+
+    def _execute_headless(self, agent_type, instructions):
+        """Execute agent using claude -p with headless automation"""
+        # Strip prompt-mode specific commands
+        clean_instructions = self._strip_manual_commands(instructions)
+        
+        cmd = [
+            'claude',
+            '-p', clean_instructions,
+            '--output-format', 'json',
+            '--dangerously-skip-permissions',
+            '--max-turns', '30',
+            '--working-dir', str(self.outputs_dir)
+        ]
+        
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1
+        )
+        
+        # Parse JSON stream for completion
+        result = self._parse_json_stream(process)
+        
+        # Update status file (always works, even without dashboard)
+        self.orchestrator._update_status_file()
+        
+        # Try to update dashboard if it exists, but don't fail
+        try:
+            if hasattr(self.orchestrator, 'agent_config') and self.orchestrator.agent_config.dashboard:
+                self.orchestrator.agent_config.dashboard.update_status(f"{agent_type} completed")
+        except:
+            pass  # Dashboard is optional, ignore any errors
+        
+        if result['success']:
+            return f"✅ {agent_type.upper()} completed successfully"
+        else:
+            return f"❌ {agent_type.upper()} failed: {result['error']}"
+
+    def _execute_via_prompt(self, agent_type, instructions):
+        """Legacy prompt mode - return instructions unchanged for Claude to execute"""
+        return instructions
+
+    def _strip_manual_commands(self, instructions):
+        """Remove prompt-mode artifacts while preserving agent logic"""
+        lines = instructions.split('\n')
+        cleaned = []
+        skip_final_step = False
+        
+        for line in lines:
+            if 'IMPORTANT: YOU MUST EXECUTE THE' in line:
+                skip_final_step = True
+                continue
+            elif 'FINAL STEP:' in line:
+                skip_final_step = True
+                continue
+            elif skip_final_step and '/clear' in line:
+                continue
+            elif skip_final_step and 'orchestrate.py continue' in line:
+                continue
+            else:
+                if skip_final_step and line.strip() == '':
+                    skip_final_step = False
+                cleaned.append(line)
+                
+        # Add file marker for completion detection
+        cleaned.append("\nWhen complete, also write 'AGENT COMPLETE' to status.txt")
+        
+        return '\n'.join(cleaned)
+
+    def _parse_json_stream(self, process):
+        """Parse JSON events from claude CLI output stream"""
+        events = []
+        completion_detected = False
+        exit_code = 0
+        error_message = ""
+        
+        try:
+            for line in process.stdout:
+                try:
+                    event = json.loads(line)
+                    events.append(event)
+                    
+                    # Completion detection
+                    if event.get('type') == 'result':
+                        completion_detected = True
+                        exit_code = event.get('exitCode', 0)
+                        break
+                        
+                except json.JSONDecodeError:
+                    continue
+                    
+        except Exception as e:
+            error_message = str(e)
+        
+        # Wait for process to complete
+        try:
+            process.wait(timeout=300)
+        except subprocess.TimeoutExpired:
+            process.terminate()
+            completion_detected = False
+            error_message = "Process timed out"
+        
+        # Also check file marker as backup
+        if not completion_detected:
+            try:
+                status_file = self.outputs_dir / 'status.txt'
+                if status_file.exists():
+                    if 'AGENT COMPLETE' in status_file.read_text():
+                        completion_detected = True
+            except:
+                pass
+        
+        return {
+            'success': completion_detected and exit_code == 0,
+            'exit_code': exit_code,
+            'events': events,
+            'error': error_message if error_message else None
+        }
+
+
 class WorkflowConfig:
     """Configuration manager for workflow definitions"""
     
@@ -698,6 +844,9 @@ class ExtensibleClaudeDrivenOrchestrator:
         
         # Initialize agent factory with configuration
         self.agent_factory = AgentFactory(self, self.agent_config)
+        
+        # Initialize agent executor for headless/prompt mode execution
+        self.agent_executor = AgentExecutor(self)
         
         # Dashboard is initialized through AgentConfig if enabled
         self.dashboard = self.agent_config.dashboard
@@ -877,7 +1026,9 @@ class ExtensibleClaudeDrivenOrchestrator:
         self._update_status_file()
         
         # Prepare the next agent using dynamic preparation
-        return self._prepare_work_agent(next_agent)
+        agent_type, instructions = self._prepare_work_agent(next_agent)
+        result = self.agent_executor.execute_agent(agent_type, instructions)
+        return agent_type, result
 
     def _prepare_work_agent(self, agent_type: str):
         """Dynamic agent preparation based on agent type"""
@@ -970,6 +1121,9 @@ class ExtensibleClaudeDrivenOrchestrator:
             status_line = "Status not found"
             for line in verification_content.split('\n'):
                 if "Overall Status:" in line:
+                    status_line = line.strip()
+                    break
+                elif "Final Verification Status:" in line:
                     status_line = line.strip()
                     break
             
