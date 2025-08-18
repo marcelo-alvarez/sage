@@ -594,29 +594,122 @@ class AgentExecutor:
             return f"❌ {agent_type} timed out after 300 seconds"
 
     def _execute_headless(self, agent_type, instructions):
-        """Execute agent using claude -p with headless automation"""
+        """Execute agent using claude -p with headless automation and enhanced diagnostics"""
+        debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+        
+        if debug_mode:
+            print(f"[DEBUG] Starting headless execution for {agent_type}")
+            print(f"[DEBUG] Original instructions length: {len(instructions)} characters")
+            print(f"[DEBUG] Raw instructions (first 200 chars): {instructions[:200]}...")
+        
+        # Working directory validation
+        if debug_mode:
+            print(f"[DEBUG] Validating working directory: {self.outputs_dir}")
+            print(f"[DEBUG] Directory exists: {self.outputs_dir.exists()}")
+            print(f"[DEBUG] Directory is writable: {os.access(self.outputs_dir, os.W_OK) if self.outputs_dir.exists() else 'N/A - does not exist'}")
+            if self.outputs_dir.exists():
+                print(f"[DEBUG] Directory contents: {list(self.outputs_dir.iterdir())}")
+        
+        # Ensure directory exists
+        try:
+            self.outputs_dir.mkdir(parents=True, exist_ok=True)
+            if debug_mode:
+                print(f"[DEBUG] Directory creation/verification successful")
+        except Exception as e:
+            if debug_mode:
+                print(f"[DEBUG] Directory creation failed: {str(e)}")
+            return f"❌ {agent_type.upper()} failed: Cannot create working directory: {str(e)}"
+        
         # Strip prompt-mode specific commands
         clean_instructions = self._strip_manual_commands(instructions)
+        
+        if debug_mode:
+            print(f"[DEBUG] Cleaned instructions length: {len(clean_instructions)} characters")
+            print(f"[DEBUG] Cleaned instructions (first 200 chars): {clean_instructions[:200]}...")
+        
+        # Environment validation
+        if debug_mode:
+            print(f"[DEBUG] Environment variables relevant to Claude:")
+            claude_env_vars = ['CLAUDE_ORCHESTRATOR_MODE', 'CLAUDE_ORCHESTRATOR_DEBUG', 'PATH']
+            for var in claude_env_vars:
+                value = os.getenv(var, '<unset>')
+                if var == 'PATH':
+                    # Show only relevant PATH entries
+                    path_entries = value.split(':') if value != '<unset>' else []
+                    claude_paths = [p for p in path_entries if 'claude' in p.lower() or 'homebrew' in p.lower()]
+                    print(f"[DEBUG]   {var} (relevant entries): {claude_paths}")
+                else:
+                    print(f"[DEBUG]   {var}: {value}")
         
         cmd = [
             'claude',
             '-p', clean_instructions,
             '--output-format', 'json',
-            '--dangerously-skip-permissions',
-            '--max-turns', '30',
-            '--working-dir', str(self.outputs_dir)
+            '--dangerously-skip-permissions'
         ]
         
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1
-        )
+        if debug_mode:
+            print(f"[DEBUG] Full command construction: {cmd}")
+            print(f"[DEBUG] Command flags: {cmd[2:]}")
+            print(f"[DEBUG] Working directory for subprocess: {self.outputs_dir}")
         
-        # Parse JSON stream for completion
-        result = self._parse_json_stream(process)
+        try:
+            if debug_mode:
+                print(f"[DEBUG] Starting subprocess.Popen...")
+            
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+                cwd=str(self.outputs_dir)
+            )
+            
+            if debug_mode:
+                print(f"[DEBUG] Subprocess created successfully with PID: {process.pid}")
+                print(f"[DEBUG] Process poll status: {process.poll()}")
+            
+            # Parse JSON stream for completion
+            if debug_mode:
+                print(f"[DEBUG] Starting JSON stream parsing...")
+            result = self._parse_json_stream(process)
+            
+            if debug_mode:
+                print(f"[DEBUG] JSON stream parsing completed")
+                print(f"[DEBUG] Parse result success: {result.get('success', 'unknown')}")
+                print(f"[DEBUG] Parse result exit_code: {result.get('exit_code', 'unknown')}")
+                print(f"[DEBUG] Parse result error: {result.get('error', 'none')}")
+                print(f"[DEBUG] Process final poll status: {process.poll()}")
+            
+            # Capture stderr for diagnostics
+            stderr_output = ""
+            if process.stderr:
+                try:
+                    stderr_output = process.stderr.read()
+                    if debug_mode:
+                        if stderr_output:
+                            print(f"[DEBUG] Stderr output captured ({len(stderr_output)} chars): {stderr_output[:200]}...")
+                        else:
+                            print(f"[DEBUG] Stderr output: <empty>")
+                except Exception as stderr_e:
+                    if debug_mode:
+                        print(f"[DEBUG] Failed to read stderr: {str(stderr_e)}")
+            
+            # Enhanced error reporting with stderr info
+            if not result['success'] and stderr_output:
+                if result['error']:
+                    result['error'] += f" | Stderr: {stderr_output[:100]}..."
+                else:
+                    result['error'] = f"Process failed with stderr: {stderr_output[:100]}..."
+            
+        except Exception as e:
+            if debug_mode:
+                print(f"[DEBUG] Exception in _execute_headless: {str(e)}")
+                print(f"[DEBUG] Exception type: {type(e).__name__}")
+                import traceback
+                print(f"[DEBUG] Exception traceback: {traceback.format_exc()}")
+            return f"❌ {agent_type.upper()} failed: Process execution error: {str(e)}"
         
         # Update status file (always works, even without dashboard)
         self.orchestrator._update_status_file()
@@ -629,9 +722,17 @@ class AgentExecutor:
             pass  # Dashboard is optional, ignore any errors
         
         if result['success']:
-            return f"✅ {agent_type.upper()} completed successfully"
+            success_msg = f"✅ {agent_type.upper()} completed successfully"
+            if debug_mode and 'debug_info' in result:
+                debug_info = result['debug_info']
+                success_msg += f" (processed {debug_info['lines_processed']} lines, {debug_info['json_events_parsed']} JSON events in {debug_info['processing_time']:.1f}s)"
+            return success_msg
         else:
-            return f"❌ {agent_type.upper()} failed: {result['error']}"
+            error_msg = f"❌ {agent_type.upper()} failed: {result['error']}"
+            if debug_mode and 'debug_info' in result:
+                debug_info = result['debug_info']
+                error_msg += f" | Debug: {debug_info['lines_processed']} lines, {debug_info['json_events_parsed']} JSON events, {debug_info['result_events_found']} result events"
+            return error_msg
 
     def _execute_via_prompt(self, agent_type, instructions):
         """Legacy prompt mode - return instructions unchanged for Claude to execute"""
@@ -661,67 +762,208 @@ class AgentExecutor:
         return '\n'.join(cleaned)
 
     def _parse_json_stream(self, process):
-        """Parse JSON events from claude CLI output stream"""
+        """Parse JSON events from claude CLI output stream with enhanced debugging"""
         events = []
         completion_detected = False
         exit_code = 0
         error_message = ""
         start_time = time.time()
         timeout_seconds = 300
+        lines_processed = 0
+        json_events_parsed = 0
+        result_events_found = 0
+        debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+        
+        if debug_mode:
+            print(f"[DEBUG] Starting JSON stream parsing for process {process.pid}")
+            print(f"[DEBUG] Timeout configured: {timeout_seconds} seconds")
+            print(f"[DEBUG] Process status at start: {process.poll()}")
         
         try:
             # Read stdout line by line with timeout monitoring
+            if debug_mode:
+                print(f"[DEBUG] Beginning stdout reading loop...")
+            
             for line in process.stdout:
+                lines_processed += 1
+                elapsed_time = time.time() - start_time
+                
                 # Check timeout during parsing
-                if time.time() - start_time > timeout_seconds:
+                if elapsed_time > timeout_seconds:
                     process.terminate()
-                    error_message = "Process timed out after 300 seconds"
+                    error_message = f"Process timed out after {timeout_seconds} seconds (processed {lines_processed} lines, {json_events_parsed} JSON events)"
+                    if debug_mode:
+                        print(f"[DEBUG] Timeout reached: {error_message}")
                     break
-                    
+                
+                # Log all lines in debug mode (not just first 10)
+                if debug_mode:
+                    if lines_processed <= 10:
+                        print(f"[DEBUG] Line {lines_processed}: {line.strip()[:100]}...")
+                    elif lines_processed % 50 == 0:  # Log every 50th line after first 10
+                        print(f"[DEBUG] Line {lines_processed} (periodic): {line.strip()[:100]}...")
+                
+                # Check if line is empty or whitespace
+                stripped_line = line.strip()
+                if not stripped_line:
+                    if debug_mode and lines_processed <= 10:
+                        print(f"[DEBUG] Line {lines_processed}: <empty or whitespace>")
+                    continue
+                
                 try:
-                    event = json.loads(line)
+                    event = json.loads(stripped_line)
                     events.append(event)
+                    json_events_parsed += 1
                     
-                    # Completion detection
-                    if event.get('type') == 'result':
+                    event_type = event.get('type', 'unknown')
+                    if debug_mode:
+                        print(f"[DEBUG] Parsed JSON event #{json_events_parsed}: type='{event_type}'")
+                        # Log additional event details for important events
+                        if event_type in ['result', 'sessionEnd', 'complete', 'finished']:
+                            print(f"[DEBUG] Event details: {event}")
+                    
+                    # Enhanced completion detection with multiple signals
+                    if event_type == 'result':
+                        result_events_found += 1
                         completion_detected = True
                         exit_code = event.get('exitCode', 0)
+                        if debug_mode:
+                            print(f"[DEBUG] Found result event #{result_events_found}: exitCode={exit_code}")
+                            print(f"[DEBUG] Result event full content: {event}")
+                        break
+                    elif event_type in ['sessionEnd', 'complete', 'finished']:
+                        # Additional completion signals
+                        completion_detected = True
+                        exit_code = event.get('exitCode', 0)
+                        if debug_mode:
+                            print(f"[DEBUG] Found completion event: type='{event_type}', exitCode={exit_code}")
+                            print(f"[DEBUG] Completion event full content: {event}")
                         break
                         
-                except json.JSONDecodeError:
+                except json.JSONDecodeError as e:
                     # Continue parsing despite malformed JSON lines
+                    if debug_mode:
+                        if lines_processed <= 10:
+                            print(f"[DEBUG] JSON decode error on line {lines_processed}: {str(e)[:50]}...")
+                            print(f"[DEBUG] Problematic line content: {stripped_line[:100]}...")
+                        elif json_events_parsed == 0 and lines_processed <= 50:
+                            # Log JSON errors more extensively if no events parsed yet
+                            print(f"[DEBUG] JSON decode error on line {lines_processed} (no events yet): {str(e)[:100]}...")
                     continue
                     
         except Exception as e:
-            error_message = str(e)
+            error_message = f"Stream parsing error: {str(e)}"
+            if debug_mode:
+                print(f"[DEBUG] Exception during parsing: {error_message}")
         
-        # Wait for process to complete with remaining timeout
+        # Enhanced process completion handling
         if not error_message:
             remaining_timeout = max(1, timeout_seconds - (time.time() - start_time))
+            if debug_mode:
+                print(f"[DEBUG] Waiting for process completion with {remaining_timeout:.1f}s timeout")
+            
             try:
-                process.wait(timeout=remaining_timeout)
+                exit_code = process.wait(timeout=remaining_timeout)
+                if debug_mode:
+                    print(f"[DEBUG] Process completed with exit code: {exit_code}")
             except subprocess.TimeoutExpired:
                 process.terminate()
-                completion_detected = False
-                error_message = "Process timed out during completion"
+                error_message = f"Process completion timeout after {timeout_seconds}s (processed {lines_processed} lines, {json_events_parsed} JSON events, {result_events_found} result events)"
+                if debug_mode:
+                    print(f"[DEBUG] Process completion timeout: {error_message}")
         
-        # Check file marker fallback when JSON detection fails
+        # Enhanced fallback detection with better diagnostics
         if not completion_detected and not error_message:
+            if debug_mode:
+                print(f"[DEBUG] No JSON completion detected, checking status.txt fallback")
+                print(f"[DEBUG] Final parsing summary: {lines_processed} lines, {json_events_parsed} JSON events, {result_events_found} result events")
+            
             try:
                 status_file = self.outputs_dir / 'status.txt'
+                if debug_mode:
+                    print(f"[DEBUG] Checking status file: {status_file}")
+                    print(f"[DEBUG] Status file exists: {status_file.exists()}")
+                    
                 if status_file.exists():
-                    if 'AGENT COMPLETE' in status_file.read_text():
+                    content = status_file.read_text()
+                    if debug_mode:
+                        print(f"[DEBUG] Status file size: {len(content)} characters")
+                        print(f"[DEBUG] Status file full content: {repr(content)}")
+                    
+                    if 'AGENT COMPLETE' in content:
                         completion_detected = True
-            except Exception:
-                # Ignore file access errors
-                pass
+                        # Use process exit code if available, otherwise assume success
+                        if hasattr(process, 'returncode') and process.returncode is not None:
+                            exit_code = process.returncode
+                        else:
+                            exit_code = 0
+                        if debug_mode:
+                            print(f"[DEBUG] Found 'AGENT COMPLETE' marker in status.txt, exit_code={exit_code}")
+                            print(f"[DEBUG] Status.txt fallback detection: SUCCESS")
+                    else:
+                        if debug_mode:
+                            print(f"[DEBUG] Status file exists but no 'AGENT COMPLETE' marker found")
+                            print(f"[DEBUG] Looking for marker 'AGENT COMPLETE' in content...")
+                            # Check for variations or partial matches
+                            if 'AGENT' in content:
+                                print(f"[DEBUG] Found 'AGENT' in content but not full marker")
+                            if 'COMPLETE' in content:
+                                print(f"[DEBUG] Found 'COMPLETE' in content but not full marker")
+                else:
+                    if debug_mode:
+                        print(f"[DEBUG] Status file {status_file} does not exist")
+                        # Check working directory for any files
+                        try:
+                            dir_contents = list(self.outputs_dir.iterdir())
+                            print(f"[DEBUG] Working directory contents: {dir_contents}")
+                        except Exception as dir_e:
+                            print(f"[DEBUG] Could not list working directory: {str(dir_e)}")
+            except Exception as e:
+                error_msg = f"Status file check error: {str(e)}"
+                if debug_mode:
+                    print(f"[DEBUG] {error_msg}")
+                    import traceback
+                    print(f"[DEBUG] Status file check traceback: {traceback.format_exc()}")
         
-        return {
+        # Enhanced error reporting with detailed diagnostics
+        if not completion_detected and not error_message:
+            error_message = (f"No completion signal detected - processed {lines_processed} lines, "
+                           f"parsed {json_events_parsed} JSON events, found {result_events_found} result events. "
+                           f"Process exit code: {getattr(process, 'returncode', 'unknown')}")
+            if debug_mode:
+                print(f"[DEBUG] Setting error message: {error_message}")
+        
+        processing_time = time.time() - start_time
+        result = {
             'success': completion_detected and exit_code == 0,
             'exit_code': exit_code,
             'events': events,
-            'error': error_message if error_message else None
+            'error': error_message if error_message else None,
+            'debug_info': {
+                'lines_processed': lines_processed,
+                'json_events_parsed': json_events_parsed,
+                'result_events_found': result_events_found,
+                'completion_detected': completion_detected,
+                'processing_time': processing_time
+            }
         }
+        
+        if debug_mode:
+            print(f"[DEBUG] Final result summary:")
+            print(f"[DEBUG]   success: {result['success']}")
+            print(f"[DEBUG]   exit_code: {exit_code}")
+            print(f"[DEBUG]   completion_detected: {completion_detected}")
+            print(f"[DEBUG]   error: {error_message}")
+            print(f"[DEBUG]   lines_processed: {lines_processed}")
+            print(f"[DEBUG]   json_events_parsed: {json_events_parsed}")
+            print(f"[DEBUG]   result_events_found: {result_events_found}")
+            print(f"[DEBUG]   processing_time: {processing_time:.2f}s")
+            print(f"[DEBUG]   total_events: {len(events)}")
+            if events:
+                event_types = [e.get('type', 'unknown') for e in events]
+                print(f"[DEBUG]   event_types: {event_types}")
+        
+        return result
 
 
 class WorkflowConfig:
@@ -815,8 +1057,8 @@ class WorkflowConfig:
             json.dump(config_data, f, indent=2)
 
 
-class ExtensibleClaudeDrivenOrchestrator:
-    """Extensible version of the Claude-Driven Orchestrator"""
+class ClaudeCodeOrchestrator:
+    """Claude Code Orchestrator - Extensible agent workflow orchestration"""
     
     def __init__(self, enable_dashboard: bool = False, dashboard_port: int = 5678, api_port: int = 8000, no_browser: bool = False):
         # Check for meta mode
@@ -1605,7 +1847,7 @@ def main():
     if command == "meta" or (command == "" and "meta" in sys.argv):
         command = "continue"
     
-    orchestrator = ExtensibleClaudeDrivenOrchestrator(no_browser=args.no_browser)
+    orchestrator = ClaudeCodeOrchestrator(no_browser=args.no_browser)
     
     # Basic workflow commands
     if command == "start":
