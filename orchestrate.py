@@ -573,12 +573,15 @@ class AgentFactory:
 class AgentExecutor:
     """Handles agent execution in both headless and prompt modes"""
     
-    def __init__(self, orchestrator):
+    def __init__(self, orchestrator, headless=False):
         self.orchestrator = orchestrator
         self.outputs_dir = orchestrator.outputs_dir
-        # Default to headless unless explicitly set to prompt
-        mode = os.getenv('CLAUDE_ORCHESTRATOR_MODE', 'headless')
-        self.use_prompt_mode = (mode == 'prompt')
+        # Check headless flag first, then environment variable, default to interactive
+        if headless:
+            self.use_prompt_mode = False
+        else:
+            mode = os.getenv('CLAUDE_ORCHESTRATOR_MODE', 'prompt')
+            self.use_prompt_mode = (mode == 'prompt')
         
     def execute_agent(self, agent_type, instructions):
         """Routes to appropriate execution method"""
@@ -1148,7 +1151,7 @@ class WorkflowConfig:
 class ClaudeCodeOrchestrator:
     """Claude Code Orchestrator - Extensible agent workflow orchestration"""
     
-    def __init__(self, enable_dashboard: bool = False, dashboard_port: int = 5678, api_port: int = 8000, no_browser: bool = False):
+    def __init__(self, enable_dashboard: bool = False, dashboard_port: int = 5678, api_port: int = 8000, no_browser: bool = False, headless: bool = False):
         # Check for meta mode
         self.meta_mode = 'meta' in sys.argv
         
@@ -1173,6 +1176,7 @@ class ClaudeCodeOrchestrator:
         self.dashboard_port = dashboard_port
         self.api_port = api_port
         self.no_browser = no_browser
+        self.headless = headless
         self.dashboard_process = None
         self.api_process = None
         self.dashboard = None
@@ -1185,7 +1189,7 @@ class ClaudeCodeOrchestrator:
         self.agent_factory = AgentFactory(self, self.agent_config)
         
         # Initialize agent executor for headless/prompt mode execution
-        self.agent_executor = AgentExecutor(self)
+        self.agent_executor = AgentExecutor(self, headless=self.headless)
         
         # Dashboard is initialized through AgentConfig if enabled
         self.dashboard = self.agent_config.dashboard
@@ -1924,6 +1928,8 @@ def main():
                        help='Command to execute (default: continue)')
     parser.add_argument('--no-browser', action='store_true',
                        help='Suppress browser opening for CI/CD environments')
+    parser.add_argument('--headless', action='store_true',
+                       help='Run in headless mode (non-interactive)')
     parser.add_argument('modification_text', nargs='*',
                        help='Modification text for modify-criteria command')
     
@@ -1935,7 +1941,7 @@ def main():
     if command == "meta" or (command == "" and "meta" in sys.argv):
         command = "continue"
     
-    orchestrator = ClaudeCodeOrchestrator(no_browser=args.no_browser)
+    orchestrator = ClaudeCodeOrchestrator(no_browser=args.no_browser, headless=args.headless)
     
     # Basic workflow commands
     if command == "start":
