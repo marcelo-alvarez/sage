@@ -1578,12 +1578,20 @@ Begin by analyzing the current directory and asking the user about their goals.
             print("Already in supervised mode - no unsupervised file found")
 
 
+def show_help():
+    """Display help information about available commands"""
+    print("\nAvailable commands:")
+    print("  Workflow: start, continue, status, clean, complete, fail, bootstrap")
+    print("  Gates: approve-criteria, modify-criteria, retry-explorer")
+    print("         approve-completion, retry-from-planner, retry-from-coder, retry-from-verifier")
+    print("  Mode: unsupervised, supervised")
+
 def main():
     """CLI entry point - designed for actual workflow operations"""
     
     parser = argparse.ArgumentParser(description='Claude Code Orchestrator')
-    parser.add_argument('command', nargs='?', default='start',
-                       help='Command to execute (default: start)')
+    parser.add_argument('command', nargs='?', default='continue',
+                       help='Command to execute (default: continue)')
     parser.add_argument('--no-browser', action='store_true',
                        help='Suppress browser opening for CI/CD environments')
     parser.add_argument('modification_text', nargs='*',
@@ -1660,13 +1668,12 @@ def main():
     elif command == "supervised":
         orchestrator.disable_unsupervised_mode()
         
+    elif command == "help":
+        show_help()
+        
     else:
         print("Unknown command: " + command)
-        print("\nAvailable commands:")
-        print("  Workflow: start, continue, status, clean, complete, fail, bootstrap")
-        print("  Gates: approve-criteria, modify-criteria, retry-explorer")
-        print("         approve-completion, retry-from-planner, retry-from-coder, retry-from-verifier")
-        print("  Mode: unsupervised, supervised")
+        show_help()
 
 
 if __name__ == "__main__":
