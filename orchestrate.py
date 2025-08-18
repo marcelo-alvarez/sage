@@ -1601,7 +1601,8 @@ def main():
     command = args.command
     
     # If command is "meta", treat it as "continue" but keep "meta" in sys.argv for mode detection
-    if command == "meta":
+    # Also handle empty string when in meta mode (when $ARGUMENTS is empty in slash command)
+    if command == "meta" or (command == "" and "meta" in sys.argv):
         command = "continue"
     
     orchestrator = ExtensibleClaudeDrivenOrchestrator(no_browser=args.no_browser)
