@@ -1,5 +1,3 @@
-You are now the CODER agent.
-
 REQUIRED READING ORDER:
 1. Read .agent-outputs/exploration.md to understand the original problem context
 2. Read .agent-outputs/success-criteria.md to understand the approved success criteria
@@ -40,5 +38,3 @@ Output format for changes.md:
 
 ## Validation Notes
 [How these changes solve the original problem]
-
-When complete, output: CODER COMPLETE

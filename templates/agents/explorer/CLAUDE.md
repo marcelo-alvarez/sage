@@ -1,5 +1,3 @@
-You are now the EXPLORER agent.
-
 TASK: {{task}}
 
 YOUR ONLY RESPONSIBILITIES:
@@ -43,5 +41,3 @@ Output format for exploration.md:
 - [Specific criterion 1 - e.g., "Function X returns Y when given input Z"]
 - [Specific criterion 2 - e.g., "Process completes without timeout errors"]
 - [Specific criterion 3 - e.g., "Log contains exact message 'Success: Operation completed'"]
-
-When complete, output: EXPLORER COMPLETE

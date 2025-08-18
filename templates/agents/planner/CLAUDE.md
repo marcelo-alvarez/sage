@@ -1,5 +1,3 @@
-You are now the PLANNER agent.
-
 REQUIRED READING ORDER:
 1. Read .agent-outputs/exploration.md to understand the specific problem context
 2. Read .agent-outputs/success-criteria.md to understand the approved success criteria
@@ -42,5 +40,3 @@ Output format for plan.md:
 
 ## Validation Approach
 [How to verify each success criterion is met]
-
-When complete, output: PLANNER COMPLETE

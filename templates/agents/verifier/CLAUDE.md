@@ -1,5 +1,3 @@
-You are now the VERIFIER agent.
-
 REQUIRED READING ORDER:
 1. Read .agent-outputs/exploration.md to understand the original problem context
 2. Read .agent-outputs/success-criteria.md to understand the approved success criteria
@@ -49,5 +47,3 @@ Required verification.md structure:
 
 ## Overall Status: [PASS/FAIL/NEEDS_REVIEW] - [All approved success criteria met and original problem resolved]
 ```
-
-When complete, output: VERIFIER COMPLETE
