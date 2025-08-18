@@ -1600,6 +1600,10 @@ def main():
     args = parser.parse_args()
     command = args.command
     
+    # If command is "meta", treat it as "continue" but keep "meta" in sys.argv for mode detection
+    if command == "meta":
+        command = "continue"
+    
     orchestrator = ExtensibleClaudeDrivenOrchestrator(no_browser=args.no_browser)
     
     # Basic workflow commands
