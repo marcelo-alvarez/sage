@@ -646,17 +646,13 @@ class AgentExecutor:
         for line in lines:
             if 'IMPORTANT: YOU MUST EXECUTE THE' in line:
                 skip_final_step = True
-                continue
             elif 'FINAL STEP:' in line:
                 skip_final_step = True
-                continue
             elif skip_final_step and '/clear' in line:
                 continue
             elif skip_final_step and 'orchestrate.py continue' in line:
                 continue
             else:
-                if skip_final_step and line.strip() == '':
-                    skip_final_step = False
                 cleaned.append(line)
                 
         # Add file marker for completion detection
@@ -670,9 +666,18 @@ class AgentExecutor:
         completion_detected = False
         exit_code = 0
         error_message = ""
+        start_time = time.time()
+        timeout_seconds = 300
         
         try:
+            # Read stdout line by line with timeout monitoring
             for line in process.stdout:
+                # Check timeout during parsing
+                if time.time() - start_time > timeout_seconds:
+                    process.terminate()
+                    error_message = "Process timed out after 300 seconds"
+                    break
+                    
                 try:
                     event = json.loads(line)
                     events.append(event)
@@ -684,27 +689,31 @@ class AgentExecutor:
                         break
                         
                 except json.JSONDecodeError:
+                    # Continue parsing despite malformed JSON lines
                     continue
                     
         except Exception as e:
             error_message = str(e)
         
-        # Wait for process to complete
-        try:
-            process.wait(timeout=300)
-        except subprocess.TimeoutExpired:
-            process.terminate()
-            completion_detected = False
-            error_message = "Process timed out"
+        # Wait for process to complete with remaining timeout
+        if not error_message:
+            remaining_timeout = max(1, timeout_seconds - (time.time() - start_time))
+            try:
+                process.wait(timeout=remaining_timeout)
+            except subprocess.TimeoutExpired:
+                process.terminate()
+                completion_detected = False
+                error_message = "Process timed out during completion"
         
-        # Also check file marker as backup
-        if not completion_detected:
+        # Check file marker fallback when JSON detection fails
+        if not completion_detected and not error_message:
             try:
                 status_file = self.outputs_dir / 'status.txt'
                 if status_file.exists():
                     if 'AGENT COMPLETE' in status_file.read_text():
                         completion_detected = True
-            except:
+            except Exception:
+                # Ignore file access errors
                 pass
         
         return {
@@ -947,10 +956,13 @@ class ExtensibleClaudeDrivenOrchestrator:
         # Add meta flag to continue command if in meta mode
         meta_flag = ' meta' if self.meta_mode else ''
         
+        # Replace .agent-outputs/ paths with actual outputs directory for meta mode compatibility
+        adjusted_work_section = work_section.replace('.agent-outputs/', f'{self.outputs_dir.name}/')
+        
         # Build complete instructions that work without requiring /clear execution by Claude
         complete_instructions = "IMPORTANT: YOU MUST EXECUTE THE 'FINAL STEP' at the end of these instructions once you are done.\n\n" + \
                                "You are now the " + agent_name.upper() + " agent.\n\n" + \
-                               work_section + "\n\n" + \
+                               adjusted_work_section + "\n\n" + \
                                "When complete, output: " + completion_phrase + "\n\n" + \
                                "FINAL STEP: Run the claude code command `/clear` to reset context, then run:\n" + \
                                "python3 ~/.claude-orchestrator/orchestrate.py continue" + meta_flag
