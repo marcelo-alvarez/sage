@@ -139,7 +139,7 @@ class AgentRole:
 class AgentConfig:
     """Configuration manager for agent definitions"""
     
-    def __init__(self, config_path: Path = None, enable_dashboard: bool = True, dashboard_port: int = 5678, api_port: int = 8000, no_browser: bool = False):
+    def __init__(self, config_path: Path = None, enable_dashboard: bool = False, dashboard_port: int = 5678, api_port: int = 8000, no_browser: bool = False):
         self.config_path = config_path or Path('.claude/agent-config.json')
         self.templates_dir = Path('templates/agents')
         self.agents = {}
@@ -818,7 +818,7 @@ class WorkflowConfig:
 class ExtensibleClaudeDrivenOrchestrator:
     """Extensible version of the Claude-Driven Orchestrator"""
     
-    def __init__(self, enable_dashboard: bool = True, dashboard_port: int = 5678, api_port: int = 8000, no_browser: bool = False):
+    def __init__(self, enable_dashboard: bool = False, dashboard_port: int = 5678, api_port: int = 8000, no_browser: bool = False):
         # Check for meta mode
         self.meta_mode = 'meta' in sys.argv
         
