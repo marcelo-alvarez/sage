@@ -641,8 +641,35 @@ class AgentExecutor:
                 else:
                     print(f"[DEBUG]   {var}: {value}")
         
+        # Validate Claude CLI availability before subprocess creation
+        claude_binary = 'claude'
+        try:
+            # Test if claude command is available
+            claude_test = subprocess.run(['which', claude_binary], capture_output=True, text=True)
+            if claude_test.returncode != 0:
+                # Try alternative paths
+                alternative_paths = ['/usr/local/bin/claude', '/opt/homebrew/bin/claude', '~/.local/bin/claude']
+                claude_found = False
+                for alt_path in alternative_paths:
+                    expanded_path = os.path.expanduser(alt_path)
+                    if os.path.exists(expanded_path) and os.access(expanded_path, os.X_OK):
+                        claude_binary = expanded_path
+                        claude_found = True
+                        if debug_mode:
+                            print(f"[DEBUG] Found Claude CLI at alternative path: {claude_binary}")
+                        break
+                if not claude_found:
+                    return f"❌ {agent_type.upper()} failed: Claude CLI not found in PATH or standard locations"
+            else:
+                if debug_mode:
+                    print(f"[DEBUG] Claude CLI found in PATH: {claude_test.stdout.strip()}")
+        except Exception as e:
+            if debug_mode:
+                print(f"[DEBUG] Claude CLI validation error: {str(e)}")
+            return f"❌ {agent_type.upper()} failed: Claude CLI validation error: {str(e)}"
+        
         cmd = [
-            'claude',
+            claude_binary,
             '-p', clean_instructions,
             '--output-format', 'json',
             '--dangerously-skip-permissions'
@@ -652,10 +679,21 @@ class AgentExecutor:
             print(f"[DEBUG] Full command construction: {cmd}")
             print(f"[DEBUG] Command flags: {cmd[2:]}")
             print(f"[DEBUG] Working directory for subprocess: {self.outputs_dir}")
+            print(f"[DEBUG] Instructions length: {len(clean_instructions)} characters")
         
         try:
             if debug_mode:
                 print(f"[DEBUG] Starting subprocess.Popen...")
+                print(f"[DEBUG] Current working directory: {os.getcwd()}")
+                print(f"[DEBUG] Target working directory: {self.outputs_dir}")
+                print(f"[DEBUG] Target directory exists: {self.outputs_dir.exists()}")
+                print(f"[DEBUG] Target directory writable: {os.access(self.outputs_dir, os.W_OK) if self.outputs_dir.exists() else False}")
+            
+            # Validate target directory accessibility
+            if not self.outputs_dir.exists():
+                return f"❌ {agent_type.upper()} failed: Target directory does not exist: {self.outputs_dir}"
+            if not os.access(self.outputs_dir, os.W_OK):
+                return f"❌ {agent_type.upper()} failed: Target directory is not writable: {self.outputs_dir}"
             
             process = subprocess.Popen(
                 cmd,
@@ -663,12 +701,18 @@ class AgentExecutor:
                 stderr=subprocess.PIPE,
                 text=True,
                 bufsize=1,
-                cwd=str(self.outputs_dir)
+                universal_newlines=True,
+                cwd=str(self.outputs_dir),
+                # Ensure clean environment for subprocess
+                env=dict(os.environ, CLAUDE_ORCHESTRATOR_MODE='headless')
             )
             
             if debug_mode:
                 print(f"[DEBUG] Subprocess created successfully with PID: {process.pid}")
                 print(f"[DEBUG] Process poll status: {process.poll()}")
+                # Give process a moment to initialize
+                time.sleep(0.1)
+                print(f"[DEBUG] Process poll status after init: {process.poll()}")
             
             # Parse JSON stream for completion
             if debug_mode:
@@ -682,34 +726,78 @@ class AgentExecutor:
                 print(f"[DEBUG] Parse result error: {result.get('error', 'none')}")
                 print(f"[DEBUG] Process final poll status: {process.poll()}")
             
-            # Capture stderr for diagnostics
+            # Enhanced stderr capture and process cleanup
             stderr_output = ""
-            if process.stderr:
-                try:
+            try:
+                # Ensure process has terminated before reading stderr
+                if process.poll() is None:
+                    if debug_mode:
+                        print(f"[DEBUG] Process still running, waiting for termination...")
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        if debug_mode:
+                            print(f"[DEBUG] Process termination timeout, forcing kill")
+                        process.kill()
+                        process.wait()
+                
+                # Read stderr after process completion
+                if process.stderr:
                     stderr_output = process.stderr.read()
                     if debug_mode:
                         if stderr_output:
                             print(f"[DEBUG] Stderr output captured ({len(stderr_output)} chars): {stderr_output[:200]}...")
                         else:
                             print(f"[DEBUG] Stderr output: <empty>")
-                except Exception as stderr_e:
-                    if debug_mode:
-                        print(f"[DEBUG] Failed to read stderr: {str(stderr_e)}")
+            except Exception as stderr_e:
+                if debug_mode:
+                    print(f"[DEBUG] Failed to read stderr or cleanup process: {str(stderr_e)}")
+                stderr_output = f"Error reading stderr: {str(stderr_e)}"
             
-            # Enhanced error reporting with stderr info
-            if not result['success'] and stderr_output:
-                if result['error']:
-                    result['error'] += f" | Stderr: {stderr_output[:100]}..."
-                else:
-                    result['error'] = f"Process failed with stderr: {stderr_output[:100]}..."
+            # Enhanced error reporting with comprehensive diagnostics
+            if not result['success']:
+                error_details = []
+                if result.get('error'):
+                    error_details.append(result['error'])
+                if stderr_output:
+                    error_details.append(f"Stderr: {stderr_output[:150]}..." if len(stderr_output) > 150 else f"Stderr: {stderr_output}")
+                if hasattr(process, 'returncode') and process.returncode is not None and process.returncode != 0:
+                    error_details.append(f"Exit code: {process.returncode}")
+                
+                result['error'] = ' | '.join(error_details) if error_details else 'Unknown subprocess failure'
             
         except Exception as e:
+            # Ensure cleanup on any exception
+            try:
+                if 'process' in locals() and process:
+                    if process.poll() is None:
+                        if debug_mode:
+                            print(f"[DEBUG] Cleaning up process {process.pid} due to exception")
+                        process.terminate()
+                        try:
+                            process.wait(timeout=3)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            process.wait()
+            except Exception as cleanup_e:
+                if debug_mode:
+                    print(f"[DEBUG] Process cleanup error: {str(cleanup_e)}")
+            
             if debug_mode:
                 print(f"[DEBUG] Exception in _execute_headless: {str(e)}")
                 print(f"[DEBUG] Exception type: {type(e).__name__}")
                 import traceback
                 print(f"[DEBUG] Exception traceback: {traceback.format_exc()}")
-            return f"❌ {agent_type.upper()} failed: Process execution error: {str(e)}"
+            
+            # More specific error messages based on exception type
+            if isinstance(e, FileNotFoundError):
+                return f"❌ {agent_type.upper()} failed: Command not found - ensure Claude CLI is installed and in PATH"
+            elif isinstance(e, PermissionError):
+                return f"❌ {agent_type.upper()} failed: Permission denied - check directory permissions"
+            elif isinstance(e, subprocess.SubprocessError):
+                return f"❌ {agent_type.upper()} failed: Subprocess error: {str(e)}"
+            else:
+                return f"❌ {agent_type.upper()} failed: Process execution error: {str(e)}"
         
         # Update status file (always works, even without dashboard)
         self.orchestrator._update_status_file()
