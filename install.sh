@@ -202,6 +202,12 @@ initialize_project() {
     mkdir -p .claude
     mkdir -p .agent-outputs
     
+    # Remove existing agent-config.json if present to avoid conflicts
+    if [ -f ".claude/agent-config.json" ]; then
+        print_info "Removing existing .claude/agent-config.json to avoid conflicts"
+        rm -f ".claude/agent-config.json"
+    fi
+    
     # Copy template task files if they don't exist
     if [ ! -f ".claude/tasks.md" ] && [ -f "$TEMP_DIR/templates/tasks.md" ]; then
         cp "$TEMP_DIR/templates/tasks.md" .claude/tasks.md
@@ -303,12 +309,11 @@ print_summary() {
     fi
     echo "2. In Claude Code, run: /orchestrate start"
     echo ""
-    echo "📖 Commands:"
-    echo "   /orchestrate bootstrap   # Generate initial tasks"
-    echo "   /orchestrate start       # Start fresh workflow"
-    echo "   /orchestrate continue    # Continue workflow"
-    echo "   /orchestrate status      # Show current progress"
-    echo "   /orchestrate clean       # Reset outputs"
+    echo "📖 Available commands:"
+    echo "   Workflow: start, continue, status, clean, complete, fail, bootstrap"
+    echo "   Gates: approve-criteria, modify-criteria, retry-explorer"
+    echo "            approve-completion, retry-from-planner, retry-from-coder, retry-from-verifier"
+    echo "   Mode: unsupervised, supervised"
     echo ""
     echo "💡 The orchestrator runtime is now completely separate from your project files!"
 }
