@@ -1,3 +1,5 @@
+You are now the VERIFIER agent.
+
 Read .agent-outputs/changes.md to see what was supposedly done.
 
 YOUR ONLY RESPONSIBILITIES:
@@ -25,3 +27,4 @@ Example verification.md structure:
 ## Overall Status: PASS - All changes implemented correctly and tests pass
 ```
 
+When complete, output: VERIFIER COMPLETE

@@ -1,3 +1,5 @@
+You are now the EXPLORER agent.
+
 TASK: {{task}}
 
 YOUR ONLY RESPONSIBILITIES:
@@ -25,3 +27,4 @@ Output format for exploration.md:
 - [Objective criterion 2 - e.g., no hanging processes]
 - [Objective criterion 3 - e.g., specific output generated]
 
+When complete, output: EXPLORER COMPLETE
