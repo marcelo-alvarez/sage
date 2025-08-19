@@ -580,8 +580,8 @@ class AgentExecutor:
         if headless:
             self.use_interactive_mode = False
         else:
-            mode = os.getenv('CLAUDE_ORCHESTRATOR_MODE', 'prompt')
-            self.use_interactive_mode = (mode == 'prompt')
+            mode = os.getenv('CLAUDE_ORCHESTRATOR_MODE', 'interactive')
+            self.use_interactive_mode = (mode == 'interactive' or mode == 'prompt')
         
     def execute_agent(self, agent_type, instructions):
         """Routes to appropriate execution method"""
@@ -598,53 +598,23 @@ class AgentExecutor:
 
     def _execute_headless(self, agent_type, instructions):
         """Execute agent using claude -p with headless automation and enhanced diagnostics"""
+        timeout_seconds = 300
         debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
         
         if debug_mode:
             print(f"[DEBUG] Starting headless execution for {agent_type}")
-            print(f"[DEBUG] Original instructions length: {len(instructions)} characters")
-            print(f"[DEBUG] Raw instructions (first 200 chars): {instructions[:200]}...")
-        
-        # Working directory validation
-        if debug_mode:
-            print(f"[DEBUG] Validating working directory: {self.outputs_dir}")
-            print(f"[DEBUG] Directory exists: {self.outputs_dir.exists()}")
-            print(f"[DEBUG] Directory is writable: {os.access(self.outputs_dir, os.W_OK) if self.outputs_dir.exists() else 'N/A - does not exist'}")
-            if self.outputs_dir.exists():
-                print(f"[DEBUG] Directory contents: {list(self.outputs_dir.iterdir())}")
         
         # Ensure directory exists
         try:
             self.outputs_dir.mkdir(parents=True, exist_ok=True)
-            if debug_mode:
-                print(f"[DEBUG] Directory creation/verification successful")
         except Exception as e:
-            if debug_mode:
-                print(f"[DEBUG] Directory creation failed: {str(e)}")
             return f"❌ {agent_type.upper()} failed: Cannot create working directory {self.outputs_dir}: {str(e)}"
         
         # Strip interactive-mode specific commands
         clean_instructions = self._strip_manual_commands(instructions)
         
-        if debug_mode:
-            print(f"[DEBUG] Cleaned instructions length: {len(clean_instructions)} characters")
-            print(f"[DEBUG] Cleaned instructions (first 200 chars): {clean_instructions[:200]}...")
         
-        # Environment validation
-        if debug_mode:
-            print(f"[DEBUG] Environment variables relevant to Claude:")
-            claude_env_vars = ['CLAUDE_ORCHESTRATOR_MODE', 'CLAUDE_ORCHESTRATOR_DEBUG', 'PATH']
-            for var in claude_env_vars:
-                value = os.getenv(var, '<unset>')
-                if var == 'PATH':
-                    # Show only relevant PATH entries
-                    path_entries = value.split(':') if value != '<unset>' else []
-                    claude_paths = [p for p in path_entries if 'claude' in p.lower() or 'homebrew' in p.lower()]
-                    print(f"[DEBUG]   {var} (relevant entries): {claude_paths}")
-                else:
-                    print(f"[DEBUG]   {var}: {value}")
-        
-        # Validate Claude CLI availability before subprocess creation
+        # Validate Claude CLI availability
         claude_binary = 'claude'
         try:
             # Test if claude command is available
@@ -658,18 +628,17 @@ class AgentExecutor:
                     if os.path.exists(expanded_path) and os.access(expanded_path, os.X_OK):
                         claude_binary = expanded_path
                         claude_found = True
-                        if debug_mode:
-                            print(f"[DEBUG] Found Claude CLI at alternative path: {claude_binary}")
                         break
                 if not claude_found:
-                    return f"❌ {agent_type.upper()} failed: Claude CLI not found - ensure Claude CLI is installed and in PATH"
+                    raise FileNotFoundError("Claude CLI not found. Please install Claude CLI or add it to PATH. Checked locations: /usr/local/bin/claude, /opt/homebrew/bin/claude, ~/.local/bin/claude")
             else:
-                if debug_mode:
-                    print(f"[DEBUG] Claude CLI found in PATH: {claude_test.stdout.strip()}")
+                pass
+        except FileNotFoundError:
+            # Let FileNotFoundError propagate to parent method
+            raise
         except Exception as e:
-            if debug_mode:
-                print(f"[DEBUG] Claude CLI validation error: {str(e)}")
-            return f"❌ {agent_type.upper()} failed: Claude CLI validation failed: {str(e)}"
+            error_msg = self._sanitize_error_message(f"Claude CLI validation failed: {str(e)}")
+            raise FileNotFoundError(error_msg)
         
         cmd = [
             claude_binary,
@@ -678,394 +647,112 @@ class AgentExecutor:
             '--dangerously-skip-permissions'
         ]
         
-        if debug_mode:
-            print(f"[DEBUG] Full command construction: {cmd}")
-            print(f"[DEBUG] Command flags: {cmd[2:]}")
-            print(f"[DEBUG] Working directory for subprocess: {self.outputs_dir}")
-            print(f"[DEBUG] Instructions length: {len(clean_instructions)} characters")
+        
+        # Create subprocess environment without CLAUDE_ORCHESTRATOR_MODE
+        subprocess_env = dict(os.environ)
+        subprocess_env.pop('CLAUDE_ORCHESTRATOR_MODE', None)
         
         try:
-            if debug_mode:
-                print(f"[DEBUG] Starting subprocess.Popen...")
-                print(f"[DEBUG] Current working directory: {os.getcwd()}")
-                print(f"[DEBUG] Target working directory: {self.outputs_dir}")
-                print(f"[DEBUG] Target directory exists: {self.outputs_dir.exists()}")
-                print(f"[DEBUG] Target directory writable: {os.access(self.outputs_dir, os.W_OK) if self.outputs_dir.exists() else False}")
-            
-            # Validate target directory accessibility
-            if not self.outputs_dir.exists():
-                return f"❌ {agent_type.upper()} failed: Target directory does not exist: {self.outputs_dir}"
-            if not os.access(self.outputs_dir, os.W_OK):
-                return f"❌ {agent_type.upper()} failed: Target directory is not writable: {self.outputs_dir}"
-            
-            # Create subprocess environment - IMPORTANT: Do not set CLAUDE_ORCHESTRATOR_MODE
-            # The problem is that setting CLAUDE_ORCHESTRATOR_MODE='headless' interferes with Claude CLI
-            subprocess_env = dict(os.environ)
-            # Remove CLAUDE_ORCHESTRATOR_MODE to prevent interference with Claude CLI
-            subprocess_env.pop('CLAUDE_ORCHESTRATOR_MODE', None)
-            
-            process = subprocess.Popen(
+            result_process = subprocess.run(
                 cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                capture_output=True,
                 text=True,
-                bufsize=1,
-                universal_newlines=True,
+                timeout=timeout_seconds,
                 cwd=str(self.outputs_dir),
                 env=subprocess_env
             )
             
-            if debug_mode:
-                print(f"[DEBUG] Subprocess created successfully with PID: {process.pid}")
-                print(f"[DEBUG] Process poll status: {process.poll()}")
-                # Give process a moment to initialize
-                time.sleep(0.1)
-                print(f"[DEBUG] Process poll status after init: {process.poll()}")
-            
-            # Parse JSON stream for completion
-            if debug_mode:
-                print(f"[DEBUG] Starting JSON stream parsing...")
-            result = self._parse_json_stream(process)
+            exit_code = result_process.returncode
+            stdout_output = result_process.stdout
+            stderr_output = result_process.stderr
             
             if debug_mode:
-                print(f"[DEBUG] JSON stream parsing completed")
-                print(f"[DEBUG] Parse result success: {result.get('success', 'unknown')}")
-                print(f"[DEBUG] Parse result exit_code: {result.get('exit_code', 'unknown')}")
-                print(f"[DEBUG] Parse result error: {result.get('error', 'none')}")
-                print(f"[DEBUG] Process final poll status: {process.poll()}")
+                print(f"[DEBUG] Process completed with exit code: {exit_code}")
+                if stderr_output and exit_code != 0:
+                    print(f"[DEBUG] Error output: {stderr_output[:200]}...")
             
-            # Enhanced stderr capture and process cleanup
-            stderr_output = ""
-            try:
-                # Ensure process has terminated before reading stderr
-                if process.poll() is None:
-                    if debug_mode:
-                        print(f"[DEBUG] Process still running, waiting for termination...")
-                    try:
-                        process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        if debug_mode:
-                            print(f"[DEBUG] Process termination timeout, forcing kill")
-                        process.kill()
-                        process.wait()
-                
-                # Read stderr after process completion
-                if process.stderr:
-                    stderr_output = process.stderr.read()
-                    if debug_mode:
-                        if stderr_output:
-                            print(f"[DEBUG] Stderr output captured ({len(stderr_output)} chars): {stderr_output[:200]}...")
-                        else:
-                            print(f"[DEBUG] Stderr output: <empty>")
-            except Exception as stderr_e:
-                if debug_mode:
-                    print(f"[DEBUG] Failed to read stderr or cleanup process: {str(stderr_e)}")
-                stderr_output = f"Error reading stderr: {str(stderr_e)}"
-            
-            # Enhanced error reporting with comprehensive diagnostics
-            if not result['success']:
-                error_details = []
-                if result.get('error'):
-                    error_details.append(result['error'])
-                if stderr_output:
-                    error_details.append(f"Stderr: {stderr_output[:150]}..." if len(stderr_output) > 150 else f"Stderr: {stderr_output}")
-                if hasattr(process, 'returncode') and process.returncode is not None and process.returncode != 0:
-                    error_details.append(f"Exit code: {process.returncode}")
-                
-                result['error'] = ' | '.join(error_details) if error_details else 'Unknown subprocess failure'
-            
-        except Exception as e:
-            # Ensure cleanup on any exception
-            try:
-                if 'process' in locals() and process:
-                    if process.poll() is None:
-                        if debug_mode:
-                            print(f"[DEBUG] Cleaning up process {process.pid} due to exception")
-                        process.terminate()
-                        try:
-                            process.wait(timeout=3)
-                        except subprocess.TimeoutExpired:
-                            process.kill()
-                            process.wait()
-            except Exception as cleanup_e:
-                if debug_mode:
-                    print(f"[DEBUG] Process cleanup error: {str(cleanup_e)}")
-            
-            if debug_mode:
-                print(f"[DEBUG] Exception in _execute_headless: {str(e)}")
-                print(f"[DEBUG] Exception type: {type(e).__name__}")
-                import traceback
-                print(f"[DEBUG] Exception traceback: {traceback.format_exc()}")
-            
-            # More specific error messages based on exception type
-            if isinstance(e, FileNotFoundError):
-                return f"❌ {agent_type.upper()} failed: Claude CLI not found - ensure Claude CLI is installed and in PATH"
-            elif isinstance(e, PermissionError):
-                return f"❌ {agent_type.upper()} failed: Permission denied - check directory permissions for {self.outputs_dir}"
-            elif isinstance(e, subprocess.SubprocessError):
-                return f"❌ {agent_type.upper()} failed: Subprocess error: {str(e)}"
+            if exit_code == 0:
+                return f"✅ {agent_type.upper()} completed successfully"
             else:
-                return f"❌ {agent_type.upper()} failed: Process execution error: {str(e)}"
-        
-        # Update status file (always works, even without dashboard)
-        self.orchestrator._update_status_file()
-        
-        # Try to update dashboard if it exists, but don't fail
-        try:
-            if hasattr(self.orchestrator, 'agent_config') and self.orchestrator.agent_config.dashboard:
-                self.orchestrator.agent_config.dashboard.update_status(f"{agent_type} completed")
-        except:
-            pass  # Dashboard is optional, ignore any errors
-        
-        if result['success']:
-            success_msg = f"✅ {agent_type.upper()} completed successfully"
-            if debug_mode and 'debug_info' in result:
-                debug_info = result['debug_info']
-                success_msg += f" (processed {debug_info['lines_processed']} lines, {debug_info['json_events_parsed']} JSON events in {debug_info['processing_time']:.1f}s)"
-            return success_msg
-        else:
-            # Ensure we don't show "failed: None" - provide a meaningful default error
-            error_text = result['error'] if result['error'] and str(result['error']).strip() != 'None' else "Claude CLI execution failed - check command syntax and permissions"
-            error_msg = f"❌ {agent_type.upper()} failed: {error_text}"
-            if debug_mode and 'debug_info' in result:
-                debug_info = result['debug_info']
-                error_msg += f" | Debug: {debug_info['lines_processed']} lines, {debug_info['json_events_parsed']} JSON events, {debug_info['result_events_found']} result events"
-            return error_msg
+                error_message = f"Process failed with exit code {exit_code}"
+                if stderr_output and stderr_output.strip():
+                    stderr_truncated = stderr_output.strip()[:400]
+                    if len(stderr_output.strip()) > 400:
+                        stderr_truncated += "..."
+                    error_message += f" | Stderr: {stderr_truncated}"
+                else:
+                    error_message += " | No stderr output available"
+                return f"❌ {agent_type.upper()} failed: {self._sanitize_error_message(error_message)}"
+                
+        except subprocess.TimeoutExpired:
+            error_message = f"Claude CLI execution timed out after {timeout_seconds} seconds. This may indicate a complex task requiring more time, network issues, or Claude CLI hanging. Consider increasing timeout or checking network connectivity."
+            if debug_mode:
+                print(f"[DEBUG] Timeout error: {error_message}")
+            return f"❌ {agent_type.upper()} failed: {error_message}"
+        except subprocess.CalledProcessError as e:
+            error_message = f"Claude CLI process failed with return code {e.returncode}"
+            if e.stderr and e.stderr.strip():
+                stderr_truncated = e.stderr.strip()[:400]
+                if len(e.stderr.strip()) > 400:
+                    stderr_truncated += "..."
+                error_message += f" | Stderr: {stderr_truncated}"
+            return f"❌ {agent_type.upper()} failed: {self._sanitize_error_message(error_message)}"
+        except PermissionError as e:
+            error_message = f"Permission denied accessing {getattr(e, 'filename', 'file')}. Check file permissions or run with appropriate privileges."
+            return f"❌ {agent_type.upper()} failed: {error_message}"
+        except OSError as e:
+            error_message = f"System error: {str(e)}. Check system resources and file system access."
+            return f"❌ {agent_type.upper()} failed: {self._sanitize_error_message(error_message)}"
 
     def _execute_via_interactive(self, agent_type, instructions):
         """Legacy interactive mode - return instructions unchanged for Claude to execute"""
         return instructions
 
+    def _sanitize_error_message(self, message):
+        """Sanitize error message to prevent None values and ensure reasonable length"""
+        if message is None:
+            return "Error occurred with no details available"
+        
+        # Convert to string and handle None values more precisely
+        str_message = str(message)
+        
+        # Handle specific "failed: None" pattern
+        if "failed: None" in str_message:
+            str_message = str_message.replace("failed: None", "failed: Error details unavailable")
+        
+        # Replace standalone None/null values but preserve context
+        import re
+        # Replace "None" when it appears as a standalone value or at word boundaries
+        str_message = re.sub(r'\bNone\b', 'unavailable', str_message)
+        str_message = re.sub(r'\bnull\b', 'unavailable', str_message)
+        
+        # Ensure message is not empty
+        if not str_message.strip():
+            return "Error occurred but no details available"
+        
+        # Truncate to reasonable length
+        if len(str_message) > 500:
+            str_message = str_message[:497] + "..."
+        
+        return str_message.strip()
+
     def _strip_manual_commands(self, instructions):
-        """Remove interactive-mode artifacts while preserving agent logic"""
+        """Remove interactive-mode artifacts"""
         lines = instructions.split('\n')
         cleaned = []
         skip_final_step = False
         
         for line in lines:
-            if 'IMPORTANT: YOU MUST EXECUTE THE' in line:
+            if 'IMPORTANT: YOU MUST EXECUTE THE' in line or 'FINAL STEP:' in line:
                 skip_final_step = True
-            elif 'FINAL STEP:' in line:
-                skip_final_step = True
-            elif skip_final_step and '/clear' in line:
-                continue
-            elif skip_final_step and 'orchestrate.py continue' in line:
+            elif skip_final_step and ('/clear' in line or 'orchestrate.py continue' in line):
                 continue
             else:
                 cleaned.append(line)
                 
-        # Add file marker for completion detection
         cleaned.append("\nWhen complete, also write 'AGENT COMPLETE' to status.txt")
-        
         return '\n'.join(cleaned)
 
-    def _parse_json_stream(self, process):
-        """Parse JSON events from claude CLI output stream with enhanced debugging"""
-        events = []
-        completion_detected = False
-        exit_code = 0
-        error_message = ""
-        start_time = time.time()
-        timeout_seconds = 300
-        lines_processed = 0
-        json_events_parsed = 0
-        result_events_found = 0
-        debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
-        
-        if debug_mode:
-            print(f"[DEBUG] Starting JSON stream parsing for process {process.pid}")
-            print(f"[DEBUG] Timeout configured: {timeout_seconds} seconds")
-            print(f"[DEBUG] Process status at start: {process.poll()}")
-        
-        try:
-            # Read stdout line by line with timeout monitoring
-            if debug_mode:
-                print(f"[DEBUG] Beginning stdout reading loop...")
-            
-            # Add small delay to allow process to start producing output
-            import time
-            time.sleep(0.1)
-            
-            for line in process.stdout:
-                lines_processed += 1
-                elapsed_time = time.time() - start_time
-                
-                # Check timeout during parsing
-                if elapsed_time > timeout_seconds:
-                    process.terminate()
-                    error_message = f"Process execution timed out after {timeout_seconds} seconds during JSON stream parsing"
-                    if debug_mode:
-                        print(f"[DEBUG] Timeout reached: {error_message}")
-                    break
-                
-                # Log all lines in debug mode (not just first 10)
-                if debug_mode:
-                    if lines_processed <= 10:
-                        print(f"[DEBUG] Line {lines_processed}: {line.strip()[:100]}...")
-                    elif lines_processed % 50 == 0:  # Log every 50th line after first 10
-                        print(f"[DEBUG] Line {lines_processed} (periodic): {line.strip()[:100]}...")
-                
-                # Check if line is empty or whitespace
-                stripped_line = line.strip()
-                if not stripped_line:
-                    if debug_mode and lines_processed <= 10:
-                        print(f"[DEBUG] Line {lines_processed}: <empty or whitespace>")
-                    continue
-                
-                try:
-                    event = json.loads(stripped_line)
-                    events.append(event)
-                    json_events_parsed += 1
-                    
-                    event_type = event.get('type', 'unknown')
-                    if debug_mode:
-                        print(f"[DEBUG] Parsed JSON event #{json_events_parsed}: type='{event_type}'")
-                        # Log additional event details for important events
-                        if event_type in ['result', 'sessionEnd', 'complete', 'finished']:
-                            print(f"[DEBUG] Event details: {event}")
-                    
-                    # Enhanced completion detection with multiple signals
-                    if event_type == 'result':
-                        result_events_found += 1
-                        completion_detected = True
-                        exit_code = event.get('exitCode', 0)
-                        if debug_mode:
-                            print(f"[DEBUG] Found result event #{result_events_found}: exitCode={exit_code}")
-                            print(f"[DEBUG] Result event full content: {event}")
-                        break
-                    elif event_type in ['sessionEnd', 'complete', 'finished']:
-                        # Additional completion signals
-                        completion_detected = True
-                        exit_code = event.get('exitCode', 0)
-                        if debug_mode:
-                            print(f"[DEBUG] Found completion event: type='{event_type}', exitCode={exit_code}")
-                            print(f"[DEBUG] Completion event full content: {event}")
-                        break
-                        
-                except json.JSONDecodeError as e:
-                    # Continue parsing despite malformed JSON lines
-                    if debug_mode:
-                        if lines_processed <= 10:
-                            print(f"[DEBUG] JSON decode error on line {lines_processed}: {str(e)[:50]}...")
-                            print(f"[DEBUG] Problematic line content: {stripped_line[:100]}...")
-                        elif json_events_parsed == 0 and lines_processed <= 50:
-                            # Log JSON errors more extensively if no events parsed yet
-                            print(f"[DEBUG] JSON decode error on line {lines_processed} (no events yet): {str(e)[:100]}...")
-                    continue
-                    
-        except Exception as e:
-            error_message = f"Stream parsing error: {str(e)}"
-            if debug_mode:
-                print(f"[DEBUG] Exception during parsing: {error_message}")
-        
-        # Enhanced process completion handling
-        if not error_message:
-            remaining_timeout = max(1, timeout_seconds - (time.time() - start_time))
-            if debug_mode:
-                print(f"[DEBUG] Waiting for process completion with {remaining_timeout:.1f}s timeout")
-            
-            try:
-                exit_code = process.wait(timeout=remaining_timeout)
-                if debug_mode:
-                    print(f"[DEBUG] Process completed with exit code: {exit_code}")
-            except subprocess.TimeoutExpired:
-                process.terminate()
-                error_message = f"Process execution timed out after {timeout_seconds} seconds during process completion wait"
-                if debug_mode:
-                    print(f"[DEBUG] Process completion timeout: {error_message}")
-        
-        # Enhanced fallback detection with better diagnostics
-        if not completion_detected and not error_message:
-            if debug_mode:
-                print(f"[DEBUG] No JSON completion detected, checking status.txt fallback")
-                print(f"[DEBUG] Final parsing summary: {lines_processed} lines, {json_events_parsed} JSON events, {result_events_found} result events")
-            
-            try:
-                status_file = self.outputs_dir / 'status.txt'
-                if debug_mode:
-                    print(f"[DEBUG] Checking status file: {status_file}")
-                    print(f"[DEBUG] Status file exists: {status_file.exists()}")
-                    
-                if status_file.exists():
-                    content = status_file.read_text()
-                    if debug_mode:
-                        print(f"[DEBUG] Status file size: {len(content)} characters")
-                        print(f"[DEBUG] Status file full content: {repr(content)}")
-                    
-                    if 'AGENT COMPLETE' in content:
-                        completion_detected = True
-                        # Use process exit code if available, otherwise assume success
-                        if hasattr(process, 'returncode') and process.returncode is not None:
-                            exit_code = process.returncode
-                        else:
-                            exit_code = 0
-                        if debug_mode:
-                            print(f"[DEBUG] Found 'AGENT COMPLETE' marker in status.txt, exit_code={exit_code}")
-                            print(f"[DEBUG] Status.txt fallback detection: SUCCESS")
-                    else:
-                        if debug_mode:
-                            print(f"[DEBUG] Status file exists but no 'AGENT COMPLETE' marker found")
-                            print(f"[DEBUG] Looking for marker 'AGENT COMPLETE' in content...")
-                            # Check for variations or partial matches
-                            if 'AGENT' in content:
-                                print(f"[DEBUG] Found 'AGENT' in content but not full marker")
-                            if 'COMPLETE' in content:
-                                print(f"[DEBUG] Found 'COMPLETE' in content but not full marker")
-                else:
-                    if debug_mode:
-                        print(f"[DEBUG] Status file {status_file} does not exist")
-                        # Check working directory for any files
-                        try:
-                            dir_contents = list(self.outputs_dir.iterdir())
-                            print(f"[DEBUG] Working directory contents: {dir_contents}")
-                        except Exception as dir_e:
-                            print(f"[DEBUG] Could not list working directory: {str(dir_e)}")
-            except Exception as e:
-                error_msg = f"Status file check error: {str(e)}"
-                if debug_mode:
-                    print(f"[DEBUG] {error_msg}")
-                    import traceback
-                    print(f"[DEBUG] Status file check traceback: {traceback.format_exc()}")
-        
-        # Enhanced error reporting with detailed diagnostics
-        if not completion_detected and not error_message:
-            error_message = (f"No completion signal detected - processed {lines_processed} lines, "
-                           f"parsed {json_events_parsed} JSON events, found {result_events_found} result events. "
-                           f"Process exit code: {getattr(process, 'returncode', 'unknown')}")
-            if debug_mode:
-                print(f"[DEBUG] Setting error message: {error_message}")
-        
-        processing_time = time.time() - start_time
-        result = {
-            'success': completion_detected and exit_code == 0,
-            'exit_code': exit_code,
-            'events': events,
-            'error': error_message if error_message else None,
-            'debug_info': {
-                'lines_processed': lines_processed,
-                'json_events_parsed': json_events_parsed,
-                'result_events_found': result_events_found,
-                'completion_detected': completion_detected,
-                'processing_time': processing_time
-            }
-        }
-        
-        if debug_mode:
-            print(f"[DEBUG] Final result summary:")
-            print(f"[DEBUG]   success: {result['success']}")
-            print(f"[DEBUG]   exit_code: {exit_code}")
-            print(f"[DEBUG]   completion_detected: {completion_detected}")
-            print(f"[DEBUG]   error: {error_message}")
-            print(f"[DEBUG]   lines_processed: {lines_processed}")
-            print(f"[DEBUG]   json_events_parsed: {json_events_parsed}")
-            print(f"[DEBUG]   result_events_found: {result_events_found}")
-            print(f"[DEBUG]   processing_time: {processing_time:.2f}s")
-            print(f"[DEBUG]   total_events: {len(events)}")
-            if events:
-                event_types = [e.get('type', 'unknown') for e in events]
-                print(f"[DEBUG]   event_types: {event_types}")
-        
-        return result
 
 
 class WorkflowConfig:
