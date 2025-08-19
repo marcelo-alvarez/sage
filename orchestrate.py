@@ -988,6 +988,9 @@ class ClaudeCodeOrchestrator:
         # Add meta flag to continue command if in meta mode
         meta_flag = ' meta' if self.meta_mode else ''
         
+        # Add headless flag to continue command if in headless mode
+        headless_flag = ' --headless' if self.headless else ''
+        
         # Replace .agent-outputs/ paths with actual outputs directory for meta mode compatibility
         adjusted_work_section = work_section.replace('.agent-outputs/', f'{self.outputs_dir.name}/')
         
@@ -997,7 +1000,7 @@ class ClaudeCodeOrchestrator:
                                adjusted_work_section + "\n\n" + \
                                "When complete, output: " + completion_phrase + "\n\n" + \
                                "FINAL STEP: Run the claude code command `/clear` to reset context, then run:\n" + \
-                               "python3 ~/.claude-orchestrator/orchestrate.py continue" + meta_flag
+                               "python3 ~/.claude-orchestrator/orchestrate.py continue" + headless_flag + meta_flag
         
         # Write complete instructions to next-command.txt
         self._write_and_execute_command(complete_instructions, "Reset context and start " + agent_name + " agent")
