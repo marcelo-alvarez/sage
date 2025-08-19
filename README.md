@@ -68,7 +68,7 @@ Alternatively, manually add tasks to `.claude/tasks-checklist.md`:
 The orchestrator supports two execution modes:
 
 #### Interactive Mode (Default)
-In interactive mode, Claude shows you instructions to execute manually, giving you full control over each step:
+In interactive mode, Claude shows you instructions to execute manually, giving you full control over each step. Note that interactive mode has known context accumulation issues where conversation history can become large over time, affecting performance.
 
 ```
 /orchestrate start
@@ -86,7 +86,7 @@ AGENT: EXPLORER
 
 You can then read the file and execute the agent instructions manually.
 
-#### Headless Mode
+#### Headless Mode (Experimental)
 For automated execution, add the `--headless` flag:
 
 ```
@@ -111,13 +111,15 @@ Choose your path and the workflow continues based on your decision.
 - Fine-grained control over each step
 - Reviewing agent instructions before execution
 - Working on complex or sensitive tasks
+- Note: Has context accumulation issues that may affect performance over long sessions
 
-**Headless Mode** - Best for:
-- CI/CD automation
+**Headless Mode (Experimental)** - Best for:
+- CI/CD automation (when stabilized)
 - Batch processing multiple tasks
 - Well-tested workflows
 - Background execution
 - Meta-orchestration testing during development
+- Note: Currently experimental - will become the default once stabilized due to better context isolation
 
 **Example Workflow:**
 ```bash
