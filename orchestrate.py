@@ -571,28 +571,28 @@ class AgentFactory:
 
 
 class AgentExecutor:
-    """Handles agent execution in both headless and prompt modes"""
+    """Handles agent execution in both headless and interactive modes"""
     
     def __init__(self, orchestrator, headless=False):
         self.orchestrator = orchestrator
         self.outputs_dir = orchestrator.outputs_dir
         # Check headless flag first, then environment variable, default to interactive
         if headless:
-            self.use_prompt_mode = False
+            self.use_interactive_mode = False
         else:
             mode = os.getenv('CLAUDE_ORCHESTRATOR_MODE', 'prompt')
-            self.use_prompt_mode = (mode == 'prompt')
+            self.use_interactive_mode = (mode == 'prompt')
         
     def execute_agent(self, agent_type, instructions):
         """Routes to appropriate execution method"""
         try:
-            if self.use_prompt_mode:
-                return self._execute_via_prompt(agent_type, instructions)
+            if self.use_interactive_mode:
+                return self._execute_via_interactive(agent_type, instructions)
             else:
                 return self._execute_headless(agent_type, instructions)
         except FileNotFoundError:
-            print("Claude CLI not found, falling back to prompt mode")
-            return self._execute_via_prompt(agent_type, instructions)
+            print("Claude CLI not found, falling back to interactive mode")
+            return self._execute_via_interactive(agent_type, instructions)
         except subprocess.TimeoutExpired:
             return f"❌ {agent_type} timed out after 300 seconds"
 
@@ -621,9 +621,9 @@ class AgentExecutor:
         except Exception as e:
             if debug_mode:
                 print(f"[DEBUG] Directory creation failed: {str(e)}")
-            return f"❌ {agent_type.upper()} failed: Cannot create working directory: {str(e)}"
+            return f"❌ {agent_type.upper()} failed: Cannot create working directory {self.outputs_dir}: {str(e)}"
         
-        # Strip prompt-mode specific commands
+        # Strip interactive-mode specific commands
         clean_instructions = self._strip_manual_commands(instructions)
         
         if debug_mode:
@@ -662,14 +662,14 @@ class AgentExecutor:
                             print(f"[DEBUG] Found Claude CLI at alternative path: {claude_binary}")
                         break
                 if not claude_found:
-                    return f"❌ {agent_type.upper()} failed: Claude CLI not found in PATH or standard locations"
+                    return f"❌ {agent_type.upper()} failed: Claude CLI not found - ensure Claude CLI is installed and in PATH"
             else:
                 if debug_mode:
                     print(f"[DEBUG] Claude CLI found in PATH: {claude_test.stdout.strip()}")
         except Exception as e:
             if debug_mode:
                 print(f"[DEBUG] Claude CLI validation error: {str(e)}")
-            return f"❌ {agent_type.upper()} failed: Claude CLI validation error: {str(e)}"
+            return f"❌ {agent_type.upper()} failed: Claude CLI validation failed: {str(e)}"
         
         cmd = [
             claude_binary,
@@ -698,6 +698,12 @@ class AgentExecutor:
             if not os.access(self.outputs_dir, os.W_OK):
                 return f"❌ {agent_type.upper()} failed: Target directory is not writable: {self.outputs_dir}"
             
+            # Create subprocess environment - IMPORTANT: Do not set CLAUDE_ORCHESTRATOR_MODE
+            # The problem is that setting CLAUDE_ORCHESTRATOR_MODE='headless' interferes with Claude CLI
+            subprocess_env = dict(os.environ)
+            # Remove CLAUDE_ORCHESTRATOR_MODE to prevent interference with Claude CLI
+            subprocess_env.pop('CLAUDE_ORCHESTRATOR_MODE', None)
+            
             process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
@@ -706,8 +712,7 @@ class AgentExecutor:
                 bufsize=1,
                 universal_newlines=True,
                 cwd=str(self.outputs_dir),
-                # Ensure clean environment for subprocess
-                env=dict(os.environ, CLAUDE_ORCHESTRATOR_MODE='headless')
+                env=subprocess_env
             )
             
             if debug_mode:
@@ -794,9 +799,9 @@ class AgentExecutor:
             
             # More specific error messages based on exception type
             if isinstance(e, FileNotFoundError):
-                return f"❌ {agent_type.upper()} failed: Command not found - ensure Claude CLI is installed and in PATH"
+                return f"❌ {agent_type.upper()} failed: Claude CLI not found - ensure Claude CLI is installed and in PATH"
             elif isinstance(e, PermissionError):
-                return f"❌ {agent_type.upper()} failed: Permission denied - check directory permissions"
+                return f"❌ {agent_type.upper()} failed: Permission denied - check directory permissions for {self.outputs_dir}"
             elif isinstance(e, subprocess.SubprocessError):
                 return f"❌ {agent_type.upper()} failed: Subprocess error: {str(e)}"
             else:
@@ -819,18 +824,20 @@ class AgentExecutor:
                 success_msg += f" (processed {debug_info['lines_processed']} lines, {debug_info['json_events_parsed']} JSON events in {debug_info['processing_time']:.1f}s)"
             return success_msg
         else:
-            error_msg = f"❌ {agent_type.upper()} failed: {result['error']}"
+            # Ensure we don't show "failed: None" - provide a meaningful default error
+            error_text = result['error'] if result['error'] and str(result['error']).strip() != 'None' else "Claude CLI execution failed - check command syntax and permissions"
+            error_msg = f"❌ {agent_type.upper()} failed: {error_text}"
             if debug_mode and 'debug_info' in result:
                 debug_info = result['debug_info']
                 error_msg += f" | Debug: {debug_info['lines_processed']} lines, {debug_info['json_events_parsed']} JSON events, {debug_info['result_events_found']} result events"
             return error_msg
 
-    def _execute_via_prompt(self, agent_type, instructions):
-        """Legacy prompt mode - return instructions unchanged for Claude to execute"""
+    def _execute_via_interactive(self, agent_type, instructions):
+        """Legacy interactive mode - return instructions unchanged for Claude to execute"""
         return instructions
 
     def _strip_manual_commands(self, instructions):
-        """Remove prompt-mode artifacts while preserving agent logic"""
+        """Remove interactive-mode artifacts while preserving agent logic"""
         lines = instructions.split('\n')
         cleaned = []
         skip_final_step = False
@@ -875,6 +882,10 @@ class AgentExecutor:
             if debug_mode:
                 print(f"[DEBUG] Beginning stdout reading loop...")
             
+            # Add small delay to allow process to start producing output
+            import time
+            time.sleep(0.1)
+            
             for line in process.stdout:
                 lines_processed += 1
                 elapsed_time = time.time() - start_time
@@ -882,7 +893,7 @@ class AgentExecutor:
                 # Check timeout during parsing
                 if elapsed_time > timeout_seconds:
                     process.terminate()
-                    error_message = f"Process timed out after {timeout_seconds} seconds (processed {lines_processed} lines, {json_events_parsed} JSON events)"
+                    error_message = f"Process execution timed out after {timeout_seconds} seconds during JSON stream parsing"
                     if debug_mode:
                         print(f"[DEBUG] Timeout reached: {error_message}")
                     break
@@ -959,7 +970,7 @@ class AgentExecutor:
                     print(f"[DEBUG] Process completed with exit code: {exit_code}")
             except subprocess.TimeoutExpired:
                 process.terminate()
-                error_message = f"Process completion timeout after {timeout_seconds}s (processed {lines_processed} lines, {json_events_parsed} JSON events, {result_events_found} result events)"
+                error_message = f"Process execution timed out after {timeout_seconds} seconds during process completion wait"
                 if debug_mode:
                     print(f"[DEBUG] Process completion timeout: {error_message}")
         
@@ -1188,7 +1199,7 @@ class ClaudeCodeOrchestrator:
         # Initialize agent factory with configuration
         self.agent_factory = AgentFactory(self, self.agent_config)
         
-        # Initialize agent executor for headless/prompt mode execution
+        # Initialize agent executor for headless/interactive mode execution
         self.agent_executor = AgentExecutor(self, headless=self.headless)
         
         # Dashboard is initialized through AgentConfig if enabled
