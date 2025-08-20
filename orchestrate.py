@@ -1241,7 +1241,7 @@ class ClaudeCodeOrchestrator:
         """Show clean workflow header with task description"""
         task = self._get_current_task()
         if task:
-            print(f"CLAUDE CODE ORCHESTRATOR RUNNING ON TASK: {task}")
+            print(f"\nClaude Code Orchestrator running on task: {task}")
             print()
     
     def _show_agent_progress(self, agent_type, status="running"):
