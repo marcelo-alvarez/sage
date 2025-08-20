@@ -1234,6 +1234,8 @@ class ClaudeCodeOrchestrator:
         
         # Interactive mode: single agent execution
         agent_type, instructions = self._prepare_work_agent(next_agent)
+        if agent_type in ["complete", "error"]:
+            return agent_type, instructions
         result = self.agent_executor.execute_agent(agent_type, instructions)
         return agent_type, result
 
@@ -1346,6 +1348,12 @@ class ClaudeCodeOrchestrator:
             agent_type, instructions = self._prepare_work_agent(next_agent)
             if agent_type == "error":
                 return agent_type, instructions
+            elif agent_type == "complete":
+                # No more tasks to process
+                debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+                if not debug_mode:
+                    print("✓ ALL TASKS COMPLETED SUCCESSFULLY")
+                return agent_type, instructions
             
             # Show agent progress
             self._show_agent_progress(agent_type, "running")
@@ -1373,7 +1381,7 @@ class ClaudeCodeOrchestrator:
         if agent_type == "explorer":
             task = self._get_current_task()
             if not task:
-                return "error", "No task found in tasks-checklist.md"
+                return "complete", "All tasks have been completed successfully! No more tasks in checklist."
             return self.agent_factory.create_agent("explorer", task=task)
             
         elif agent_type == "criteria_gate":
