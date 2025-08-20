@@ -647,8 +647,8 @@ class AgentExecutor:
             '--dangerously-skip-permissions'
         ]
         
-        # Show the actual command being executed
-        print(f"🔄 Executing: {claude_binary} -p '<instructions>' --output-format json --dangerously-skip-permissions")
+        # Show the actual command being executed with full instructions
+        print(f"🔄 Executing: {claude_binary} -p '{clean_instructions}' --output-format json --dangerously-skip-permissions")
         
         # Create subprocess environment without CLAUDE_ORCHESTRATOR_MODE
         subprocess_env = dict(os.environ)
@@ -763,7 +763,7 @@ class WorkflowConfig:
     
     def __init__(self, config_path: Path = None):
         self.config_path = config_path or Path('.claude/workflow-config.json')
-        self.sequence = ["explorer", "criteria_gate", "planner", "coder", "scribe", "verifier", "completion_gate"]
+        self.sequence = ["explorer", "criteria_gate", "planner", "coder", "verifier", "scribe", "completion_gate"]
         self.gates = {
             "criteria": {
                 "after": "explorer",
@@ -829,7 +829,7 @@ class WorkflowConfig:
         elif agent_type == "coder":
             return "changes.md"
         elif agent_type == "scribe":
-            return "documentation.md"
+            return "orchestrator-log.md"
         elif agent_type == "verifier":
             return "verification.md"
         else:
@@ -1001,9 +1001,8 @@ class ClaudeCodeOrchestrator:
             work_file = self.outputs_dir / (agent_name + "-instructions.md")
             work_file.write_text(clean_instructions)
             
-            # In headless mode, return summary since instructions are handled automatically
-            return "AGENT ACTIVATED: " + agent_name.upper() + "\n\n" + \
-                   f"Complete instructions written to {self.outputs_dir}/next-command.txt"
+            # In headless mode, return the actual clean instructions for execution
+            return clean_instructions
         
         # Interactive mode: include manual execution steps
         # Add meta flag to continue command if in meta mode
@@ -1130,6 +1129,7 @@ class ClaudeCodeOrchestrator:
                 "plan.md": (self.outputs_dir / "plan.md").exists(),
                 "changes.md": (self.outputs_dir / "changes.md").exists(),
                 "documentation.md": (self.outputs_dir / "documentation.md").exists(),
+                "orchestrator-log.md": (self.outputs_dir / "orchestrator-log.md").exists(),
                 "verification.md": (self.outputs_dir / "verification.md").exists(),
                 "completion-approved.md": (self.outputs_dir / "completion-approved.md").exists()
             }
