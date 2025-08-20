@@ -1225,6 +1225,11 @@ class ClaudeCodeOrchestrator:
         
         # In headless mode, use workflow loop for automation
         if self.headless:
+            # Show workflow header only once at the start of headless execution
+            debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+            if not debug_mode and not hasattr(self, '_header_shown'):
+                self._show_workflow_header()
+                self._header_shown = True
             return self._execute_headless_workflow_loop()
         
         # Interactive mode: single agent execution
@@ -1236,10 +1241,7 @@ class ClaudeCodeOrchestrator:
         """Show clean workflow header with task description"""
         task = self._get_current_task()
         if task:
-            print("=" * 80)
-            print("CLAUDE CODE ORCHESTRATOR RUNNING ON TASK:")
-            print(f"{task}")
-            print("=" * 80)
+            print(f"CLAUDE CODE ORCHESTRATOR RUNNING ON TASK: {task}")
             print()
     
     def _show_agent_progress(self, agent_type, status="running"):
@@ -1292,9 +1294,6 @@ class ClaudeCodeOrchestrator:
         max_iterations = 10  # Safety limit to prevent infinite loops
         iteration = 0
         
-        # Show workflow header
-        self._show_workflow_header()
-        
         while iteration < max_iterations:
             iteration += 1
             
@@ -1317,9 +1316,7 @@ class ClaudeCodeOrchestrator:
                 self._update_status_file()
                 debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
                 if not debug_mode:
-                    print("\n" + "="*80)
                     print("✓ WORKFLOW COMPLETED SUCCESSFULLY")
-                    print("="*80)
                 return "complete", "All agents have completed successfully. Task marked complete."
             
             # Check if this is a gate - handle interactively
@@ -1407,15 +1404,19 @@ class ClaudeCodeOrchestrator:
                     criteria_text = '\n'.join(criteria_section)
                     criteria_file = self.outputs_dir / "success-criteria.md"
                     criteria_file.write_text("# Approved Success Criteria\n\n" + criteria_text + "\n")
-                    print("Unsupervised mode: Auto-approved criteria")
+                    debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+                    if debug_mode:
+                        print("Unsupervised mode: Auto-approved criteria")
                     
                     # Continue to next agent
                     agent, instructions = self.get_continue_agent()
-                    print("\n" + "="*60)
-                    print("AUTO-CONTINUING TO " + agent.upper())
-                    print("="*60)
-                    print(instructions)
-                    print("="*60)
+                    debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+                    if debug_mode:
+                        print("\n" + "="*60)
+                        print("AUTO-CONTINUING TO " + agent.upper())
+                        print("="*60)
+                        print(instructions)
+                        print("="*60)
                     return agent, instructions
             
             exploration_content = exploration_file.read_text()
@@ -1451,7 +1452,9 @@ class ClaudeCodeOrchestrator:
                 verification_lower = verification_content.lower()
                 if "recommend approval" in verification_lower or "ready for approval" in verification_lower or "approve" in verification_lower:
                     # Auto-approve completion in unsupervised mode
-                    print("Unsupervised mode: Auto-approved completion")
+                    debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+                    if debug_mode:
+                        print("Unsupervised mode: Auto-approved completion")
                     self.approve_completion()
                     return "complete", "Task automatically completed in unsupervised mode"
             
