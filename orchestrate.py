@@ -610,8 +610,8 @@ class AgentExecutor:
         except Exception as e:
             return f"❌ {agent_type.upper()} failed: Cannot create working directory {self.outputs_dir}: {str(e)}"
         
-        # Strip interactive-mode specific commands
-        clean_instructions = self._strip_manual_commands(instructions)
+        # Instructions are now clean from generation (no stripping needed)
+        clean_instructions = instructions
         
         
         # Validate Claude CLI availability
@@ -736,22 +736,17 @@ class AgentExecutor:
         
         return str_message.strip()
 
-    def _strip_manual_commands(self, instructions):
-        """Remove interactive-mode artifacts"""
-        lines = instructions.split('\n')
-        cleaned = []
-        skip_final_step = False
-        
-        for line in lines:
-            if 'IMPORTANT: YOU MUST EXECUTE THE' in line or 'FINAL STEP:' in line:
-                skip_final_step = True
-            elif skip_final_step and ('/clear' in line or 'orchestrate.py continue' in line):
-                continue
-            else:
-                cleaned.append(line)
-                
-        cleaned.append("\nWhen complete, also write 'AGENT COMPLETE' to status.txt")
-        return '\n'.join(cleaned)
+
+    def _process_instructions_internally(self, agent_type, instructions):
+        """Process agent instructions by executing real Claude CLI processes"""
+        try:
+            # Execute agent using the real headless execution method
+            return self._execute_headless(agent_type, instructions)
+            
+        except Exception as e:
+            return f"❌ {agent_type.upper()} failed during execution: {str(e)}"
+    
+    
 
 
 
@@ -985,6 +980,23 @@ class ClaudeCodeOrchestrator:
     def _build_agent_instructions(self, agent_name, primary_objective, work_section, completion_phrase):
         """Build standardized agent instructions with primary objective framing"""
         
+        # Check if in headless mode and use appropriate instruction builder
+        if self.headless:
+            # In headless mode, use clean instructions without interactive artifacts
+            clean_instructions = self._build_headless_agent_instructions(agent_name, primary_objective, work_section, completion_phrase)
+            
+            # Write clean instructions to next-command.txt
+            self._write_and_execute_command(clean_instructions, "Reset context and start " + agent_name + " agent")
+            
+            # Also write to agent-specific file for reference
+            work_file = self.outputs_dir / (agent_name + "-instructions.md")
+            work_file.write_text(clean_instructions)
+            
+            # In headless mode, return summary since instructions are handled automatically
+            return "AGENT ACTIVATED: " + agent_name.upper() + "\n\n" + \
+                   f"Complete instructions written to {self.outputs_dir}/next-command.txt"
+        
+        # Interactive mode: include manual execution steps
         # Add meta flag to continue command if in meta mode
         meta_flag = ' meta' if self.meta_mode else ''
         
@@ -1009,8 +1021,21 @@ class ClaudeCodeOrchestrator:
         work_file = self.outputs_dir / (agent_name + "-instructions.md")
         work_file.write_text(complete_instructions)
         
-        return "AGENT ACTIVATED: " + agent_name.upper() + "\n\n" + \
-               f"Complete instructions written to {self.outputs_dir}/next-command.txt"
+        # In interactive mode, return the actual instructions for Claude to execute
+        return complete_instructions
+
+    def _build_headless_agent_instructions(self, agent_name, primary_objective, work_section, completion_phrase):
+        """Build headless agent instructions without interactive artifacts"""
+        
+        # Replace .agent-outputs/ paths with actual outputs directory for meta mode compatibility
+        adjusted_work_section = work_section.replace('.agent-outputs/', f'{self.outputs_dir.name}/')
+        
+        # Build clean instructions without interactive commands
+        headless_instructions = "You are now the " + agent_name.upper() + " agent.\n\n" + \
+                               adjusted_work_section + "\n\n" + \
+                               "When complete, output: " + completion_phrase
+        
+        return headless_instructions
 
     def _build_gate_instructions(self, gate_name, content, options):
         """Build standardized gate instructions with improved visibility"""
@@ -1072,10 +1097,64 @@ class ClaudeCodeOrchestrator:
         # Update status to reflect current workflow state
         self._update_status_file()
         
-        # Prepare the next agent using dynamic preparation
+        # In headless mode, use workflow loop for automation
+        if self.headless:
+            return self._execute_headless_workflow_loop()
+        
+        # Interactive mode: single agent execution
         agent_type, instructions = self._prepare_work_agent(next_agent)
         result = self.agent_executor.execute_agent(agent_type, instructions)
         return agent_type, result
+
+    def _execute_headless_workflow_loop(self):
+        """Execute complete headless workflow until completion or gate"""
+        max_iterations = 10  # Safety limit to prevent infinite loops
+        iteration = 0
+        
+        while iteration < max_iterations:
+            iteration += 1
+            
+            # Check what outputs exist to determine next phase
+            current_outputs = {
+                "exploration.md": (self.outputs_dir / "exploration.md").exists(),
+                "success-criteria.md": (self.outputs_dir / "success-criteria.md").exists(),
+                "plan.md": (self.outputs_dir / "plan.md").exists(),
+                "changes.md": (self.outputs_dir / "changes.md").exists(),
+                "documentation.md": (self.outputs_dir / "documentation.md").exists(),
+                "verification.md": (self.outputs_dir / "verification.md").exists(),
+                "completion-approved.md": (self.outputs_dir / "completion-approved.md").exists()
+            }
+            
+            # Use workflow configuration to determine next agent
+            next_agent = self.workflow_config.get_next_agent(current_outputs)
+            
+            if next_agent is None:
+                # Update status before returning completion
+                self._update_status_file()
+                return "complete", "All agents have completed successfully. Task marked complete."
+            
+            # Check if this is a gate - gates require human intervention
+            if next_agent.endswith('_gate'):
+                # Prepare gate and return control to human
+                agent_type, instructions = self._prepare_work_agent(next_agent)
+                return agent_type, instructions
+            
+            # Update status to reflect current workflow state
+            self._update_status_file()
+            
+            # Prepare and execute regular work agent internally
+            agent_type, instructions = self._prepare_work_agent(next_agent)
+            if agent_type == "error":
+                return agent_type, instructions
+                
+            # Execute agent instructions using real Claude CLI processes
+            result = self.agent_executor._execute_headless(agent_type, instructions)
+            
+            if not result.startswith("✅"):
+                # Agent failed, return error
+                return agent_type, result
+                
+        return "error", f"Headless workflow exceeded maximum iterations ({max_iterations})"
 
     def _prepare_work_agent(self, agent_type: str):
         """Dynamic agent preparation based on agent type"""
@@ -1101,7 +1180,7 @@ class ClaudeCodeOrchestrator:
                 in_criteria = False
                 
                 for line in lines:
-                    if "## Suggested Success Criteria" in line:
+                    if "## Testable Success Criteria" in line:
                         in_criteria = True
                         continue
                     elif in_criteria and line.strip().startswith('##') and not line.strip().startswith('###'):
@@ -1133,7 +1212,7 @@ class ClaudeCodeOrchestrator:
             in_criteria = False
             
             for line in lines:
-                if "## Suggested Success Criteria" in line:
+                if "## Testable Success Criteria" in line:
                     in_criteria = True
                     continue
                 elif in_criteria and line.strip().startswith('##') and not line.strip().startswith('###'):
@@ -1340,7 +1419,7 @@ class ClaudeCodeOrchestrator:
             in_criteria = False
             
             for line in lines:
-                if "## Suggested Success Criteria" in line:
+                if "## Testable Success Criteria" in line:
                     in_criteria = True
                     continue
                 elif in_criteria and line.strip().startswith('##') and not line.strip().startswith('###'):
