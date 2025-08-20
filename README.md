@@ -99,7 +99,11 @@ For step-by-step control within Claude Code conversations:
 /orchestrate status         # Check progress
 ```
 
-### Execution Modes
+### Web UI (Coming Soon)
+
+A web-based user interface for the orchestrator is in development to provide a more intuitive way to manage workflows and tasks.
+
+## Execution Modes
 
 #### Headless Mode (Default for Command Line)
 - **How it works**: Executes agents automatically using `claude -p` until reaching gates
