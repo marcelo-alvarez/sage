@@ -1716,7 +1716,10 @@ class ClaudeCodeOrchestrator:
             "changes.md", 
             "verification.md",
             "completion-approved.md",
-            "criteria-modification-request.md"
+            "criteria-modification-request.md",
+            "pending-criteria-gate.md",
+            "pending-completion-gate.md",
+            "orchestrator-log.md"
         ]
         
         cleaned_count = 0
