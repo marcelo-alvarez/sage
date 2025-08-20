@@ -1729,8 +1729,8 @@ class ClaudeCodeOrchestrator:
             "completion-approved.md",
             "criteria-modification-request.md",
             "pending-criteria-gate.md",
-            "pending-completion-gate.md",
-            "orchestrator-log.md"
+            "pending-completion-gate.md"
+            # Note: orchestrator-log.md is preserved across cycles for historical record
         ]
         
         cleaned_count = 0
