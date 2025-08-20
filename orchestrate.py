@@ -213,7 +213,9 @@ class AgentConfig:
                                 if agent_type not in self.agents:
                                     self.agents[agent_type] = template
                                 else:
-                                    print(f"Info: Skipping template {agent_type} - already loaded from config")
+                                    debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+                                    if debug_mode:
+                                        print(f"Info: Skipping template {agent_type} - already loaded from config")
                             else:
                                 print(f"Warning: Template validation failed for {agent_type}")
                         except Exception as e:
@@ -284,7 +286,9 @@ class AgentConfig:
             
             # Check for forbidden actions section (good practice but not required)
             if 'forbidden' not in work_section:
-                print(f"Info: Template for {template.name} doesn't specify forbidden actions")
+                debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+                if debug_mode:
+                    print(f"Info: Template for {template.name} doesn't specify forbidden actions")
             
             # Validate completion phrase format
             if template.completion_phrase.upper() != template.completion_phrase:
@@ -649,8 +653,9 @@ class AgentExecutor:
             '--dangerously-skip-permissions'
         ]
         
-        # Show the actual command being executed with full instructions
-        print(f"🔄 Executing: {claude_binary} -p '{clean_instructions}' --output-format json --dangerously-skip-permissions")
+        # Show command execution details only in debug mode
+        if debug_mode:
+            print(f"🔄 Executing: {claude_binary} -p '{clean_instructions}' --output-format json --dangerously-skip-permissions")
         
         # Create subprocess environment without CLAUDE_ORCHESTRATOR_MODE
         subprocess_env = dict(os.environ)
@@ -670,11 +675,12 @@ class AgentExecutor:
             stdout_output = result_process.stdout
             stderr_output = result_process.stderr
             
-            # Show captured output
-            if stdout_output and stdout_output.strip():
-                print(f"📤 Claude output: {stdout_output.strip()}")
-            if stderr_output and stderr_output.strip():
-                print(f"⚠️  Claude stderr: {stderr_output.strip()}")
+            # Show captured output only in debug mode
+            if debug_mode:
+                if stdout_output and stdout_output.strip():
+                    print(f"📤 Claude output: {stdout_output.strip()}")
+                if stderr_output and stderr_output.strip():
+                    print(f"⚠️  Claude stderr: {stderr_output.strip()}")
             
             if debug_mode:
                 print(f"[DEBUG] Process completed with exit code: {exit_code}")
@@ -1093,9 +1099,24 @@ class ClaudeCodeOrchestrator:
 
     def _handle_interactive_gate(self, gate_type, gate_content):
         """Handle interactive gate input in persistent mode"""
-        print("\n" + "="*60)
-        print(gate_content)
-        print("="*60)
+        debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+        
+        if debug_mode:
+            print("\n" + "="*60)
+            print(gate_content)
+            print("="*60)
+        else:
+            # Clean gate display for normal mode
+            print(f"\n🚪 {gate_type.upper()} GATE: Human Review Required")
+            if gate_type == "criteria":
+                print("Review success criteria and choose:")
+            elif gate_type == "completion":
+                print("Review verification results and choose:")
+            
+            gate_options = GATE_OPTIONS.get(gate_type, [])
+            for option in gate_options:
+                print(f"  • {option}")
+            print()
         
         gate_options = GATE_OPTIONS.get(gate_type, [])
         valid_commands = [opt.split(' - ')[0] for opt in gate_options]
@@ -1211,10 +1232,68 @@ class ClaudeCodeOrchestrator:
         result = self.agent_executor.execute_agent(agent_type, instructions)
         return agent_type, result
 
+    def _show_workflow_header(self):
+        """Show clean workflow header with task description"""
+        task = self._get_current_task()
+        if task:
+            print("=" * 80)
+            print("CLAUDE CODE ORCHESTRATOR RUNNING ON TASK:")
+            print(f"{task}")
+            print("=" * 80)
+            print()
+    
+    def _show_agent_progress(self, agent_type, status="running"):
+        """Show clean progress indicator for current agent"""
+        debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+        
+        if not debug_mode:
+            agent_display = {
+                "explorer": "Exploring",
+                "planner": "Planning", 
+                "coder": "Coding",
+                "verifier": "Verifying",
+                "scribe": "Documenting"
+            }
+            
+            if agent_type in agent_display:
+                if status == "running":
+                    print(f"{agent_display[agent_type]}...")
+                elif status == "complete":
+                    print(f"✓ {agent_display[agent_type]} complete")
+                elif status == "failed":
+                    print(f"✗ {agent_display[agent_type]} failed")
+
+    def _show_verification_status(self):
+        """Show verification pass/fail status"""
+        debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+        
+        if not debug_mode:
+            verification_file = self.outputs_dir / "verification.md"
+            if verification_file.exists():
+                try:
+                    content = verification_file.read_text()
+                    # Look for overall status line
+                    for line in content.split('\n'):
+                        if "Overall Status:" in line:
+                            if "PASS" in line.upper():
+                                print("✓ PASS - see verification.md for details")
+                            elif "FAIL" in line.upper():
+                                print("✗ FAIL - see verification.md for details")
+                            else:
+                                print("? NEEDS_REVIEW - see verification.md for details")
+                            break
+                    else:
+                        print("? Status unclear - see verification.md for details")
+                except Exception:
+                    print("? Could not read verification status")
+
     def _execute_headless_workflow_loop(self):
         """Execute complete headless workflow until completion or gate"""
         max_iterations = 10  # Safety limit to prevent infinite loops
         iteration = 0
+        
+        # Show workflow header
+        self._show_workflow_header()
         
         while iteration < max_iterations:
             iteration += 1
@@ -1236,6 +1315,11 @@ class ClaudeCodeOrchestrator:
             if next_agent is None:
                 # Update status before returning completion
                 self._update_status_file()
+                debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+                if not debug_mode:
+                    print("\n" + "="*80)
+                    print("✓ WORKFLOW COMPLETED SUCCESSFULLY")
+                    print("="*80)
                 return "complete", "All agents have completed successfully. Task marked complete."
             
             # Check if this is a gate - handle interactively
@@ -1265,13 +1349,24 @@ class ClaudeCodeOrchestrator:
             agent_type, instructions = self._prepare_work_agent(next_agent)
             if agent_type == "error":
                 return agent_type, instructions
+            
+            # Show agent progress
+            self._show_agent_progress(agent_type, "running")
                 
             # Execute agent instructions using real Claude CLI processes
             result = self.agent_executor._execute_headless(agent_type, instructions)
             
             if not result.startswith("✅"):
-                # Agent failed, return error
+                # Agent failed
+                self._show_agent_progress(agent_type, "failed")
                 return agent_type, result
+            else:
+                # Agent succeeded
+                self._show_agent_progress(agent_type, "complete")
+                
+                # Special handling for verifier to show pass/fail status
+                if agent_type == "verifier":
+                    self._show_verification_status()
                 
         return "error", f"Headless workflow exceeded maximum iterations ({max_iterations})"
 
