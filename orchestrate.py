@@ -1089,7 +1089,7 @@ class ClaudeCodeOrchestrator:
             "success-criteria.md": (self.outputs_dir / "success-criteria.md").exists(),
             "plan.md": (self.outputs_dir / "plan.md").exists(),
             "changes.md": (self.outputs_dir / "changes.md").exists(),
-            "documentation.md": (self.outputs_dir / "documentation.md").exists(),
+            "orchestrator-log.md": (self.outputs_dir / "orchestrator-log.md").exists(),
             "verification.md": (self.outputs_dir / "verification.md").exists(),
             "completion-approved.md": (self.outputs_dir / "completion-approved.md").exists()
         }
@@ -1128,7 +1128,6 @@ class ClaudeCodeOrchestrator:
                 "success-criteria.md": (self.outputs_dir / "success-criteria.md").exists(),
                 "plan.md": (self.outputs_dir / "plan.md").exists(),
                 "changes.md": (self.outputs_dir / "changes.md").exists(),
-                "documentation.md": (self.outputs_dir / "documentation.md").exists(),
                 "orchestrator-log.md": (self.outputs_dir / "orchestrator-log.md").exists(),
                 "verification.md": (self.outputs_dir / "verification.md").exists(),
                 "completion-approved.md": (self.outputs_dir / "completion-approved.md").exists()
