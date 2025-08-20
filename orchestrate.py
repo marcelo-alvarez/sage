@@ -799,7 +799,7 @@ class WorkflowConfig:
             except Exception as e:
                 print(f"Warning: Failed to load workflow config: {e}")
                 
-    def get_next_agent(self, current_outputs: Dict[str, bool]) -> Optional[str]:
+    def get_next_agent(self, current_outputs: Dict[str, bool], outputs_dir: Path = None) -> Optional[str]:
         """Get next agent in sequence based on current outputs"""
         for agent_type in self.sequence:
             if agent_type.endswith('_gate'):
@@ -817,8 +817,25 @@ class WorkflowConfig:
             else:
                 # Regular agent - check if output file exists
                 output_file = self._get_output_file(agent_type)
-                if not current_outputs.get(output_file, False):
-                    return agent_type
+                
+                # Special case for scribe: run after verifier if verification is newer than last scribe run
+                if agent_type == "scribe" and outputs_dir:
+                    if current_outputs.get("verification.md", False):
+                        verification_file = outputs_dir / "verification.md"
+                        scribe_file = outputs_dir / "orchestrator-log.md"
+                        
+                        # Run scribe if orchestrator-log doesn't exist or verification is newer
+                        if not scribe_file.exists():
+                            return agent_type
+                        elif verification_file.exists():
+                            verification_time = verification_file.stat().st_mtime
+                            scribe_time = scribe_file.stat().st_mtime
+                            if verification_time > scribe_time:
+                                return agent_type
+                else:
+                    # Normal agents - check if output file exists
+                    if not current_outputs.get(output_file, False):
+                        return agent_type
                     
         return None  # All complete
         
@@ -1175,7 +1192,7 @@ class ClaudeCodeOrchestrator:
         }
         
         # Use workflow configuration to determine next agent
-        next_agent = self.workflow_config.get_next_agent(current_outputs)
+        next_agent = self.workflow_config.get_next_agent(current_outputs, self.outputs_dir)
         
         if next_agent is None:
             # Update status before returning completion
@@ -1214,7 +1231,7 @@ class ClaudeCodeOrchestrator:
             }
             
             # Use workflow configuration to determine next agent
-            next_agent = self.workflow_config.get_next_agent(current_outputs)
+            next_agent = self.workflow_config.get_next_agent(current_outputs, self.outputs_dir)
             
             if next_agent is None:
                 # Update status before returning completion
