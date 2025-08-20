@@ -647,6 +647,8 @@ class AgentExecutor:
             '--dangerously-skip-permissions'
         ]
         
+        # Show the actual command being executed
+        print(f"🔄 Executing: {claude_binary} -p '<instructions>' --output-format json --dangerously-skip-permissions")
         
         # Create subprocess environment without CLAUDE_ORCHESTRATOR_MODE
         subprocess_env = dict(os.environ)
@@ -665,6 +667,12 @@ class AgentExecutor:
             exit_code = result_process.returncode
             stdout_output = result_process.stdout
             stderr_output = result_process.stderr
+            
+            # Show captured output
+            if stdout_output and stdout_output.strip():
+                print(f"📤 Claude output: {stdout_output.strip()}")
+            if stderr_output and stderr_output.strip():
+                print(f"⚠️  Claude stderr: {stderr_output.strip()}")
             
             if debug_mode:
                 print(f"[DEBUG] Process completed with exit code: {exit_code}")
@@ -985,8 +993,9 @@ class ClaudeCodeOrchestrator:
             # In headless mode, use clean instructions without interactive artifacts
             clean_instructions = self._build_headless_agent_instructions(agent_name, primary_objective, work_section, completion_phrase)
             
-            # Write clean instructions to next-command.txt
-            self._write_and_execute_command(clean_instructions, "Reset context and start " + agent_name + " agent")
+            # In headless mode, only write to files - no need to print instructions since they're passed via -p
+            command_file = self.outputs_dir / "next-command.txt"
+            command_file.write_text(clean_instructions)
             
             # Also write to agent-specific file for reference
             work_file = self.outputs_dir / (agent_name + "-instructions.md")
