@@ -6,6 +6,7 @@ Implements configurable agent types and workflow sequences
 """
 
 import json
+import os
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional, Tuple, List
@@ -138,7 +139,7 @@ class AgentRole:
 class AgentConfig:
     """Configuration manager for agent definitions"""
     
-    def __init__(self, config_path: Path = None, enable_dashboard: bool = True, dashboard_port: int = 5678, api_port: int = 8000, no_browser: bool = False):
+    def __init__(self, config_path: Path = None, enable_dashboard: bool = False, dashboard_port: int = 5678, api_port: int = 8000, no_browser: bool = False):
         self.config_path = config_path or Path('.claude/agent-config.json')
         self.templates_dir = Path('templates/agents')
         self.agents = {}
@@ -212,7 +213,9 @@ class AgentConfig:
                                 if agent_type not in self.agents:
                                     self.agents[agent_type] = template
                                 else:
-                                    print(f"Info: Skipping template {agent_type} - already loaded from config")
+                                    debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+                                    if debug_mode:
+                                        print(f"Info: Skipping template {agent_type} - already loaded from config")
                             else:
                                 print(f"Warning: Template validation failed for {agent_type}")
                         except Exception as e:
@@ -283,7 +286,9 @@ class AgentConfig:
             
             # Check for forbidden actions section (good practice but not required)
             if 'forbidden' not in work_section:
-                print(f"Info: Template for {template.name} doesn't specify forbidden actions")
+                debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+                if debug_mode:
+                    print(f"Info: Template for {template.name} doesn't specify forbidden actions")
             
             # Validate completion phrase format
             if template.completion_phrase.upper() != template.completion_phrase:
@@ -437,17 +442,19 @@ class AgentConfig:
 # Legacy gate options - can be made configurable in future
 GATE_OPTIONS = {
     "criteria": [
-        "Execute the slash-command `/orchestrate approve-criteria` - Accept and continue",
-        "Execute the slash-command `/orchestrate modify-criteria` - Modify criteria first",  
-        "Execute the slash-command `/orchestrate retry-explorer` - Restart exploration"
+        "approve-criteria - Accept and continue",
+        "modify-criteria - Modify criteria first",  
+        "retry-explorer - Restart exploration",
+        "exit - Exit and resume from this gate later"
     ],
     
     "completion": [
-        "Execute the slash-command `/orchestrate approve-completion` - Mark complete",
-        "Execute the slash-command `/orchestrate retry-explorer` - Restart all",
-        "Execute the slash-command `/orchestrate retry-from-planner` - Restart from Planner",  
-        "Execute the slash-command `/orchestrate retry-from-coder` - Restart from Coder",
-        "Execute the slash-command `/orchestrate retry-from-verifier` - Re-verify only"
+        "approve-completion - Mark complete",
+        "retry-explorer - Restart all",
+        "retry-from-planner - Restart from Planner",  
+        "retry-from-coder - Restart from Coder",
+        "retry-from-verifier - Re-verify only",
+        "exit - Exit and resume from this gate later"
     ]
 }
 
@@ -569,12 +576,202 @@ class AgentFactory:
         return role["name"].lower(), instructions
 
 
+class AgentExecutor:
+    """Handles agent execution in both headless and interactive modes"""
+    
+    def __init__(self, orchestrator, headless=False):
+        self.orchestrator = orchestrator
+        self.outputs_dir = orchestrator.outputs_dir
+        # Check headless flag first, then environment variable, default to interactive
+        if headless:
+            self.use_interactive_mode = False
+        else:
+            mode = os.getenv('CLAUDE_ORCHESTRATOR_MODE', 'interactive')
+            self.use_interactive_mode = (mode == 'interactive' or mode == 'prompt')
+        
+    def execute_agent(self, agent_type, instructions):
+        """Routes to appropriate execution method"""
+        try:
+            if self.use_interactive_mode:
+                return self._execute_via_interactive(agent_type, instructions)
+            else:
+                return self._execute_headless(agent_type, instructions)
+        except FileNotFoundError:
+            print("Claude CLI not found, falling back to interactive mode")
+            return self._execute_via_interactive(agent_type, instructions)
+        except subprocess.TimeoutExpired:
+            return f"❌ {agent_type} timed out after 300 seconds"
+
+    def _execute_headless(self, agent_type, instructions):
+        """Execute agent using claude -p with headless automation and enhanced diagnostics"""
+        timeout_seconds = 300
+        debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+        
+        if debug_mode:
+            print(f"[DEBUG] Starting headless execution for {agent_type}")
+        
+        # Ensure directory exists
+        try:
+            self.outputs_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            return f"❌ {agent_type.upper()} failed: Cannot create working directory {self.outputs_dir}: {str(e)}"
+        
+        # Instructions are now clean from generation (no stripping needed)
+        clean_instructions = instructions
+        
+        
+        # Validate Claude CLI availability
+        claude_binary = 'claude'
+        try:
+            # Test if claude command is available
+            claude_test = subprocess.run(['which', claude_binary], capture_output=True, text=True)
+            if claude_test.returncode != 0:
+                # Try alternative paths
+                alternative_paths = ['/usr/local/bin/claude', '/opt/homebrew/bin/claude', '~/.local/bin/claude']
+                claude_found = False
+                for alt_path in alternative_paths:
+                    expanded_path = os.path.expanduser(alt_path)
+                    if os.path.exists(expanded_path) and os.access(expanded_path, os.X_OK):
+                        claude_binary = expanded_path
+                        claude_found = True
+                        break
+                if not claude_found:
+                    raise FileNotFoundError("Claude CLI not found. Please install Claude CLI or add it to PATH. Checked locations: /usr/local/bin/claude, /opt/homebrew/bin/claude, ~/.local/bin/claude")
+            else:
+                pass
+        except FileNotFoundError:
+            # Let FileNotFoundError propagate to parent method
+            raise
+        except Exception as e:
+            error_msg = self._sanitize_error_message(f"Claude CLI validation failed: {str(e)}")
+            raise FileNotFoundError(error_msg)
+        
+        cmd = [
+            claude_binary,
+            '-p', clean_instructions,
+            '--output-format', 'json',
+            '--dangerously-skip-permissions'
+        ]
+        
+        # Show command execution details only in debug mode
+        if debug_mode:
+            print(f"🔄 Executing: {claude_binary} -p '{clean_instructions}' --output-format json --dangerously-skip-permissions")
+        
+        # Create subprocess environment without CLAUDE_ORCHESTRATOR_MODE
+        subprocess_env = dict(os.environ)
+        subprocess_env.pop('CLAUDE_ORCHESTRATOR_MODE', None)
+        
+        try:
+            result_process = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+                cwd=str(self.outputs_dir),
+                env=subprocess_env
+            )
+            
+            exit_code = result_process.returncode
+            stdout_output = result_process.stdout
+            stderr_output = result_process.stderr
+            
+            # Show captured output only in debug mode
+            if debug_mode:
+                if stdout_output and stdout_output.strip():
+                    print(f"📤 Claude output: {stdout_output.strip()}")
+                if stderr_output and stderr_output.strip():
+                    print(f"⚠️  Claude stderr: {stderr_output.strip()}")
+            
+            if debug_mode:
+                print(f"[DEBUG] Process completed with exit code: {exit_code}")
+                if stderr_output and exit_code != 0:
+                    print(f"[DEBUG] Error output: {stderr_output[:200]}...")
+            
+            if exit_code == 0:
+                return f"✅ {agent_type.upper()} completed successfully"
+            else:
+                error_message = f"Process failed with exit code {exit_code}"
+                if stderr_output and stderr_output.strip():
+                    stderr_truncated = stderr_output.strip()[:400]
+                    if len(stderr_output.strip()) > 400:
+                        stderr_truncated += "..."
+                    error_message += f" | Stderr: {stderr_truncated}"
+                else:
+                    error_message += " | No stderr output available"
+                return f"❌ {agent_type.upper()} failed: {self._sanitize_error_message(error_message)}"
+                
+        except subprocess.TimeoutExpired:
+            error_message = f"Claude CLI execution timed out after {timeout_seconds} seconds. This may indicate a complex task requiring more time, network issues, or Claude CLI hanging. Consider increasing timeout or checking network connectivity."
+            if debug_mode:
+                print(f"[DEBUG] Timeout error: {error_message}")
+            return f"❌ {agent_type.upper()} failed: {error_message}"
+        except subprocess.CalledProcessError as e:
+            error_message = f"Claude CLI process failed with return code {e.returncode}"
+            if e.stderr and e.stderr.strip():
+                stderr_truncated = e.stderr.strip()[:400]
+                if len(e.stderr.strip()) > 400:
+                    stderr_truncated += "..."
+                error_message += f" | Stderr: {stderr_truncated}"
+            return f"❌ {agent_type.upper()} failed: {self._sanitize_error_message(error_message)}"
+        except PermissionError as e:
+            error_message = f"Permission denied accessing {getattr(e, 'filename', 'file')}. Check file permissions or run with appropriate privileges."
+            return f"❌ {agent_type.upper()} failed: {error_message}"
+        except OSError as e:
+            error_message = f"System error: {str(e)}. Check system resources and file system access."
+            return f"❌ {agent_type.upper()} failed: {self._sanitize_error_message(error_message)}"
+
+    def _execute_via_interactive(self, agent_type, instructions):
+        """Legacy interactive mode - return instructions unchanged for Claude to execute"""
+        return instructions
+
+    def _sanitize_error_message(self, message):
+        """Sanitize error message to prevent None values and ensure reasonable length"""
+        if message is None:
+            return "Error occurred with no details available"
+        
+        # Convert to string and handle None values more precisely
+        str_message = str(message)
+        
+        # Handle specific "failed: None" pattern
+        if "failed: None" in str_message:
+            str_message = str_message.replace("failed: None", "failed: Error details unavailable")
+        
+        # Replace standalone None/null values but preserve context
+        import re
+        # Replace "None" when it appears as a standalone value or at word boundaries
+        str_message = re.sub(r'\bNone\b', 'unavailable', str_message)
+        str_message = re.sub(r'\bnull\b', 'unavailable', str_message)
+        
+        # Ensure message is not empty
+        if not str_message.strip():
+            return "Error occurred but no details available"
+        
+        # Truncate to reasonable length
+        if len(str_message) > 500:
+            str_message = str_message[:497] + "..."
+        
+        return str_message.strip()
+
+
+    def _process_instructions_internally(self, agent_type, instructions):
+        """Process agent instructions by executing real Claude CLI processes"""
+        try:
+            # Execute agent using the real headless execution method
+            return self._execute_headless(agent_type, instructions)
+            
+        except Exception as e:
+            return f"❌ {agent_type.upper()} failed during execution: {str(e)}"
+    
+    
+
+
+
 class WorkflowConfig:
     """Configuration manager for workflow definitions"""
     
     def __init__(self, config_path: Path = None):
         self.config_path = config_path or Path('.claude/workflow-config.json')
-        self.sequence = ["explorer", "criteria_gate", "planner", "coder", "scribe", "verifier", "completion_gate"]
+        self.sequence = ["explorer", "criteria_gate", "planner", "coder", "verifier", "scribe", "completion_gate"]
         self.gates = {
             "criteria": {
                 "after": "explorer",
@@ -608,7 +805,7 @@ class WorkflowConfig:
             except Exception as e:
                 print(f"Warning: Failed to load workflow config: {e}")
                 
-    def get_next_agent(self, current_outputs: Dict[str, bool]) -> Optional[str]:
+    def get_next_agent(self, current_outputs: Dict[str, bool], outputs_dir: Path = None) -> Optional[str]:
         """Get next agent in sequence based on current outputs"""
         for agent_type in self.sequence:
             if agent_type.endswith('_gate'):
@@ -626,8 +823,25 @@ class WorkflowConfig:
             else:
                 # Regular agent - check if output file exists
                 output_file = self._get_output_file(agent_type)
-                if not current_outputs.get(output_file, False):
-                    return agent_type
+                
+                # Special case for scribe: run after verifier if verification is newer than last scribe run
+                if agent_type == "scribe" and outputs_dir:
+                    if current_outputs.get("verification.md", False):
+                        verification_file = outputs_dir / "verification.md"
+                        scribe_file = outputs_dir / "orchestrator-log.md"
+                        
+                        # Run scribe if orchestrator-log doesn't exist or verification is newer
+                        if not scribe_file.exists():
+                            return agent_type
+                        elif verification_file.exists():
+                            verification_time = verification_file.stat().st_mtime
+                            scribe_time = scribe_file.stat().st_mtime
+                            if verification_time > scribe_time:
+                                return agent_type
+                else:
+                    # Normal agents - check if output file exists
+                    if not current_outputs.get(output_file, False):
+                        return agent_type
                     
         return None  # All complete
         
@@ -640,7 +854,7 @@ class WorkflowConfig:
         elif agent_type == "coder":
             return "changes.md"
         elif agent_type == "scribe":
-            return "documentation.md"
+            return "orchestrator-log.md"
         elif agent_type == "verifier":
             return "verification.md"
         else:
@@ -660,10 +874,10 @@ class WorkflowConfig:
             json.dump(config_data, f, indent=2)
 
 
-class ExtensibleClaudeDrivenOrchestrator:
-    """Extensible version of the Claude-Driven Orchestrator"""
+class ClaudeCodeOrchestrator:
+    """Claude Code Orchestrator - Extensible agent workflow orchestration"""
     
-    def __init__(self, enable_dashboard: bool = True, dashboard_port: int = 5678, api_port: int = 8000, no_browser: bool = False):
+    def __init__(self, enable_dashboard: bool = False, dashboard_port: int = 5678, api_port: int = 8000, no_browser: bool = False, headless: bool = False):
         # Check for meta mode
         self.meta_mode = 'meta' in sys.argv
         
@@ -688,6 +902,7 @@ class ExtensibleClaudeDrivenOrchestrator:
         self.dashboard_port = dashboard_port
         self.api_port = api_port
         self.no_browser = no_browser
+        self.headless = headless
         self.dashboard_process = None
         self.api_process = None
         self.dashboard = None
@@ -698,6 +913,9 @@ class ExtensibleClaudeDrivenOrchestrator:
         
         # Initialize agent factory with configuration
         self.agent_factory = AgentFactory(self, self.agent_config)
+        
+        # Initialize agent executor for headless/interactive mode execution
+        self.agent_executor = AgentExecutor(self, headless=self.headless)
         
         # Dashboard is initialized through AgentConfig if enabled
         self.dashboard = self.agent_config.dashboard
@@ -795,16 +1013,39 @@ class ExtensibleClaudeDrivenOrchestrator:
     def _build_agent_instructions(self, agent_name, primary_objective, work_section, completion_phrase):
         """Build standardized agent instructions with primary objective framing"""
         
+        # Check if in headless mode and use appropriate instruction builder
+        if self.headless:
+            # In headless mode, use clean instructions without interactive artifacts
+            clean_instructions = self._build_headless_agent_instructions(agent_name, primary_objective, work_section, completion_phrase)
+            
+            # In headless mode, only write to files - no need to print instructions since they're passed via -p
+            command_file = self.outputs_dir / "next-command.txt"
+            command_file.write_text(clean_instructions)
+            
+            # Also write to agent-specific file for reference
+            work_file = self.outputs_dir / (agent_name + "-instructions.md")
+            work_file.write_text(clean_instructions)
+            
+            # In headless mode, return the actual clean instructions for execution
+            return clean_instructions
+        
+        # Interactive mode: include manual execution steps
         # Add meta flag to continue command if in meta mode
         meta_flag = ' meta' if self.meta_mode else ''
+        
+        # Add headless flag to continue command if in headless mode
+        headless_flag = ' --headless' if self.headless else ''
+        
+        # Replace .agent-outputs/ paths with actual outputs directory for meta mode compatibility
+        adjusted_work_section = work_section.replace('.agent-outputs/', f'{self.outputs_dir.name}/')
         
         # Build complete instructions that work without requiring /clear execution by Claude
         complete_instructions = "IMPORTANT: YOU MUST EXECUTE THE 'FINAL STEP' at the end of these instructions once you are done.\n\n" + \
                                "You are now the " + agent_name.upper() + " agent.\n\n" + \
-                               work_section + "\n\n" + \
+                               adjusted_work_section + "\n\n" + \
                                "When complete, output: " + completion_phrase + "\n\n" + \
                                "FINAL STEP: Run the claude code command `/clear` to reset context, then run:\n" + \
-                               "python3 ~/.claude-orchestrator/orchestrate.py continue" + meta_flag
+                               "python3 ~/.claude-orchestrator/orchestrate.py continue" + headless_flag + meta_flag
         
         # Write complete instructions to next-command.txt
         self._write_and_execute_command(complete_instructions, "Reset context and start " + agent_name + " agent")
@@ -813,46 +1054,152 @@ class ExtensibleClaudeDrivenOrchestrator:
         work_file = self.outputs_dir / (agent_name + "-instructions.md")
         work_file.write_text(complete_instructions)
         
-        return "AGENT ACTIVATED: " + agent_name.upper() + "\n\n" + \
-               f"Complete instructions written to {self.outputs_dir}/next-command.txt"
+        # In interactive mode, return the actual instructions for Claude to execute
+        return complete_instructions
+
+    def _build_headless_agent_instructions(self, agent_name, primary_objective, work_section, completion_phrase):
+        """Build headless agent instructions without interactive artifacts"""
+        
+        # Replace .agent-outputs/ paths with actual outputs directory for meta mode compatibility
+        adjusted_work_section = work_section.replace('.agent-outputs/', f'{self.outputs_dir.name}/')
+        
+        # Build clean instructions without interactive commands
+        headless_instructions = "You are now the " + agent_name.upper() + " agent.\n\n" + \
+                               adjusted_work_section + "\n\n" + \
+                               "When complete, output: " + completion_phrase
+        
+        return headless_instructions
 
     def _build_gate_instructions(self, gate_name, content, options):
         """Build standardized gate instructions with improved visibility"""
         options_text = '\n'.join('• ' + option for option in options)
         
-        # Determine mode for API integration
-        mode = 'meta' if self.meta_mode else 'regular'
-        
-        # Add API integration section
-        api_section = f"\nPROGRAMMATIC OPTIONS (via Dashboard API):\n" + \
-                     f"POST http://localhost:8000/api/gate-decision?mode={mode}\n" + \
-                     "Content-Type: application/json\n\n" + \
-                     "Request format:\n" + \
-                     '{\n' + \
-                     '  "decision_type": "approve-criteria|modify-criteria|retry-explorer",\n' + \
-                     '  "modifications": "text for modify-criteria only"\n' + \
-                     '}\n\n' + \
-                     "Dashboard can poll status and make decisions programmatically.\n"
-        
         # Write gate info to file for display
         gate_content = gate_name.upper() + " GATE: Human Review Required\n\n" + \
                       content + "\n\n" + \
-                      "AVAILABLE OPTIONS:\n" + options_text + api_section + "\n" + \
+                      "AVAILABLE OPTIONS:\n" + options_text + "\n\n" + \
                       "WORKFLOW PAUSED - Choose an option above\n"
         
         gate_filename = "current-" + gate_name.lower() + "-gate.md"
-        self._write_and_display(gate_content, gate_filename, "gate options")
+        gate_filepath = self.outputs_dir / gate_filename
+        gate_filepath.write_text(gate_content)
         
         # Set dashboard gate information if dashboard is available
         if self.dashboard and getattr(self.agent_config, 'dashboard_available', False):
             self.dashboard.set_gate(gate_name, content, options)
         
-        return gate_name.upper() + " GATE: Human Review Required\n\n" + \
-               "STOP: I must wait for the human to choose one of the options displayed above. " + \
-               "I will not provide commentary, analysis, or summaries. The human will select an option."
+        # In interactive mode, return minimal message since file will be displayed
+        # In headless mode, return full gate content since it needs to be shown
+        if self.headless:
+            return gate_content
+        else:
+            return gate_name.upper() + " GATE: Human Review Required\n\n" + \
+                   "STOP: I must wait for the human to choose one of the options displayed above. " + \
+                   "I will not provide commentary, analysis, or summaries. The human will select an option."
+
+    def _handle_interactive_gate(self, gate_type, gate_content):
+        """Handle interactive gate input in persistent mode"""
+        debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+        
+        if debug_mode:
+            print("\n" + "="*60)
+            print(gate_content)
+            print("="*60)
+        else:
+            # Clean gate display for normal mode
+            print(f"\n🚪 {gate_type.upper()} GATE: Human Review Required")
+            if gate_type == "criteria":
+                print("Review success criteria and choose:")
+            elif gate_type == "completion":
+                print("Review verification results and choose:")
+            
+            gate_options = GATE_OPTIONS.get(gate_type, [])
+            for option in gate_options:
+                print(f"  • {option}")
+            print()
+        
+        gate_options = GATE_OPTIONS.get(gate_type, [])
+        valid_commands = [opt.split(' - ')[0] for opt in gate_options]
+        
+        while True:
+            try:
+                user_input = input("\nEnter your choice: ").strip().lower()
+                
+                if user_input == "exit":
+                    # Save gate state for resume
+                    gate_state_file = self.outputs_dir / f"pending-{gate_type}-gate.md"
+                    gate_state_file.write_text(gate_content)
+                    print(f"Exiting. Run 'continue' to resume from {gate_type} gate.")
+                    return "exit", "User chose to exit at gate"
+                
+                elif user_input in valid_commands:
+                    # Remove any pending gate state since we're proceeding
+                    gate_state_file = self.outputs_dir / f"pending-{gate_type}-gate.md"
+                    if gate_state_file.exists():
+                        gate_state_file.unlink()
+                    
+                    # Execute the gate decision
+                    if user_input == "approve-criteria":
+                        print("Approving criteria...")
+                        self.approve_criteria()
+                        return "approved", "Criteria approved, continuing workflow"
+                    elif user_input == "modify-criteria":
+                        modification = input("Enter modification request: ").strip()
+                        if modification:
+                            print(f"Modifying criteria: {modification}")
+                            self.modify_criteria(modification)
+                            return "modified", "Criteria modified, continuing workflow"
+                        else:
+                            print("No modification provided, continuing...")
+                            continue
+                    elif user_input == "retry-explorer":
+                        print("Restarting from explorer...")
+                        self.retry_explorer()
+                        return "retry", "Restarting from explorer"
+                    elif user_input == "approve-completion":
+                        print("Approving completion...")
+                        self.approve_completion()
+                        return "completed", "Task completion approved"
+                    elif user_input == "retry-from-planner":
+                        print("Restarting from planner...")
+                        self.retry_from_planner()
+                        return "retry", "Restarting from planner"
+                    elif user_input == "retry-from-coder":
+                        print("Restarting from coder...")
+                        self.retry_from_coder()
+                        return "retry", "Restarting from coder"
+                    elif user_input == "retry-from-verifier":
+                        print("Restarting from verifier...")
+                        self.retry_from_verifier()
+                        return "retry", "Restarting from verifier"
+                    else:
+                        print(f"Command '{user_input}' not implemented yet")
+                        continue
+                        
+                else:
+                    print(f"Invalid option. Choose from: {', '.join(valid_commands)}")
+                    continue
+                    
+            except KeyboardInterrupt:
+                print("\nInterrupted. Use 'exit' to save state and quit gracefully.")
+                continue
+            except EOFError:
+                print("\nEOF received. Exiting.")
+                return "exit", "EOF received"
 
     def get_continue_agent(self):
         """Get the next agent to run and its instructions using configurable workflow"""
+        
+        # Check for pending gate state first (for resume functionality)
+        pending_criteria_gate = self.outputs_dir / "pending-criteria-gate.md"
+        pending_completion_gate = self.outputs_dir / "pending-completion-gate.md"
+        
+        if pending_criteria_gate.exists():
+            gate_content = pending_criteria_gate.read_text()
+            return self._handle_interactive_gate("criteria", gate_content)
+        elif pending_completion_gate.exists():
+            gate_content = pending_completion_gate.read_text()
+            return self._handle_interactive_gate("completion", gate_content)
         
         # Check what outputs exist to determine next phase
         current_outputs = {
@@ -860,13 +1207,13 @@ class ExtensibleClaudeDrivenOrchestrator:
             "success-criteria.md": (self.outputs_dir / "success-criteria.md").exists(),
             "plan.md": (self.outputs_dir / "plan.md").exists(),
             "changes.md": (self.outputs_dir / "changes.md").exists(),
-            "documentation.md": (self.outputs_dir / "documentation.md").exists(),
+            "orchestrator-log.md": (self.outputs_dir / "orchestrator-log.md").exists(),
             "verification.md": (self.outputs_dir / "verification.md").exists(),
             "completion-approved.md": (self.outputs_dir / "completion-approved.md").exists()
         }
         
         # Use workflow configuration to determine next agent
-        next_agent = self.workflow_config.get_next_agent(current_outputs)
+        next_agent = self.workflow_config.get_next_agent(current_outputs, self.outputs_dir)
         
         if next_agent is None:
             # Update status before returning completion
@@ -876,8 +1223,157 @@ class ExtensibleClaudeDrivenOrchestrator:
         # Update status to reflect current workflow state
         self._update_status_file()
         
-        # Prepare the next agent using dynamic preparation
-        return self._prepare_work_agent(next_agent)
+        # In headless mode, use workflow loop for automation
+        if self.headless:
+            # Show workflow header only once at the start of headless execution
+            debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+            if not debug_mode and not hasattr(self, '_header_shown'):
+                self._show_workflow_header()
+                self._header_shown = True
+            return self._execute_headless_workflow_loop()
+        
+        # Interactive mode: single agent execution
+        agent_type, instructions = self._prepare_work_agent(next_agent)
+        if agent_type in ["complete", "error"]:
+            return agent_type, instructions
+        result = self.agent_executor.execute_agent(agent_type, instructions)
+        return agent_type, result
+
+    def _show_workflow_header(self):
+        """Show clean workflow header with task description"""
+        task = self._get_current_task()
+        if task:
+            print(f"\nClaude Code Orchestrator running on task: {task}")
+            print()
+    
+    def _show_agent_progress(self, agent_type, status="running"):
+        """Show clean progress indicator for current agent"""
+        debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+        
+        if not debug_mode:
+            agent_display = {
+                "explorer": "Exploring",
+                "planner": "Planning", 
+                "coder": "Coding",
+                "verifier": "Verifying",
+                "scribe": "Documenting"
+            }
+            
+            if agent_type in agent_display:
+                if status == "running":
+                    print(f"{agent_display[agent_type]}...")
+                elif status == "complete":
+                    print(f"✓ {agent_display[agent_type]} complete")
+                elif status == "failed":
+                    print(f"✗ {agent_display[agent_type]} failed")
+
+    def _show_verification_status(self):
+        """Show verification pass/fail status"""
+        debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+        
+        if not debug_mode:
+            verification_file = self.outputs_dir / "verification.md"
+            if verification_file.exists():
+                try:
+                    content = verification_file.read_text()
+                    # Look for overall status line
+                    for line in content.split('\n'):
+                        if "Overall Status:" in line:
+                            if "PASS" in line.upper():
+                                print("✓ PASS - see verification.md for details")
+                            elif "FAIL" in line.upper():
+                                print("✗ FAIL - see verification.md for details")
+                            else:
+                                print("? NEEDS_REVIEW - see verification.md for details")
+                            break
+                    else:
+                        print("? Status unclear - see verification.md for details")
+                except Exception:
+                    print("? Could not read verification status")
+
+    def _execute_headless_workflow_loop(self):
+        """Execute complete headless workflow until completion or gate"""
+        max_iterations = 10  # Safety limit to prevent infinite loops
+        iteration = 0
+        
+        while iteration < max_iterations:
+            iteration += 1
+            
+            # Check what outputs exist to determine next phase
+            current_outputs = {
+                "exploration.md": (self.outputs_dir / "exploration.md").exists(),
+                "success-criteria.md": (self.outputs_dir / "success-criteria.md").exists(),
+                "plan.md": (self.outputs_dir / "plan.md").exists(),
+                "changes.md": (self.outputs_dir / "changes.md").exists(),
+                "orchestrator-log.md": (self.outputs_dir / "orchestrator-log.md").exists(),
+                "verification.md": (self.outputs_dir / "verification.md").exists(),
+                "completion-approved.md": (self.outputs_dir / "completion-approved.md").exists()
+            }
+            
+            # Use workflow configuration to determine next agent
+            next_agent = self.workflow_config.get_next_agent(current_outputs, self.outputs_dir)
+            
+            if next_agent is None:
+                # Update status before returning completion
+                self._update_status_file()
+                debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+                if not debug_mode:
+                    print("✓ WORKFLOW COMPLETED SUCCESSFULLY")
+                return "complete", "All agents have completed successfully. Task marked complete."
+            
+            # Check if this is a gate - handle interactively
+            if next_agent.endswith('_gate'):
+                gate_type = next_agent.replace('_gate', '')
+                agent_type, gate_content = self._prepare_work_agent(next_agent)
+                
+                if agent_type == "error":
+                    return agent_type, gate_content
+                
+                # Handle gate interactively
+                result_type, result_message = self._handle_interactive_gate(gate_type, gate_content)
+                
+                if result_type == "exit":
+                    return result_type, result_message
+                elif result_type in ["approved", "modified", "retry", "completed"]:
+                    # Gate was handled, continue workflow
+                    print(f"Gate decision: {result_message}")
+                    continue
+                else:
+                    return "error", f"Unexpected gate result: {result_type}"
+            
+            # Update status to reflect current workflow state
+            self._update_status_file()
+            
+            # Prepare and execute regular work agent internally
+            agent_type, instructions = self._prepare_work_agent(next_agent)
+            if agent_type == "error":
+                return agent_type, instructions
+            elif agent_type == "complete":
+                # No more tasks to process
+                debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+                if not debug_mode:
+                    print("✓ ALL TASKS COMPLETED SUCCESSFULLY")
+                return agent_type, instructions
+            
+            # Show agent progress
+            self._show_agent_progress(agent_type, "running")
+                
+            # Execute agent instructions using real Claude CLI processes
+            result = self.agent_executor._execute_headless(agent_type, instructions)
+            
+            if not result.startswith("✅"):
+                # Agent failed
+                self._show_agent_progress(agent_type, "failed")
+                return agent_type, result
+            else:
+                # Agent succeeded
+                self._show_agent_progress(agent_type, "complete")
+                
+                # Special handling for verifier to show pass/fail status
+                if agent_type == "verifier":
+                    self._show_verification_status()
+                
+        return "error", f"Headless workflow exceeded maximum iterations ({max_iterations})"
 
     def _prepare_work_agent(self, agent_type: str):
         """Dynamic agent preparation based on agent type"""
@@ -885,7 +1381,7 @@ class ExtensibleClaudeDrivenOrchestrator:
         if agent_type == "explorer":
             task = self._get_current_task()
             if not task:
-                return "error", "No task found in tasks-checklist.md"
+                return "complete", "All tasks have been completed successfully! No more tasks in checklist."
             return self.agent_factory.create_agent("explorer", task=task)
             
         elif agent_type == "criteria_gate":
@@ -903,7 +1399,7 @@ class ExtensibleClaudeDrivenOrchestrator:
                 in_criteria = False
                 
                 for line in lines:
-                    if "## Suggested Success Criteria" in line:
+                    if "## Testable Success Criteria" in line:
                         in_criteria = True
                         continue
                     elif in_criteria and line.strip().startswith('##') and not line.strip().startswith('###'):
@@ -916,15 +1412,19 @@ class ExtensibleClaudeDrivenOrchestrator:
                     criteria_text = '\n'.join(criteria_section)
                     criteria_file = self.outputs_dir / "success-criteria.md"
                     criteria_file.write_text("# Approved Success Criteria\n\n" + criteria_text + "\n")
-                    print("Unsupervised mode: Auto-approved criteria")
+                    debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+                    if debug_mode:
+                        print("Unsupervised mode: Auto-approved criteria")
                     
                     # Continue to next agent
                     agent, instructions = self.get_continue_agent()
-                    print("\n" + "="*60)
-                    print("AUTO-CONTINUING TO " + agent.upper())
-                    print("="*60)
-                    print(instructions)
-                    print("="*60)
+                    debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+                    if debug_mode:
+                        print("\n" + "="*60)
+                        print("AUTO-CONTINUING TO " + agent.upper())
+                        print("="*60)
+                        print(instructions)
+                        print("="*60)
                     return agent, instructions
             
             exploration_content = exploration_file.read_text()
@@ -935,7 +1435,7 @@ class ExtensibleClaudeDrivenOrchestrator:
             in_criteria = False
             
             for line in lines:
-                if "## Suggested Success Criteria" in line:
+                if "## Testable Success Criteria" in line:
                     in_criteria = True
                     continue
                 elif in_criteria and line.strip().startswith('##') and not line.strip().startswith('###'):
@@ -960,7 +1460,9 @@ class ExtensibleClaudeDrivenOrchestrator:
                 verification_lower = verification_content.lower()
                 if "recommend approval" in verification_lower or "ready for approval" in verification_lower or "approve" in verification_lower:
                     # Auto-approve completion in unsupervised mode
-                    print("Unsupervised mode: Auto-approved completion")
+                    debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+                    if debug_mode:
+                        print("Unsupervised mode: Auto-approved completion")
                     self.approve_completion()
                     return "complete", "Task automatically completed in unsupervised mode"
             
@@ -970,6 +1472,9 @@ class ExtensibleClaudeDrivenOrchestrator:
             status_line = "Status not found"
             for line in verification_content.split('\n'):
                 if "Overall Status:" in line:
+                    status_line = line.strip()
+                    break
+                elif "Final Verification Status:" in line:
                     status_line = line.strip()
                     break
             
@@ -1139,7 +1644,7 @@ class ExtensibleClaudeDrivenOrchestrator:
             in_criteria = False
             
             for line in lines:
-                if "## Suggested Success Criteria" in line:
+                if "## Testable Success Criteria" in line:
                     in_criteria = True
                     continue
                 elif in_criteria and line.strip().startswith('##') and not line.strip().startswith('###'):
@@ -1222,7 +1727,10 @@ class ExtensibleClaudeDrivenOrchestrator:
             "changes.md", 
             "verification.md",
             "completion-approved.md",
-            "criteria-modification-request.md"
+            "criteria-modification-request.md",
+            "pending-criteria-gate.md",
+            "pending-completion-gate.md"
+            # Note: orchestrator-log.md is preserved across cycles for historical record
         ]
         
         cleaned_count = 0
@@ -1412,21 +1920,37 @@ Begin by analyzing the current directory and asking the user about their goals.
             print("Already in supervised mode - no unsupervised file found")
 
 
+def show_help():
+    """Display help information about available commands"""
+    print("\nAvailable commands:")
+    print("  Workflow: start, continue, interactive, status, clean, complete, fail, bootstrap")
+    print("  Gates: approve-criteria, modify-criteria, retry-explorer")
+    print("         approve-completion, retry-from-planner, retry-from-coder, retry-from-verifier")
+    print("  Mode: unsupervised, supervised")
+    print("  Interactive mode: Runs persistent workflow with interactive gates")
+
 def main():
     """CLI entry point - designed for actual workflow operations"""
     
     parser = argparse.ArgumentParser(description='Claude Code Orchestrator')
-    parser.add_argument('command', nargs='?', default='start',
-                       help='Command to execute (default: start)')
+    parser.add_argument('command', nargs='?', default='continue',
+                       help='Command to execute (default: continue)')
     parser.add_argument('--no-browser', action='store_true',
                        help='Suppress browser opening for CI/CD environments')
+    parser.add_argument('--interactive', action='store_true',
+                       help='Run in interactive mode (default is headless)')
     parser.add_argument('modification_text', nargs='*',
                        help='Modification text for modify-criteria command')
     
     args = parser.parse_args()
     command = args.command
     
-    orchestrator = ExtensibleClaudeDrivenOrchestrator(no_browser=args.no_browser)
+    # If command is "meta", treat it as "continue" but keep "meta" in sys.argv for mode detection
+    # Also handle empty string when in meta mode (when $ARGUMENTS is empty in slash command)
+    if command == "meta" or (command == "" and "meta" in sys.argv):
+        command = "continue"
+    
+    orchestrator = ClaudeCodeOrchestrator(no_browser=args.no_browser, headless=not args.interactive)
     
     # Basic workflow commands
     if command == "start":
@@ -1445,6 +1969,49 @@ def main():
         print("="*60)
         print(instructions)
         print("="*60)
+        
+    elif command == "interactive":
+        # Start persistent interactive workflow
+        print("\n" + "="*60)
+        print("STARTING INTERACTIVE WORKFLOW")
+        print("="*60)
+        print("Running persistent workflow with interactive gates...")
+        print("Use 'exit' at any gate to save state and quit gracefully.")
+        print("="*60)
+        
+        while True:
+            try:
+                agent, result = orchestrator.get_continue_agent()
+                
+                if agent == "complete":
+                    print("\n" + "="*60)
+                    print("WORKFLOW COMPLETED SUCCESSFULLY!")
+                    print("="*60)
+                    print(result)
+                    break
+                elif agent == "exit":
+                    print("\n" + "="*60)
+                    print("WORKFLOW PAUSED")
+                    print("="*60)
+                    print(result)
+                    break
+                elif agent == "error":
+                    print("\n" + "="*60)
+                    print("WORKFLOW ERROR")
+                    print("="*60)
+                    print(result)
+                    break
+                else:
+                    # Continue workflow automatically
+                    continue
+                    
+            except KeyboardInterrupt:
+                print("\n\nWorkflow interrupted. Use 'continue' to resume or 'clean' to start fresh.")
+                break
+            except Exception as e:
+                print(f"\nUnexpected error: {e}")
+                print("Use 'continue' to resume or 'clean' to start fresh.")
+                break
         
     elif command == "status":
         orchestrator.status()
@@ -1494,13 +2061,12 @@ def main():
     elif command == "supervised":
         orchestrator.disable_unsupervised_mode()
         
+    elif command == "help":
+        show_help()
+        
     else:
         print("Unknown command: " + command)
-        print("\nAvailable commands:")
-        print("  Workflow: start, continue, status, clean, complete, fail, bootstrap")
-        print("  Gates: approve-criteria, modify-criteria, retry-explorer")
-        print("         approve-completion, retry-from-planner, retry-from-coder, retry-from-verifier")
-        print("  Mode: unsupervised, supervised")
+        show_help()
 
 
 if __name__ == "__main__":

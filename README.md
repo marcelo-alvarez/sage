@@ -12,25 +12,79 @@ The key insight is separating the work phases (automated) from the decision poin
 
 ### Installation
 
-Install Claude Orchestrator with a single command:
+Install the orchestrator with a single command:
 
 ```bash
-# Global installation (recommended) - available in all projects
+# Global installation (recommended) - creates cc-orchestrate command in PATH
 curl -fsSL https://raw.githubusercontent.com/marcelo-alvarez/claude-orchestrator/main/install.sh | bash
-
-# Initialize specific project directory
-curl -fsSL https://raw.githubusercontent.com/marcelo-alvarez/claude-orchestrator/main/install.sh | bash -s -- --project-dir ~/my-project
-
-# Project-local slash command (only available in this project)
-curl -fsSL https://raw.githubusercontent.com/marcelo-alvarez/claude-orchestrator/main/install.sh | bash -s -- --local-command
-
-# Install from specific branch
-curl -fsSL https://raw.githubusercontent.com/marcelo-alvarez/claude-orchestrator/main/install.sh | bash -s -- --branch feature/web-dashboard
 ```
+
+After installation, the `cc-orchestrate` command is available globally for running workflows.
+
+### Basic Usage (Headless Mode - Default)
+
+The orchestrator runs in clean headless mode by default, showing only essential progress:
+
+```bash
+# Run a complete workflow automatically
+cc-orchestrate continue
+
+# Start fresh workflow  
+cc-orchestrate start
+
+# Bootstrap initial tasks for your project
+cc-orchestrate bootstrap
+
+# Check current workflow status
+cc-orchestrate status
+```
+
+**Example Output:**
+```
+Claude Code Orchestrator running on task: Implement user authentication
+
+Exploring...
+✓ Exploring complete
+Planning...
+✓ Planning complete
+Coding...
+✓ Coding complete
+Verifying...
+✓ PASS - see verification.md for details
+✓ WORKFLOW COMPLETED SUCCESSFULLY
+```
+
+### Interactive Mode
+
+For step-by-step control with gates, use interactive mode:
+
+```bash
+# Run with interactive gates for approval control
+cc-orchestrate continue --interactive
+
+# Persistent interactive workflow (single process)
+cc-orchestrate interactive
+```
+
+### Two Ways to Run Workflows
+
+**Terminal (Primary)** - Clean headless execution:
+```bash
+cc-orchestrate continue      # Headless mode (default)
+cc-orchestrate continue --interactive  # With gates
+```
+
+**Claude Code Slash Commands** - Interactive workflow within conversations:
+```bash
+/orchestrate continue        # Continue workflow in Claude Code
+/orchestrate start           # Start fresh workflow
+```
+
+The terminal commands provide clean output for automation and regular use, while slash commands are perfect for development and interactive workflow control within Claude Code conversations.
 
 ### Installation Options
 
-The `install.sh` script supports the following arguments:
+The `install.sh` script supports these arguments:
 
 | Argument | Description | Default |
 |----------|-------------|---------|
@@ -40,15 +94,16 @@ The `install.sh` script supports the following arguments:
 | `--help` | Show detailed usage information | - |
 
 **Installation Behavior:**
-- **Runtime files** always install to `~/.claude-orchestrator/` (global)
+- **Runtime files** install to `~/.claude-orchestrator/` (global)
+- **cc-orchestrate command** added to PATH for global access
 - **Slash command** installs to `~/.claude/commands/` (global) or `.claude/commands/` (local)
-- **Project files** (`.claude/tasks*.md`) are created in the specified project directory
+- **Project files** (`.claude/tasks*.md`) created in specified project directory
 
 ### Generate Initial Tasks
 
-Use the bootstrap command to analyze your project and generate initial tasks:
-```
-/orchestrate bootstrap
+Use the bootstrap command to analyze your project and create initial tasks:
+```bash
+cc-orchestrate bootstrap
 ```
 
 Claude will:
@@ -64,12 +119,36 @@ Alternatively, manually add tasks to `.claude/tasks-checklist.md`:
 ```
 
 ### Usage
-Start a workflow in Claude Code:
+
+The orchestrator supports two execution modes:
+
+#### Interactive Mode (Default)
+In interactive mode, Claude shows you instructions to execute manually, giving you full control over each step. Note that interactive mode has known context accumulation issues where conversation history can become large over time, affecting performance.
+
 ```
 /orchestrate start
 ```
 
-Claude will work through the Explorer phase automatically, then pause at the Criteria Gate:
+Claude will present instructions like:
+```
+INSTRUCTION TO CLAUDE:
+Read the file .agent-outputs/next-command.txt
+Then follow the instructions it contains exactly.
+============================================================
+AGENT: EXPLORER
+============================================================
+```
+
+You can then read the file and execute the agent instructions manually.
+
+#### Headless Mode (Experimental)
+For automated execution, add the `--headless` flag:
+
+```
+/orchestrate start --headless
+```
+
+In headless mode, the orchestrator runs automatically without human intervention until it reaches a decision gate:
 ```
 🚪 CRITERIA GATE: Human Review Required
 • /orchestrate approve-criteria
@@ -78,6 +157,36 @@ Claude will work through the Explorer phase automatically, then pause at the Cri
 ```
 
 Choose your path and the workflow continues based on your decision.
+
+#### When to Use Each Mode
+
+**Interactive Mode (Default)** - Best for:
+- Development and debugging
+- Learning how the orchestrator works
+- Fine-grained control over each step
+- Reviewing agent instructions before execution
+- Working on complex or sensitive tasks
+- Note: Has context accumulation issues that may affect performance over long sessions
+
+**Headless Mode (Experimental)** - Best for:
+- CI/CD automation (when stabilized)
+- Batch processing multiple tasks
+- Well-tested workflows
+- Background execution
+- Meta-orchestration testing during development
+- Note: Currently experimental - will become the default once stabilized due to better context isolation
+
+**Example Workflow:**
+```bash
+# Start development with interactive mode for control
+/orchestrate start
+
+# Once confident in the workflow, switch to headless for speed
+/orchestrate continue --headless
+
+# Switch back to interactive for final review
+/orchestrate continue
+```
 
 ## Workflow
 
@@ -99,10 +208,14 @@ analyzes     USER APPROVES     creates   implements  documents   verifies     US
 When developing the orchestrator itself, use meta-mode to prevent interference with your main development workflow:
 
 ```bash
-# Use /morchestrate instead of /orchestrate when working on orchestrator code
+# Interactive meta-orchestration (default)
 /morchestrate start    # Uses .agent-outputs-meta/ and .claude-meta/
 /morchestrate status   # Check meta workflow progress
 /morchestrate clean    # Clean meta workflow files
+
+# Headless meta-orchestration for automated testing
+/morchestrate start --headless    # Run meta workflow automatically
+/morchestrate continue --headless # Continue meta workflow automatically
 ```
 
 **Meta-mode features:**
@@ -110,6 +223,7 @@ When developing the orchestrator itself, use meta-mode to prevent interference w
 - **Self-propagating:** All continuation commands automatically include `meta` flag
 - **Prevents collision:** Testing/development won't interfere with main workflow
 - **Identical functionality:** Same agents and workflow, just isolated namespace
+- **Same execution modes:** Supports both interactive and headless execution
 
 ## Commands
 
@@ -131,6 +245,12 @@ When developing the orchestrator itself, use meta-mode to prevent interference w
 - `/orchestrate retry-from-coder` - Restart from coding phase
 - `/orchestrate retry-from-verifier` - Re-verify only
 
+**Execution modes:**
+Add `--headless` to any command to run in automated mode:
+- `/orchestrate start --headless` - Start in headless mode
+- `/orchestrate continue --headless` - Continue in headless mode
+- Default: Interactive mode (shows instructions to Claude)
+
 ### Meta-Orchestration Commands
 
 When working on orchestrator development, use these isolated commands:
@@ -146,6 +266,12 @@ When working on orchestrator development, use these isolated commands:
 - `/morchestrate approve-criteria` - Accept criteria in meta mode
 - `/morchestrate modify-criteria "changes"` - Edit criteria in meta mode
 - `/morchestrate approve-completion` - Mark meta task complete
+
+**Meta execution modes:**
+Add `--headless` to any meta command to run in automated mode:
+- `/morchestrate start --headless` - Start meta workflow in headless mode
+- `/morchestrate continue --headless` - Continue meta workflow in headless mode
+- Default: Interactive mode (shows instructions to Claude)
 
 ### Custom Environment Configuration
 

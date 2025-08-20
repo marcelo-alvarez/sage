@@ -202,6 +202,12 @@ initialize_project() {
     mkdir -p .claude
     mkdir -p .agent-outputs
     
+    # Remove existing agent-config.json if present to avoid conflicts
+    if [ -f ".claude/agent-config.json" ]; then
+        print_info "Removing existing .claude/agent-config.json to avoid conflicts"
+        rm -f ".claude/agent-config.json"
+    fi
+    
     # Copy template task files if they don't exist
     if [ ! -f ".claude/tasks.md" ] && [ -f "$TEMP_DIR/templates/tasks.md" ]; then
         cp "$TEMP_DIR/templates/tasks.md" .claude/tasks.md
@@ -262,6 +268,66 @@ make_executable() {
     print_success "Scripts made executable"
 }
 
+# Create cc-orchestrate wrapper executable
+create_wrapper_executable() {
+    print_info "Creating cc-orchestrate wrapper executable..."
+    
+    # Find a suitable directory in PATH
+    local wrapper_dir=""
+    
+    # Check common directories in order of preference
+    for dir in "$HOME/.local/bin" "$HOME/bin" "/usr/local/bin"; do
+        if [[ ":$PATH:" == *":$dir:"* ]] || [ "$dir" = "/usr/local/bin" ]; then
+            wrapper_dir="$dir"
+            break
+        fi
+    done
+    
+    # If no suitable directory found, use ~/.local/bin and add to PATH
+    if [ -z "$wrapper_dir" ]; then
+        wrapper_dir="$HOME/.local/bin"
+        print_info "Adding $wrapper_dir to PATH in shell profile"
+        
+        # Add to shell profile if not already there
+        local shell_profile=""
+        if [ -f "$HOME/.zshrc" ]; then
+            shell_profile="$HOME/.zshrc"
+        elif [ -f "$HOME/.bashrc" ]; then
+            shell_profile="$HOME/.bashrc"
+        elif [ -f "$HOME/.bash_profile" ]; then
+            shell_profile="$HOME/.bash_profile"
+        fi
+        
+        if [ -n "$shell_profile" ] && ! grep -q "$wrapper_dir" "$shell_profile" 2>/dev/null; then
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$shell_profile"
+            print_info "Added $wrapper_dir to PATH in $shell_profile"
+        fi
+    fi
+    
+    # Create the wrapper directory
+    mkdir -p "$wrapper_dir"
+    
+    # Create the wrapper script
+    cat > "$wrapper_dir/cc-orchestrate" << 'EOF'
+#!/bin/bash
+# Claude Code Orchestrator wrapper
+exec python3 "$HOME/.claude-orchestrator/orchestrate.py" "$@"
+EOF
+    
+    # Make wrapper executable
+    chmod +x "$wrapper_dir/cc-orchestrate"
+    
+    print_success "cc-orchestrate command created in $wrapper_dir"
+    
+    # Check if it's immediately available
+    if command -v cc-orchestrate &> /dev/null; then
+        print_success "cc-orchestrate command is available in PATH"
+    else
+        print_info "cc-orchestrate will be available after restarting your terminal"
+        print_info "Or run: export PATH=\"$wrapper_dir:\$PATH\""
+    fi
+}
+
 # Print installation summary
 print_summary() {
     echo ""
@@ -272,6 +338,8 @@ print_summary() {
     echo "   ├── orchestrate.py             # Main orchestrator script"
     echo "   ├── agents/                    # Agent templates"
     echo "   └── config/                    # Default configurations"
+    echo ""
+    echo "   cc-orchestrate command          # Global wrapper executable in PATH"
     echo ""
     if [ "$LOCAL_COMMAND_ONLY" = true ]; then
         echo "   $PROJECT_DIR/.claude/commands/  # Slash command (local)"
@@ -296,19 +364,22 @@ print_summary() {
     
     echo ""
     echo "🚀 Quick Start:"
-    if [ -n "$PROJECT_DIR" ]; then
-        echo "1. Add tasks to $PROJECT_DIR/.claude/tasks-checklist.md"
-    else
-        echo "1. Navigate to your project and add tasks to .claude/tasks-checklist.md"
-    fi
-    echo "2. In Claude Code, run: /orchestrate start"
+    echo "   Terminal: cc-orchestrate bootstrap     # Generate initial tasks"
+    echo "   Terminal: cc-orchestrate continue      # Run workflow (headless)"
+    echo "   Terminal: cc-orchestrate interactive   # Interactive mode with gates"
     echo ""
-    echo "📖 Commands:"
-    echo "   /orchestrate bootstrap   # Generate initial tasks"
-    echo "   /orchestrate start       # Start fresh workflow"
-    echo "   /orchestrate continue    # Continue workflow"
-    echo "   /orchestrate status      # Show current progress"
-    echo "   /orchestrate clean       # Reset outputs"
+    if [ -n "$PROJECT_DIR" ]; then
+        echo "   Or add tasks manually to: $PROJECT_DIR/.claude/tasks-checklist.md"
+    else
+        echo "   Or navigate to your project and add tasks to .claude/tasks-checklist.md"
+    fi
+    echo "   Then in Claude Code: /orchestrate start"
+    echo ""
+    echo "📖 Available commands:"
+    echo "   Workflow: start, continue, status, clean, complete, fail, bootstrap"
+    echo "   Gates: approve-criteria, modify-criteria, retry-explorer"
+    echo "            approve-completion, retry-from-planner, retry-from-coder, retry-from-verifier"
+    echo "   Mode: unsupervised, supervised"
     echo ""
     echo "💡 The orchestrator runtime is now completely separate from your project files!"
 }
@@ -330,6 +401,7 @@ main() {
     fi
     install_slash_command
     make_executable
+    create_wrapper_executable
     print_summary
 }
 
