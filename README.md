@@ -12,25 +12,79 @@ The key insight is separating the work phases (automated) from the decision poin
 
 ### Installation
 
-Install Claude Orchestrator with a single command:
+Install the orchestrator with a single command:
 
 ```bash
-# Global installation (recommended) - available in all projects
+# Global installation (recommended) - creates cc-orchestrate command in PATH
 curl -fsSL https://raw.githubusercontent.com/marcelo-alvarez/claude-orchestrator/main/install.sh | bash
-
-# Initialize specific project directory
-curl -fsSL https://raw.githubusercontent.com/marcelo-alvarez/claude-orchestrator/main/install.sh | bash -s -- --project-dir ~/my-project
-
-# Project-local slash command (only available in this project)
-curl -fsSL https://raw.githubusercontent.com/marcelo-alvarez/claude-orchestrator/main/install.sh | bash -s -- --local-command
-
-# Install from specific branch
-curl -fsSL https://raw.githubusercontent.com/marcelo-alvarez/claude-orchestrator/main/install.sh | bash -s -- --branch feature/web-dashboard
 ```
+
+After installation, the `cc-orchestrate` command is available globally for running workflows.
+
+### Basic Usage (Headless Mode - Default)
+
+The orchestrator runs in clean headless mode by default, showing only essential progress:
+
+```bash
+# Run a complete workflow automatically
+cc-orchestrate continue
+
+# Start fresh workflow  
+cc-orchestrate start
+
+# Bootstrap initial tasks for your project
+cc-orchestrate bootstrap
+
+# Check current workflow status
+cc-orchestrate status
+```
+
+**Example Output:**
+```
+Claude Code Orchestrator running on task: Implement user authentication
+
+Exploring...
+✓ Exploring complete
+Planning...
+✓ Planning complete
+Coding...
+✓ Coding complete
+Verifying...
+✓ PASS - see verification.md for details
+✓ WORKFLOW COMPLETED SUCCESSFULLY
+```
+
+### Interactive Mode
+
+For step-by-step control with gates, use interactive mode:
+
+```bash
+# Run with interactive gates for approval control
+cc-orchestrate continue --interactive
+
+# Persistent interactive workflow (single process)
+cc-orchestrate interactive
+```
+
+### Two Ways to Run Workflows
+
+**Terminal (Primary)** - Clean headless execution:
+```bash
+cc-orchestrate continue      # Headless mode (default)
+cc-orchestrate continue --interactive  # With gates
+```
+
+**Claude Code Slash Commands** - Interactive workflow within conversations:
+```bash
+/orchestrate continue        # Continue workflow in Claude Code
+/orchestrate start           # Start fresh workflow
+```
+
+The terminal commands provide clean output for automation and regular use, while slash commands are perfect for development and interactive workflow control within Claude Code conversations.
 
 ### Installation Options
 
-The `install.sh` script supports the following arguments:
+The `install.sh` script supports these arguments:
 
 | Argument | Description | Default |
 |----------|-------------|---------|
@@ -40,15 +94,16 @@ The `install.sh` script supports the following arguments:
 | `--help` | Show detailed usage information | - |
 
 **Installation Behavior:**
-- **Runtime files** always install to `~/.claude-orchestrator/` (global)
+- **Runtime files** install to `~/.claude-orchestrator/` (global)
+- **cc-orchestrate command** added to PATH for global access
 - **Slash command** installs to `~/.claude/commands/` (global) or `.claude/commands/` (local)
-- **Project files** (`.claude/tasks*.md`) are created in the specified project directory
+- **Project files** (`.claude/tasks*.md`) created in specified project directory
 
 ### Generate Initial Tasks
 
-Use the bootstrap command to analyze your project and generate initial tasks:
-```
-/orchestrate bootstrap
+Use the bootstrap command to analyze your project and create initial tasks:
+```bash
+cc-orchestrate bootstrap
 ```
 
 Claude will:

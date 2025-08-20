@@ -1929,8 +1929,8 @@ def main():
                        help='Command to execute (default: continue)')
     parser.add_argument('--no-browser', action='store_true',
                        help='Suppress browser opening for CI/CD environments')
-    parser.add_argument('--headless', action='store_true',
-                       help='Run in headless mode (non-interactive)')
+    parser.add_argument('--interactive', action='store_true',
+                       help='Run in interactive mode (default is headless)')
     parser.add_argument('modification_text', nargs='*',
                        help='Modification text for modify-criteria command')
     
@@ -1942,7 +1942,7 @@ def main():
     if command == "meta" or (command == "" and "meta" in sys.argv):
         command = "continue"
     
-    orchestrator = ClaudeCodeOrchestrator(no_browser=args.no_browser, headless=args.headless)
+    orchestrator = ClaudeCodeOrchestrator(no_browser=args.no_browser, headless=not args.interactive)
     
     # Basic workflow commands
     if command == "start":
