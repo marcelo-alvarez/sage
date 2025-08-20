@@ -438,17 +438,19 @@ class AgentConfig:
 # Legacy gate options - can be made configurable in future
 GATE_OPTIONS = {
     "criteria": [
-        "Execute the slash-command `/orchestrate approve-criteria` - Accept and continue",
-        "Execute the slash-command `/orchestrate modify-criteria` - Modify criteria first",  
-        "Execute the slash-command `/orchestrate retry-explorer` - Restart exploration"
+        "approve-criteria - Accept and continue",
+        "modify-criteria - Modify criteria first",  
+        "retry-explorer - Restart exploration",
+        "exit - Exit and resume from this gate later"
     ],
     
     "completion": [
-        "Execute the slash-command `/orchestrate approve-completion` - Mark complete",
-        "Execute the slash-command `/orchestrate retry-explorer` - Restart all",
-        "Execute the slash-command `/orchestrate retry-from-planner` - Restart from Planner",  
-        "Execute the slash-command `/orchestrate retry-from-coder` - Restart from Coder",
-        "Execute the slash-command `/orchestrate retry-from-verifier` - Re-verify only"
+        "approve-completion - Mark complete",
+        "retry-explorer - Restart all",
+        "retry-from-planner - Restart from Planner",  
+        "retry-from-coder - Restart from Coder",
+        "retry-from-verifier - Re-verify only",
+        "exit - Exit and resume from this gate later"
     ]
 }
 
@@ -1049,39 +1051,117 @@ class ClaudeCodeOrchestrator:
         """Build standardized gate instructions with improved visibility"""
         options_text = '\n'.join('• ' + option for option in options)
         
-        # Determine mode for API integration
-        mode = 'meta' if self.meta_mode else 'regular'
-        
-        # Add API integration section
-        api_section = f"\nPROGRAMMATIC OPTIONS (via Dashboard API):\n" + \
-                     f"POST http://localhost:8000/api/gate-decision?mode={mode}\n" + \
-                     "Content-Type: application/json\n\n" + \
-                     "Request format:\n" + \
-                     '{\n' + \
-                     '  "decision_type": "approve-criteria|modify-criteria|retry-explorer",\n' + \
-                     '  "modifications": "text for modify-criteria only"\n' + \
-                     '}\n\n' + \
-                     "Dashboard can poll status and make decisions programmatically.\n"
-        
         # Write gate info to file for display
         gate_content = gate_name.upper() + " GATE: Human Review Required\n\n" + \
                       content + "\n\n" + \
-                      "AVAILABLE OPTIONS:\n" + options_text + api_section + "\n" + \
+                      "AVAILABLE OPTIONS:\n" + options_text + "\n\n" + \
                       "WORKFLOW PAUSED - Choose an option above\n"
         
         gate_filename = "current-" + gate_name.lower() + "-gate.md"
-        self._write_and_display(gate_content, gate_filename, "gate options")
+        gate_filepath = self.outputs_dir / gate_filename
+        gate_filepath.write_text(gate_content)
         
         # Set dashboard gate information if dashboard is available
         if self.dashboard and getattr(self.agent_config, 'dashboard_available', False):
             self.dashboard.set_gate(gate_name, content, options)
         
-        return gate_name.upper() + " GATE: Human Review Required\n\n" + \
-               "STOP: I must wait for the human to choose one of the options displayed above. " + \
-               "I will not provide commentary, analysis, or summaries. The human will select an option."
+        # In interactive mode, return minimal message since file will be displayed
+        # In headless mode, return full gate content since it needs to be shown
+        if self.headless:
+            return gate_content
+        else:
+            return gate_name.upper() + " GATE: Human Review Required\n\n" + \
+                   "STOP: I must wait for the human to choose one of the options displayed above. " + \
+                   "I will not provide commentary, analysis, or summaries. The human will select an option."
+
+    def _handle_interactive_gate(self, gate_type, gate_content):
+        """Handle interactive gate input in persistent mode"""
+        print("\n" + "="*60)
+        print(gate_content)
+        print("="*60)
+        
+        gate_options = GATE_OPTIONS.get(gate_type, [])
+        valid_commands = [opt.split(' - ')[0] for opt in gate_options]
+        
+        while True:
+            try:
+                user_input = input("\nEnter your choice: ").strip().lower()
+                
+                if user_input == "exit":
+                    # Save gate state for resume
+                    gate_state_file = self.outputs_dir / f"pending-{gate_type}-gate.md"
+                    gate_state_file.write_text(gate_content)
+                    print(f"Exiting. Run 'continue' to resume from {gate_type} gate.")
+                    return "exit", "User chose to exit at gate"
+                
+                elif user_input in valid_commands:
+                    # Remove any pending gate state since we're proceeding
+                    gate_state_file = self.outputs_dir / f"pending-{gate_type}-gate.md"
+                    if gate_state_file.exists():
+                        gate_state_file.unlink()
+                    
+                    # Execute the gate decision
+                    if user_input == "approve-criteria":
+                        print("Approving criteria...")
+                        self.approve_criteria()
+                        return "approved", "Criteria approved, continuing workflow"
+                    elif user_input == "modify-criteria":
+                        modification = input("Enter modification request: ").strip()
+                        if modification:
+                            print(f"Modifying criteria: {modification}")
+                            self.modify_criteria(modification)
+                            return "modified", "Criteria modified, continuing workflow"
+                        else:
+                            print("No modification provided, continuing...")
+                            continue
+                    elif user_input == "retry-explorer":
+                        print("Restarting from explorer...")
+                        self.retry_explorer()
+                        return "retry", "Restarting from explorer"
+                    elif user_input == "approve-completion":
+                        print("Approving completion...")
+                        self.approve_completion()
+                        return "completed", "Task completion approved"
+                    elif user_input == "retry-from-planner":
+                        print("Restarting from planner...")
+                        self.retry_from_planner()
+                        return "retry", "Restarting from planner"
+                    elif user_input == "retry-from-coder":
+                        print("Restarting from coder...")
+                        self.retry_from_coder()
+                        return "retry", "Restarting from coder"
+                    elif user_input == "retry-from-verifier":
+                        print("Restarting from verifier...")
+                        self.retry_from_verifier()
+                        return "retry", "Restarting from verifier"
+                    else:
+                        print(f"Command '{user_input}' not implemented yet")
+                        continue
+                        
+                else:
+                    print(f"Invalid option. Choose from: {', '.join(valid_commands)}")
+                    continue
+                    
+            except KeyboardInterrupt:
+                print("\nInterrupted. Use 'exit' to save state and quit gracefully.")
+                continue
+            except EOFError:
+                print("\nEOF received. Exiting.")
+                return "exit", "EOF received"
 
     def get_continue_agent(self):
         """Get the next agent to run and its instructions using configurable workflow"""
+        
+        # Check for pending gate state first (for resume functionality)
+        pending_criteria_gate = self.outputs_dir / "pending-criteria-gate.md"
+        pending_completion_gate = self.outputs_dir / "pending-completion-gate.md"
+        
+        if pending_criteria_gate.exists():
+            gate_content = pending_criteria_gate.read_text()
+            return self._handle_interactive_gate("criteria", gate_content)
+        elif pending_completion_gate.exists():
+            gate_content = pending_completion_gate.read_text()
+            return self._handle_interactive_gate("completion", gate_content)
         
         # Check what outputs exist to determine next phase
         current_outputs = {
@@ -1141,11 +1221,25 @@ class ClaudeCodeOrchestrator:
                 self._update_status_file()
                 return "complete", "All agents have completed successfully. Task marked complete."
             
-            # Check if this is a gate - gates require human intervention
+            # Check if this is a gate - handle interactively
             if next_agent.endswith('_gate'):
-                # Prepare gate and return control to human
-                agent_type, instructions = self._prepare_work_agent(next_agent)
-                return agent_type, instructions
+                gate_type = next_agent.replace('_gate', '')
+                agent_type, gate_content = self._prepare_work_agent(next_agent)
+                
+                if agent_type == "error":
+                    return agent_type, gate_content
+                
+                # Handle gate interactively
+                result_type, result_message = self._handle_interactive_gate(gate_type, gate_content)
+                
+                if result_type == "exit":
+                    return result_type, result_message
+                elif result_type in ["approved", "modified", "retry", "completed"]:
+                    # Gate was handled, continue workflow
+                    print(f"Gate decision: {result_message}")
+                    continue
+                else:
+                    return "error", f"Unexpected gate result: {result_type}"
             
             # Update status to reflect current workflow state
             self._update_status_file()
@@ -1703,10 +1797,11 @@ Begin by analyzing the current directory and asking the user about their goals.
 def show_help():
     """Display help information about available commands"""
     print("\nAvailable commands:")
-    print("  Workflow: start, continue, status, clean, complete, fail, bootstrap")
+    print("  Workflow: start, continue, interactive, status, clean, complete, fail, bootstrap")
     print("  Gates: approve-criteria, modify-criteria, retry-explorer")
     print("         approve-completion, retry-from-planner, retry-from-coder, retry-from-verifier")
     print("  Mode: unsupervised, supervised")
+    print("  Interactive mode: Runs persistent workflow with interactive gates")
 
 def main():
     """CLI entry point - designed for actual workflow operations"""
@@ -1748,6 +1843,49 @@ def main():
         print("="*60)
         print(instructions)
         print("="*60)
+        
+    elif command == "interactive":
+        # Start persistent interactive workflow
+        print("\n" + "="*60)
+        print("STARTING INTERACTIVE WORKFLOW")
+        print("="*60)
+        print("Running persistent workflow with interactive gates...")
+        print("Use 'exit' at any gate to save state and quit gracefully.")
+        print("="*60)
+        
+        while True:
+            try:
+                agent, result = orchestrator.get_continue_agent()
+                
+                if agent == "complete":
+                    print("\n" + "="*60)
+                    print("WORKFLOW COMPLETED SUCCESSFULLY!")
+                    print("="*60)
+                    print(result)
+                    break
+                elif agent == "exit":
+                    print("\n" + "="*60)
+                    print("WORKFLOW PAUSED")
+                    print("="*60)
+                    print(result)
+                    break
+                elif agent == "error":
+                    print("\n" + "="*60)
+                    print("WORKFLOW ERROR")
+                    print("="*60)
+                    print(result)
+                    break
+                else:
+                    # Continue workflow automatically
+                    continue
+                    
+            except KeyboardInterrupt:
+                print("\n\nWorkflow interrupted. Use 'continue' to resume or 'clean' to start fresh.")
+                break
+            except Exception as e:
+                print(f"\nUnexpected error: {e}")
+                print("Use 'continue' to resume or 'clean' to start fresh.")
+                break
         
     elif command == "status":
         orchestrator.status()
