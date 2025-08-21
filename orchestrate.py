@@ -736,6 +736,21 @@ class AgentExecutor:
         subprocess_env = dict(os.environ)
         subprocess_env.pop('CLAUDE_ORCHESTRATOR_MODE', None)
         
+        # Add deterministic start timestamp to agent log file
+        from datetime import datetime
+        start_time = datetime.now()
+        timestamp = start_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+        log_file = self.outputs_dir / f"{agent_type}-log.txt"
+        
+        # Add start timestamp
+        start_log = f"\n## {timestamp} - {agent_type.upper()} Agent Session\n\n"
+        if log_file.exists():
+            with open(log_file, 'a') as f:
+                f.write(start_log)
+        else:
+            with open(log_file, 'w') as f:
+                f.write(start_log)
+        
         try:
             result_process = subprocess.run(
                 cmd,
@@ -762,21 +777,48 @@ class AgentExecutor:
                 if stderr_output and exit_code != 0:
                     print(f"[DEBUG] Error output: {stderr_output[:200]}...")
             
+            # Add deterministic stop timestamp to agent log file
+            end_time = datetime.now()
+            end_timestamp = end_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+            duration = (end_time - start_time).total_seconds()
+            
             if exit_code == 0:
+                stop_log = f"\n## {end_timestamp} - {agent_type.upper()} Agent Session Complete (Duration: {duration:.1f}s, Exit Code: {exit_code})\n"
+                with open(log_file, 'a') as f:
+                    f.write(stop_log)
                 return f"✅ {agent_type.upper()} completed successfully"
             else:
                 # Build detailed error report for better debugging
                 detailed_error = self._build_detailed_agent_error(
                     agent_type, exit_code, stdout_output, stderr_output
                 )
+                stop_log = f"\n## {end_timestamp} - {agent_type.upper()} Agent Session Failed (Duration: {duration:.1f}s, Exit Code: {exit_code})\n"
+                with open(log_file, 'a') as f:
+                    f.write(stop_log)
                 return f"❌ {agent_type.upper()} failed: {detailed_error}"
                 
         except subprocess.TimeoutExpired:
+            # Add stop timestamp for timeout
+            end_time = datetime.now()
+            end_timestamp = end_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+            duration = (end_time - start_time).total_seconds()
+            stop_log = f"\n## {end_timestamp} - {agent_type.upper()} Agent Session Timeout (Duration: {duration:.1f}s)\n"
+            with open(log_file, 'a') as f:
+                f.write(stop_log)
+            
             error_message = f"Claude CLI execution timed out after {timeout_seconds} seconds. This may indicate a complex task requiring more time, network issues, or Claude CLI hanging. Consider increasing timeout or checking network connectivity."
             if debug_mode:
                 print(f"[DEBUG] Timeout error: {error_message}")
             return f"❌ {agent_type.upper()} failed: {error_message}"
         except subprocess.CalledProcessError as e:
+            # Add stop timestamp for process error
+            end_time = datetime.now()
+            end_timestamp = end_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+            duration = (end_time - start_time).total_seconds()
+            stop_log = f"\n## {end_timestamp} - {agent_type.upper()} Agent Session Error (Duration: {duration:.1f}s, CalledProcessError)\n"
+            with open(log_file, 'a') as f:
+                f.write(stop_log)
+            
             error_message = f"Claude CLI process failed with return code {e.returncode}"
             if e.stderr and e.stderr.strip():
                 stderr_truncated = e.stderr.strip()[:400]
@@ -785,9 +827,25 @@ class AgentExecutor:
                 error_message += f" | Stderr: {stderr_truncated}"
             return f"❌ {agent_type.upper()} failed: {self._sanitize_error_message(error_message)}"
         except PermissionError as e:
+            # Add stop timestamp for permission error
+            end_time = datetime.now()
+            end_timestamp = end_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+            duration = (end_time - start_time).total_seconds()
+            stop_log = f"\n## {end_timestamp} - {agent_type.upper()} Agent Session Error (Duration: {duration:.1f}s, PermissionError)\n"
+            with open(log_file, 'a') as f:
+                f.write(stop_log)
+            
             error_message = f"Permission denied accessing {getattr(e, 'filename', 'file')}. Check file permissions or run with appropriate privileges."
             return f"❌ {agent_type.upper()} failed: {error_message}"
         except OSError as e:
+            # Add stop timestamp for OS error
+            end_time = datetime.now()
+            end_timestamp = end_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+            duration = (end_time - start_time).total_seconds()
+            stop_log = f"\n## {end_timestamp} - {agent_type.upper()} Agent Session Error (Duration: {duration:.1f}s, OSError)\n"
+            with open(log_file, 'a') as f:
+                f.write(stop_log)
+            
             error_message = f"System error: {str(e)}. Check system resources and file system access."
             return f"❌ {agent_type.upper()} failed: {self._sanitize_error_message(error_message)}"
 
@@ -1229,8 +1287,6 @@ class ClaudeCodeOrchestrator:
         adjusted_work_section = work_section.replace('.agent-outputs/', f'{self.outputs_dir.name}/')
         
         # Add agent logging instructions for transparency
-        from datetime import datetime
-        timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
         log_file = f"{self.outputs_dir.name}/{agent_name}-log.txt"
         
         # Get current time for example
@@ -1245,10 +1301,8 @@ FIRST: Add task header if this is a new log file or first session:
 TASK: {primary_objective}
 ---
 
-THEN: Add your session log:
-## {timestamp} - {agent_name.upper()} Agent Session
-
-[14:32:15] Starting {agent_name} agent work
+THEN: Add your session log entries (Python has already added session start timestamp):
+[{current_time}] Starting {agent_name} agent work
 [14:32:18] Reading required input files...
 [14:32:25] [Describe what you found/understood]
 [14:32:40] Beginning implementation...
@@ -1258,7 +1312,8 @@ THEN: Add your session log:
 
 CRITICAL REQUIREMENTS:
 - APPEND to the file (do not overwrite existing content)
-- DO NOT use the example times shown above (14:32:15, etc)
+- DO NOT add session start/end timestamps - Python handles those automatically
+- DO NOT use the example times shown above (14:32:18, etc)
 - Each time you write a log entry, check the current system time and use that
 - Format: [HH:MM:SS] where HH:MM:SS is the ACTUAL time right now when you write each entry
 - Examples: If it's 2:45 PM when you start, write [14:45:00]. If it's 2:47 PM when you finish reading, write [14:47:00]
