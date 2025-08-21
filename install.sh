@@ -8,6 +8,7 @@ set -e
 # Default values
 PROJECT_DIR=""
 LOCAL_COMMAND_ONLY=false
+LOCAL_INSTALL=false
 TEMP_DIR=""
 BRANCH="main"
 
@@ -37,7 +38,7 @@ print_warning() {
 
 # Cleanup function
 cleanup() {
-    if [ -n "$TEMP_DIR" ] && [ -d "$TEMP_DIR" ]; then
+    if [ -n "$TEMP_DIR" ] && [ -d "$TEMP_DIR" ] && [ "$LOCAL_INSTALL" != true ]; then
         print_info "Cleaning up temporary files..."
         rm -rf "$TEMP_DIR"
     fi
@@ -53,6 +54,7 @@ show_usage() {
     echo "Options:"
     echo "  --project-dir DIR    Initialize project files in specific directory (default: current directory)"
     echo "  --branch BRANCH      Install from specific branch (default: main)"
+    echo "  --local              Install from current directory instead of downloading from GitHub"
     echo "  --local-command      Install slash command locally in project instead of globally"
     echo "  --help              Show this help message"
     echo ""
@@ -73,6 +75,9 @@ show_usage() {
     echo ""
     echo "  # Install from specific branch"
     echo "  ./install.sh --branch feature/web-dashboard"
+    echo ""
+    echo "  # Install from current directory (for development)"
+    echo "  ./install.sh --local"
 }
 
 # Parse command line arguments
@@ -85,6 +90,10 @@ while [[ $# -gt 0 ]]; do
         --branch)
             BRANCH="$2"
             shift 2
+            ;;
+        --local)
+            LOCAL_INSTALL=true
+            shift
             ;;
         --local-command)
             LOCAL_COMMAND_ONLY=true
@@ -146,17 +155,38 @@ validate_target_directory() {
     print_success "Target directory validated"
 }
 
-# Clone repository to temporary directory
+# Clone repository to temporary directory or use current directory
 clone_repository() {
-    print_info "Downloading Claude Orchestrator from branch: $BRANCH"
-    
-    TEMP_DIR=$(mktemp -d)
-    git clone --quiet --branch "$BRANCH" https://github.com/marcelo-alvarez/claude-orchestrator.git "$TEMP_DIR" || {
-        print_error "Failed to clone repository from branch: $BRANCH"
-        exit 1
-    }
-    
-    print_success "Repository downloaded to temporary directory"
+    if [ "$LOCAL_INSTALL" = true ]; then
+        print_info "Using current directory for local installation"
+        
+        # Check if we're in a valid orchestrator directory
+        if [ ! -f "orchestrate.py" ] || [ ! -d "templates" ]; then
+            print_error "Current directory doesn't appear to be a Claude Orchestrator repository"
+            print_error "Missing required files: orchestrate.py or templates/ directory"
+            print_error "Make sure you're running this script from the root of the claude-orchestrator repository"
+            exit 1
+        fi
+        
+        # Check for missing files that might be needed
+        if [ ! -f "process_manager.py" ]; then
+            print_warning "process_manager.py not found - some features may not work correctly"
+        fi
+        
+        # Use current directory as source
+        TEMP_DIR="$(pwd)"
+        print_success "Using local directory as source"
+    else
+        print_info "Downloading Claude Orchestrator from branch: $BRANCH"
+        
+        TEMP_DIR=$(mktemp -d)
+        git clone --quiet --branch "$BRANCH" https://github.com/marcelo-alvarez/claude-orchestrator.git "$TEMP_DIR" || {
+            print_error "Failed to clone repository from branch: $BRANCH"
+            exit 1
+        }
+        
+        print_success "Repository downloaded to temporary directory"
+    fi
 }
 
 # Install orchestrator runtime globally
@@ -169,6 +199,11 @@ install_orchestrator_runtime() {
     
     # Copy main orchestrator script
     cp "$TEMP_DIR/orchestrate.py" "$runtime_dir/orchestrate.py"
+    
+    # Copy process manager if it exists
+    if [ -f "$TEMP_DIR/process_manager.py" ]; then
+        cp "$TEMP_DIR/process_manager.py" "$runtime_dir/process_manager.py"
+    fi
     
     # The orchestrate.py file is already configured for global installation
     # No path modifications needed
