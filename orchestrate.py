@@ -1238,8 +1238,14 @@ class ClaudeCodeOrchestrator:
         
         logging_instructions = f"""
 AGENT LOGGING (for debugging transparency):
-Throughout your work, append progress updates to {log_file} using this format:
+APPEND (do not overwrite) progress updates to {log_file} using this format:
 
+FIRST: Add task header if this is a new log file or first session:
+---
+TASK: {primary_objective}
+---
+
+THEN: Add your session log:
 ## {timestamp} - {agent_name.upper()} Agent Session
 
 [14:32:15] Starting {agent_name} agent work
@@ -1250,11 +1256,14 @@ Throughout your work, append progress updates to {log_file} using this format:
 [14:33:20] Writing output files...
 [14:33:25] {agent_name.title()} agent work complete
 
-CRITICAL: DO NOT use the example times shown above (14:32:15, etc).
-INSTEAD: Each time you write a log entry, check the current system time and use that.
-Format: [HH:MM:SS] where HH:MM:SS is the ACTUAL time right now when you write each entry.
-Examples: If it's 2:45 PM when you start, write [14:45:00]. If it's 2:47 PM when you finish reading, write [14:47:00].
-DO NOT use sequential numbers like [00:00:01], [00:00:02] - use real clock time.
+CRITICAL REQUIREMENTS:
+- APPEND to the file (do not overwrite existing content)
+- DO NOT use the example times shown above (14:32:15, etc)
+- Each time you write a log entry, check the current system time and use that
+- Format: [HH:MM:SS] where HH:MM:SS is the ACTUAL time right now when you write each entry
+- Examples: If it's 2:45 PM when you start, write [14:45:00]. If it's 2:47 PM when you finish reading, write [14:47:00]
+- DO NOT use sequential numbers like [00:00:01], [00:00:02] - use real clock time
+- Use Write tool with append mode or add content to existing file
 
 """
         
