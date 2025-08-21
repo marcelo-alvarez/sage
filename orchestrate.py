@@ -1641,7 +1641,11 @@ CRITICAL REQUIREMENTS:
         if agent_type == "explorer":
             task = self._get_current_task()
             if not task:
-                return "complete", "All tasks have been completed successfully! No more tasks in checklist."
+                # Check if there are more tasks after this one
+                if self._has_more_tasks():
+                    return "user_checkpoint", "User validation checkpoint reached. Complete manual testing before continuing."
+                else:
+                    return "complete", "All tasks have been completed successfully! No more tasks in checklist."
             return self.agent_factory.create_agent("explorer", task=task)
             
         elif agent_type == "criteria_gate":
@@ -1761,7 +1765,7 @@ CRITICAL REQUIREMENTS:
             return self.agent_factory.create_agent(agent_type)
 
     def _get_current_task(self):
-        """Extract continue uncompleted task from tasks-checklist.md"""
+        """Extract current task from checklist, recognizing validation tasks"""
         
         if self.checklist_file.exists():
             content = self.checklist_file.read_text()
@@ -1772,9 +1776,84 @@ CRITICAL REQUIREMENTS:
                     task = re.sub(r'^\s*-\s*\[\s*\]\s*', '', line)
                     task = re.sub(r'\s*\(.*\)\s*$', '', task)
                     task = task.strip()
-                    if task:
+                    
+                    # Check if this is a USER task (validation, test, review, etc.)
+                    if task.startswith('USER'):
+                        # This is a human task - handle specially
+                        return self._handle_user_validation(task)
+                    elif task:
                         return task
         return None
+
+    def _handle_user_validation(self, task):
+        """Handle USER tasks by showing instructions and halting orchestrator"""
+        
+        # Extract validation type and ID if present (e.g., "USER VALIDATION A", "USER TEST 3")
+        import re
+        match = re.match(r'USER\s+(\w+)\s*([A-Z0-9]*)', task)
+        if match:
+            validation_type = match.group(1)
+            validation_id = match.group(2) if match.group(2) else ""
+        else:
+            validation_type = "TASK"
+            validation_id = ""
+        
+        # Extract the task details after the colon if present
+        task_details = task[task.find(':'):].strip() if ':' in task else task
+        
+        # Write validation instructions to file for reference
+        from datetime import datetime
+        validation_file = self.outputs_dir / f"current-user-{validation_type.lower()}.md"
+        validation_content = f"""# {validation_type} {validation_id} Required
+
+## Task
+{task}
+
+## Status
+WAITING FOR USER
+
+## Instructions
+1. Execute the validation steps described above
+2. Document results in comments or separate file  
+3. If tests PASS: Mark this task complete in checklist
+4. If tests FAIL: Fix issues before continuing
+5. Run 'cc-orchestrate continue' to proceed
+
+## Started
+{datetime.now().isoformat()}
+"""
+        validation_file.write_text(validation_content)
+        
+        print("\n" + "="*60)
+        print(f"🛑 USER {validation_type} {validation_id} REQUIRED".strip())
+        print("="*60)
+        print("ORCHESTRATOR HALTED - Manual action required")
+        print()
+        print("Task:")
+        print(task_details if task_details else task)
+        print()
+        print("Instructions:")
+        print("1. Execute the steps described in the task")
+        print("2. Document your results")
+        print("3. If PASS: Mark task complete with [x] in checklist")
+        print("4. If FAIL: Fix issues, then mark complete")
+        print("5. Run 'cc-orchestrate continue' to proceed")
+        print()
+        print(f"Full details written to: {validation_file}")
+        print("="*60)
+        
+        # Return None to signal no agent work should be done
+        return None
+
+    def _has_more_tasks(self):
+        """Check if there are any uncompleted tasks in the checklist"""
+        if self.checklist_file.exists():
+            content = self.checklist_file.read_text()
+            lines = content.split('\n')
+            for line in lines:
+                if re.match(r'^\s*-\s*\[\s*\]\s*', line):
+                    return True
+        return False
         
     def _update_task_status(self, task, status):
         """Update task status in tasks.md"""
@@ -2041,67 +2120,75 @@ CRITICAL REQUIREMENTS:
         """Interactive bootstrap to help users generate initial tasks"""
         
         bootstrap_instructions = """
-BOOTSTRAP MODE: Help the user create initial tasks for their project
+BOOTSTRAP MODE: Generate human-in-the-loop task structure for the project
 
-TASK: Analyze the current project and guide the user through creating meaningful tasks
+CRITICAL REQUIREMENTS:
+1. Generate THREE files: tasks-checklist.md, tasks.md, and concept.md
+2. Each task must be ONE PARAGRAPH on a SINGLE LINE (no line breaks within tasks)
+3. Create 10-15 tasks MAXIMUM per taskset
+4. Balance tasks for roughly equal complexity and likelihood of success
+5. Embed USER validation checkpoints directly in the task sequence
+6. USER tasks must start with "USER" (e.g., USER VALIDATION, USER TEST, USER REVIEW)
 
-YOUR RESPONSIBILITIES:
-1. Analyze the current codebase and project structure
-2. Ask the user about their goals and priorities  
-3. Suggest specific, actionable tasks based on the analysis
-4. Create both tasks.md and tasks-checklist.md files
-5. Explain the next steps for using the orchestrator
+FILE STRUCTURE TO CREATE:
+
+## .claude/concept.md
+High-level design document that:
+- Describes the overall goal and architecture
+- Defines success criteria for the entire taskset
+- Explains key design decisions and trade-offs
+- Provides context for all tasks
+- Self-contained reference (doesn't reference other files)
+
+## .claude/tasks.md
+Detailed task descriptions where:
+- Each task is a comprehensive single paragraph
+- Tasks frequently reference concept.md for design rationale
+- USER tasks are clearly marked and detailed
+- USER tasks specify exact commands/tests to run
+- Each task ~500-1000 characters for adequate detail
+
+## .claude/tasks-checklist.md
+Actionable checklist where:
+- Each line is one task (matching tasks.md)
+- Tasks reference both tasks.md and concept.md
+- Format: - [ ] Brief description referencing details in tasks.md and concept in concept.md
+- USER tasks clearly start with "USER" keyword
+
+TASK STRUCTURE PATTERN:
+1. Implementation task (agents do work)
+2. USER VALIDATION task (human tests and verifies)
+3. Implementation task (agents continue)
+4. USER TEST task (human tests again)
+[Repeat pattern throughout]
+
+USER TASK FORMAT:
+"USER [TYPE] [ID]: [Description of what to test] by executing these specific commands: (1) [command], (2) [command], (3) [verification step], checking that [expected outcome], and documenting results in [location] before proceeding - DO NOT CONTINUE if [failure condition]"
+
+Types can be: VALIDATION, TEST, REVIEW, CHECK, VERIFY, etc.
 
 ANALYSIS TO PERFORM:
-- Examine package.json, requirements.txt, or similar dependency files
-- Look at README.md and documentation
-- Identify main source code directories and files
-- Check for existing tests, build scripts, CI/CD
-- Note any obvious issues (missing tests, outdated deps, TODO comments)
+1. Examine project structure and existing code
+2. Identify the primary objective/problem to solve
+3. Break down into logical implementation chunks
+4. Insert USER checkpoints after each major feature
+5. Ensure each task is independently testable
 
 QUESTIONS TO ASK USER:
-1. "What are the main goals for this project?"
-2. "What problems are you currently facing?"
-3. "What would you like to work on first - bugs, features, or improvements?"
-4. "Are there any specific areas of the code that need attention?"
+1. "What is the primary goal for this taskset?"
+2. "What constitutes success for this work?"
+3. "Are there specific areas that need extra validation?"
+4. "What's your risk tolerance for this implementation?"
+5. "Should this be production-ready or prototype?"
 
-TASK GENERATION APPROACH:
-- Create 3-5 specific, actionable tasks
-- Mix of different types: bug fixes, features, tests, docs, refactoring
-- Start with smaller tasks that can build momentum
-- Include acceptance criteria for each task
+TASK BALANCING:
+- Each task should take roughly 1-3 agent cycles
+- USER tasks should take 5-15 minutes of human time
+- Complex features split across multiple tasks with validation between
+- No task should be a single line of code change
+- No task should be a complete rewrite
 
-OUTPUT FORMAT:
-Create both .claude/tasks.md and .claude/tasks-checklist.md with:
-
-tasks.md:
-```markdown
-# Project Tasks
-
-## Current Sprint
-- [ ] [Generated task 1 with clear acceptance criteria]
-- [ ] [Generated task 2 with clear acceptance criteria]
-
-## Backlog  
-- [ ] [Future task 1]
-- [ ] [Future task 2]
-
-## Completed
-[Empty initially]
-```
-
-tasks-checklist.md:
-```markdown
-# Tasks Checklist
-
-- [ ] [Same tasks as above but in simple checklist format]
-```
-
-FINAL STEP: 
-After creating the files, tell the user:
-"Bootstrap complete! Your tasks are ready. Execute the slash-command `/orchestrate start` to begin your first workflow."
-
-Begin by analyzing the current directory and asking the user about their goals.
+Begin by analyzing the current directory and asking about the goal.
 """
         
         print("\n" + "="*60)
@@ -2109,6 +2196,39 @@ Begin by analyzing the current directory and asking the user about their goals.
         print("="*60)
         print(bootstrap_instructions)
         print("="*60)
+
+    def bootstrap_with_validation(self):
+        """Enhanced bootstrap that generates human-in-the-loop task structure"""
+        
+        # Check if bootstrap files already exist
+        concept_file = self.claude_dir / "concept.md"
+        if concept_file.exists():
+            print("Warning: concept.md already exists. Rename or remove existing files first.")
+            return
+        
+        # Set bootstrap mode flag for agents
+        bootstrap_flag = self.claude_dir / ".bootstrap-mode"
+        bootstrap_flag.write_text("active")
+        
+        # Provide enhanced instructions with validation pattern
+        print("\n" + "="*60)
+        print("HUMAN-IN-THE-LOOP BOOTSTRAP MODE")
+        print("="*60)
+        print("This will generate three files with embedded validation:")
+        print("1. concept.md - Overall design and architecture")
+        print("2. tasks.md - Detailed task descriptions") 
+        print("3. tasks-checklist.md - Actionable checklist")
+        print()
+        print("USER tasks (starting with 'USER') will halt the orchestrator")
+        print("for manual validation/testing before continuing.")
+        print("="*60)
+        
+        # Call the main bootstrap method
+        self.bootstrap_tasks()
+        
+        # Clean up bootstrap flag after completion
+        if bootstrap_flag.exists():
+            bootstrap_flag.unlink()
         
     def _retry_from_phase(self, phase_name, display_name=None):
         """Generic retry method for any phase"""
@@ -2492,7 +2612,12 @@ def main():
         orchestrator.retry_from_verifier()
         
     elif command == "bootstrap":
-        orchestrator.bootstrap_tasks()
+        # Check for bootstrap mode flag
+        if "--with-validation" in sys.argv or "--hil" in sys.argv:
+            orchestrator.bootstrap_with_validation()
+        else:
+            # Legacy bootstrap
+            orchestrator.bootstrap_tasks()
         
     elif command == "unsupervised":
         orchestrator.enable_unsupervised_mode()
