@@ -1900,6 +1900,10 @@ This log helps debug workflow issues - please maintain it as you work.
             if unsupervised_file.exists():
                 print("Unsupervised mode detected - auto-continuing workflow")
                 self.clean_outputs()
+                
+                # Show workflow header with next task
+                self._show_workflow_header()
+                
                 agent, instructions = self.get_continue_agent()
                 print("\n" + "="*60)
                 print("AUTO-STARTING - AGENT: " + agent.upper())
