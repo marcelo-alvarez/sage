@@ -19,6 +19,8 @@ import webbrowser
 import time
 import socket
 import argparse
+import signal
+from process_manager import ProcessManager
 
 
 def find_available_port(start_port: int, max_attempts: int = 20) -> int:
@@ -351,6 +353,8 @@ class AgentConfig:
                 '--port', str(self.api_port)
             ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             
+            # Register API process with ProcessManager
+            self.process_manager.register_process('api_server', self.api_process)
             print(f"API server started as subprocess (PID: {self.api_process.pid}) on port {self.api_port}")
             
             # Start dashboard server as subprocess
@@ -358,6 +362,8 @@ class AgentConfig:
                 sys.executable, 'test_dashboard_server.py', str(self.dashboard_port)
             ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             
+            # Register dashboard process with ProcessManager
+            self.process_manager.register_process('dashboard_server', self.dashboard_process)
             print(f"Dashboard server started as subprocess (PID: {self.dashboard_process.pid}) on port {self.dashboard_port}")
             
             # Give servers time to start
@@ -409,30 +415,13 @@ class AgentConfig:
     def stop_dashboard(self):
         """Stop dashboard and API server subprocesses"""
         try:
-            if self.dashboard_process:
-                try:
-                    self.dashboard_process.terminate()
-                    self.dashboard_process.wait(timeout=5)
-                    print("Dashboard server stopped")
-                except:
-                    try:
-                        self.dashboard_process.kill()
-                        print("Dashboard server force-killed")
-                    except:
-                        pass
+            # Use ProcessManager for clean shutdown
+            dashboard_stopped = self.process_manager.terminate_process('dashboard_server')
+            api_stopped = self.process_manager.terminate_process('api_server')
+            
+            if dashboard_stopped:
                 self.dashboard_process = None
-                
-            if self.api_process:
-                try:
-                    self.api_process.terminate()
-                    self.api_process.wait(timeout=5)
-                    print("API server stopped")
-                except:
-                    try:
-                        self.api_process.kill()
-                        print("API server force-killed")
-                    except:
-                        pass
+            if api_stopped:
                 self.api_process = None
                 
         except Exception as e:
@@ -690,15 +679,11 @@ class AgentExecutor:
             if exit_code == 0:
                 return f"✅ {agent_type.upper()} completed successfully"
             else:
-                error_message = f"Process failed with exit code {exit_code}"
-                if stderr_output and stderr_output.strip():
-                    stderr_truncated = stderr_output.strip()[:400]
-                    if len(stderr_output.strip()) > 400:
-                        stderr_truncated += "..."
-                    error_message += f" | Stderr: {stderr_truncated}"
-                else:
-                    error_message += " | No stderr output available"
-                return f"❌ {agent_type.upper()} failed: {self._sanitize_error_message(error_message)}"
+                # Build detailed error report for better debugging
+                detailed_error = self._build_detailed_agent_error(
+                    agent_type, exit_code, stdout_output, stderr_output
+                )
+                return f"❌ {agent_type.upper()} failed: {detailed_error}"
                 
         except subprocess.TimeoutExpired:
             error_message = f"Claude CLI execution timed out after {timeout_seconds} seconds. This may indicate a complex task requiring more time, network issues, or Claude CLI hanging. Consider increasing timeout or checking network connectivity."
@@ -723,6 +708,73 @@ class AgentExecutor:
     def _execute_via_interactive(self, agent_type, instructions):
         """Legacy interactive mode - return instructions unchanged for Claude to execute"""
         return instructions
+
+    def _build_detailed_agent_error(self, agent_type, exit_code, stdout_output, stderr_output):
+        """Build comprehensive error report for agent failures"""
+        error_parts = []
+        
+        # Basic failure info
+        error_parts.append(f"Exit code {exit_code}")
+        
+        # Expected output files for this agent type
+        expected_outputs = {
+            "explorer": "exploration.md",
+            "planner": "plan.md", 
+            "coder": "changes.md",
+            "verifier": "verification.md",
+            "scribe": "orchestrator-log.md"
+        }
+        
+        expected_file = expected_outputs.get(agent_type)
+        if expected_file:
+            expected_path = self.outputs_dir / expected_file
+            if expected_path.exists():
+                size = expected_path.stat().st_size
+                error_parts.append(f"Expected output '{expected_file}' was created ({size} bytes)")
+            else:
+                error_parts.append(f"Expected output '{expected_file}' was NOT created")
+        
+        # Check input files exist (for agents that need them)
+        if agent_type in ["planner", "coder", "verifier"]:
+            input_files = {
+                "planner": ["exploration.md", "success-criteria.md"],
+                "coder": ["exploration.md", "success-criteria.md", "plan.md"],
+                "verifier": ["exploration.md", "success-criteria.md", "plan.md", "changes.md"]
+            }
+            
+            missing_inputs = []
+            for input_file in input_files.get(agent_type, []):
+                input_path = self.outputs_dir / input_file
+                if not input_path.exists():
+                    missing_inputs.append(input_file)
+            
+            if missing_inputs:
+                error_parts.append(f"Missing required input files: {', '.join(missing_inputs)}")
+            else:
+                error_parts.append("All required input files present")
+        
+        # Working directory info
+        error_parts.append(f"Working directory: {self.outputs_dir}")
+        if not self.outputs_dir.exists():
+            error_parts.append("ERROR: Working directory does not exist!")
+        elif not self.outputs_dir.is_dir():
+            error_parts.append("ERROR: Working directory path is not a directory!")
+        
+        # Claude CLI stdout (full output, not truncated)
+        if stdout_output and stdout_output.strip():
+            clean_stdout = stdout_output.strip()
+            error_parts.append(f"Claude CLI stdout ({len(clean_stdout)} chars): {clean_stdout}")
+        else:
+            error_parts.append("No stdout output from Claude CLI")
+        
+        # Claude CLI stderr (full output, not truncated)  
+        if stderr_output and stderr_output.strip():
+            clean_stderr = stderr_output.strip()
+            error_parts.append(f"Claude CLI stderr ({len(clean_stderr)} chars): {clean_stderr}")
+        else:
+            error_parts.append("No stderr output from Claude CLI")
+        
+        return " | ".join(error_parts)
 
     def _sanitize_error_message(self, message):
         """Sanitize error message to prevent None values and ensure reasonable length"""
@@ -921,6 +973,12 @@ class ClaudeCodeOrchestrator:
         self.dashboard = self.agent_config.dashboard
         self.dashboard_available = getattr(self.agent_config, 'dashboard_available', False)
         
+        # Initialize process manager for robust subprocess handling
+        self.process_manager = ProcessManager()
+        
+        # Install signal handlers for clean shutdown
+        self._install_signal_handlers()
+        
         # Ensure directories exist
         self.claude_dir.mkdir(exist_ok=True)
         self.agents_dir.mkdir(exist_ok=True)
@@ -928,6 +986,16 @@ class ClaudeCodeOrchestrator:
         
         # Generate default configuration files if they don't exist
         self._ensure_config_files()
+
+    def _install_signal_handlers(self):
+        """Install signal handlers for clean shutdown"""
+        def signal_handler(sig, frame):
+            print(f"\nReceived signal {sig}. Cleaning up processes...")
+            self.process_manager.cleanup_all_processes()
+            sys.exit(0)
+        
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
 
     def _test_api_endpoint(self):
         """Test if API server HTTP endpoint is responding"""
@@ -2060,6 +2128,17 @@ def main():
         
     elif command == "supervised":
         orchestrator.disable_unsupervised_mode()
+        
+    elif command == "stop":
+        # Stop all orchestrator processes system-wide
+        process_manager = ProcessManager()
+        success = process_manager.cleanup_system_wide()
+        if success:
+            print("All orchestrator processes have been stopped.")
+            sys.exit(0)
+        else:
+            print("Warning: Some processes may not have been terminated properly.")
+            sys.exit(1)
         
     elif command == "help":
         show_help()
