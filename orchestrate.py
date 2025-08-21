@@ -2130,6 +2130,164 @@ Begin by analyzing the current directory and asking the user about their goals.
             print("Already in supervised mode - no unsupervised file found")
 
 
+def serve_command(args):
+    """Start dashboard and API servers with health monitoring"""
+    
+    # Health check function
+    def check_server_health(host, port, endpoint="/", timeout=5):
+        try:
+            url = f"http://{host}:{port}{endpoint}"
+            response = urllib.request.urlopen(url, timeout=timeout)
+            return response.getcode() == 200
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError):
+            return False
+    
+    # Find available ports
+    dashboard_port = find_available_port(5678, 20)
+    if dashboard_port == 5678:
+        print(f"Dashboard server will use port {dashboard_port}")
+    else:
+        print(f"Port 5678 busy, using fallback port {dashboard_port}")
+    
+    api_port = find_available_port(8000, 20)
+    if api_port == 8000:
+        print(f"API server will use port {api_port}")
+    else:
+        print(f"Port 8000 busy, using fallback port {api_port}")
+    
+    # Initialize process manager
+    process_manager = ProcessManager()
+    
+    # Health monitoring state
+    health_monitoring_active = True
+    health_check_thread = None
+    
+    def health_monitor():
+        """Periodic health check for both servers"""
+        while health_monitoring_active:
+            try:
+                time.sleep(30)  # Check every 30 seconds
+                if not health_monitoring_active:
+                    break
+                    
+                # Check dashboard health
+                if not check_server_health('localhost', dashboard_port):
+                    print(f"Warning: Dashboard server on port {dashboard_port} is unresponsive")
+                
+                # Check API server health if it's running
+                running_processes = process_manager.get_running_processes()
+                if 'api_server' in running_processes:
+                    if not check_server_health('localhost', api_port, '/health'):
+                        print(f"Warning: API server on port {api_port} is unresponsive")
+                        
+            except Exception as e:
+                if health_monitoring_active:
+                    print(f"Health check error: {e}")
+    
+    def cleanup_and_exit(signal_num=None, frame=None):
+        """Cleanup function for graceful shutdown"""
+        nonlocal health_monitoring_active, health_check_thread
+        
+        print("\nShutting down servers...")
+        health_monitoring_active = False
+        
+        # Wait for health check thread to finish
+        if health_check_thread and health_check_thread.is_alive():
+            health_check_thread.join(timeout=2)
+        
+        # Cleanup all processes
+        success = process_manager.cleanup_all_processes()
+        if success:
+            print("All servers stopped successfully")
+        else:
+            print("Warning: Some processes may not have terminated properly")
+        
+        sys.exit(0 if success else 1)
+    
+    # Register signal handlers
+    signal.signal(signal.SIGINT, cleanup_and_exit)
+    signal.signal(signal.SIGTERM, cleanup_and_exit)
+    
+    try:
+        # Start API server as subprocess
+        print(f"Starting API server on port {api_port}...")
+        api_cmd = [sys.executable, "-c", f"""
+import subprocess
+import sys
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import json
+
+class APIHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/health':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({{'status': 'healthy', 'port': {api_port}}}).encode())
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def log_message(self, format, *args):
+        print(f"[API Server] {{format % args}}")
+
+try:
+    server = HTTPServer(('localhost', {api_port}), APIHandler)
+    print(f"API server started on port {api_port}")
+    server.serve_forever()
+except KeyboardInterrupt:
+    print("API server stopped")
+except Exception as e:
+    print(f"API server error: {{e}}")
+    sys.exit(1)
+"""]
+        
+        api_process = subprocess.Popen(api_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        process_manager.register_process('api_server', api_process)
+        
+        # Give API server time to start
+        time.sleep(2)
+        
+        # Verify API server started
+        if check_server_health('localhost', api_port, '/health'):
+            print(f"API server healthy on http://localhost:{api_port}")
+        else:
+            print(f"Warning: API server may not have started properly on port {api_port}")
+        
+        # Start health monitoring in background
+        health_check_thread = threading.Thread(target=health_monitor, daemon=True)
+        health_check_thread.start()
+        
+        # Open browser unless --no-browser flag is set
+        dashboard_url = f"http://localhost:{dashboard_port}"
+        if not args.no_browser:
+            print(f"Opening browser to {dashboard_url}")
+            try:
+                webbrowser.open(dashboard_url)
+            except Exception as e:
+                print(f"Could not open browser: {e}")
+        else:
+            print(f"Dashboard available at: {dashboard_url}")
+        
+        # Start dashboard server (this will block)
+        print(f"Starting dashboard server on port {dashboard_port}...")
+        print("Press Ctrl+C to stop all servers")
+        print("-" * 50)
+        
+        # Import and start dashboard server
+        import dashboard_server
+        success = dashboard_server.start_dashboard_server(dashboard_port, 'localhost')
+        
+        # If dashboard server exits, cleanup
+        cleanup_and_exit()
+        
+    except KeyboardInterrupt:
+        cleanup_and_exit()
+    except Exception as e:
+        print(f"Error starting servers: {e}")
+        cleanup_and_exit()
+
+
 def show_help():
     """Display help information about available commands"""
     print("\nAvailable commands:")
@@ -2281,6 +2439,9 @@ def main():
         else:
             print("Warning: Some processes may not have been terminated properly.")
             sys.exit(1)
+        
+    elif command == "serve":
+        serve_command(args)
         
     elif command == "help":
         show_help()
