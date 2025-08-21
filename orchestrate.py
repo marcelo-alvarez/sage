@@ -1233,21 +1233,25 @@ class ClaudeCodeOrchestrator:
         timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
         log_file = f"{self.outputs_dir.name}/{agent_name}-log.txt"
         
+        # Get current time for example
+        current_time = datetime.now().strftime("%H:%M:%S")
+        
         logging_instructions = f"""
 AGENT LOGGING (for debugging transparency):
 Throughout your work, append progress updates to {log_file} using this format:
 
 ## {timestamp} - {agent_name.upper()} Agent Session
 
-[timestamp] Starting {agent_name} agent work
-[timestamp] Reading required input files...
-[timestamp] [Describe what you found/understood]
-[timestamp] Beginning implementation...
-[timestamp] [Major steps or decisions]
-[timestamp] Writing output files...
-[timestamp] {agent_name.title()} agent work complete
+[{current_time}] Starting {agent_name} agent work
+[{current_time}] Reading required input files...
+[{current_time}] [Describe what you found/understood]
+[{current_time}] Beginning implementation...
+[{current_time}] [Major steps or decisions]  
+[{current_time}] Writing output files...
+[{current_time}] {agent_name.title()} agent work complete
 
-Use actual timestamps in [HH:MM:SS] format for each entry.
+IMPORTANT: Replace [{current_time}] with the ACTUAL current time when you write each entry.
+Use format [HH:MM:SS] with the real time, not placeholder timestamps.
 This log helps debug workflow issues - please maintain it as you work.
 
 """
