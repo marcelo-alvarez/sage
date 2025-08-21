@@ -1614,6 +1614,9 @@ CRITICAL REQUIREMENTS:
                 if not debug_mode:
                     print("✓ ALL TASKS COMPLETED SUCCESSFULLY")
                 return agent_type, instructions
+            elif agent_type == "user_checkpoint":
+                # USER validation task encountered - halt headless execution
+                return agent_type, instructions
             
             # Show agent progress
             self._show_agent_progress(agent_type, "running")
@@ -1798,8 +1801,12 @@ CRITICAL REQUIREMENTS:
             validation_type = "TASK"
             validation_id = ""
         
-        # Extract the task details after the colon if present
-        task_details = task[task.find(':'):].strip() if ':' in task else task
+        # Extract the task details after the colon if present  
+        if ':' in task:
+            colon_pos = task.find(':')
+            task_details = task[colon_pos + 1:].strip()
+        else:
+            task_details = task
         
         # Write validation instructions to file for reference
         from datetime import datetime
