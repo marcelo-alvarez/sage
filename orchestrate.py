@@ -1242,17 +1242,19 @@ Throughout your work, append progress updates to {log_file} using this format:
 
 ## {timestamp} - {agent_name.upper()} Agent Session
 
-[{current_time}] Starting {agent_name} agent work
-[{current_time}] Reading required input files...
-[{current_time}] [Describe what you found/understood]
-[{current_time}] Beginning implementation...
-[{current_time}] [Major steps or decisions]  
-[{current_time}] Writing output files...
-[{current_time}] {agent_name.title()} agent work complete
+[14:32:15] Starting {agent_name} agent work
+[14:32:18] Reading required input files...
+[14:32:25] [Describe what you found/understood]
+[14:32:40] Beginning implementation...
+[14:33:05] [Major steps or decisions]  
+[14:33:20] Writing output files...
+[14:33:25] {agent_name.title()} agent work complete
 
-IMPORTANT: Replace [{current_time}] with the ACTUAL current time when you write each entry.
-Use format [HH:MM:SS] with the real time, not placeholder timestamps.
-This log helps debug workflow issues - please maintain it as you work.
+CRITICAL: DO NOT use the example times shown above (14:32:15, etc).
+INSTEAD: Each time you write a log entry, check the current system time and use that.
+Format: [HH:MM:SS] where HH:MM:SS is the ACTUAL time right now when you write each entry.
+Examples: If it's 2:45 PM when you start, write [14:45:00]. If it's 2:47 PM when you finish reading, write [14:47:00].
+DO NOT use sequential numbers like [00:00:01], [00:00:02] - use real clock time.
 
 """
         
