@@ -17,7 +17,14 @@ import subprocess
 import os
 import webbrowser
 import socket
+from orchestrate import ClaudeCodeOrchestrator
 
+# Global state for concurrent operation tracking
+OPERATION_STATE = {
+    'current_operation': None,  # 'idle', 'starting', 'continuing', 'cleaning'
+    'start_time': None,
+    'pid': None
+}
 
 def find_available_port(start_port: int, max_attempts: int = 20) -> int:
     """Find an available port starting from start_port"""
@@ -229,6 +236,8 @@ class StatusHandler(BaseHTTPRequestHandler):
         
         if parsed_url.path == '/api/gate-decision':
             self._handle_gate_decision_request(parsed_url)
+        elif parsed_url.path == '/api/execute':
+            self._handle_execute_request(parsed_url)
         else:
             self._send_error(404, 'Not Found')
     
@@ -507,6 +516,152 @@ class StatusHandler(BaseHTTPRequestHandler):
         
         self.wfile.write(response_body)
     
+    def _handle_execute_request(self, parsed_url):
+        """Handle /api/execute endpoint for command execution"""
+        try:
+            # Parse query parameters for mode
+            query_params = parse_qs(parsed_url.query)
+            mode = query_params.get('mode', ['regular'])[0]
+            
+            # Validate mode parameter
+            if mode not in ['regular', 'meta']:
+                self._send_error(400, 'Invalid mode parameter. Use "regular" or "meta".')
+                return
+            
+            # Read request body
+            content_length = int(self.headers.get('Content-Length', 0))
+            if content_length == 0:
+                self._send_error(400, 'Missing request body')
+                return
+            
+            request_body = self.rfile.read(content_length).decode('utf-8')
+            
+            # Parse JSON body
+            try:
+                execute_data = json.loads(request_body)
+            except json.JSONDecodeError:
+                self._send_error(400, 'Invalid JSON in request body')
+                return
+            
+            # Validate required fields
+            command = execute_data.get('command')
+            if not command:
+                self._send_error(400, 'Missing required field: command')
+                return
+            
+            # Validate command against whitelist
+            valid_commands = ['start', 'continue', 'status', 'clean']
+            if command not in valid_commands:
+                self._send_error(400, f'Invalid command. Must be one of: {", ".join(valid_commands)}')
+                return
+            
+            # Check for concurrent operations
+            global OPERATION_STATE
+            if OPERATION_STATE['current_operation'] and OPERATION_STATE['current_operation'] != 'idle':
+                if command not in ['status']:  # Status is always allowed
+                    self._send_error(409, f'Operation in progress: {OPERATION_STATE["current_operation"]}')
+                    return
+            
+            # Force test commands to regular mode for meta-mode isolation
+            if mode == 'meta' and command in ['start', 'continue', 'clean']:
+                mode = 'regular'
+                print(f"[API Execute] Meta-mode isolation: redirecting {command} to regular mode")
+            
+            # Execute the command
+            result = self._execute_orchestrator_command(command, mode, execute_data)
+            
+            if result['success']:
+                self._send_json_response(result)
+            else:
+                self._send_error(500, result['error'])
+            
+        except Exception as e:
+            print(f"Error handling execute request: {e}")
+            self._send_error(500, 'Internal Server Error')
+    
+    def _execute_orchestrator_command(self, command, mode, execute_data):
+        """Execute orchestrator command directly"""
+        try:
+            global OPERATION_STATE
+            
+            # Initialize orchestrator
+            orchestrator = ClaudeCodeOrchestrator(no_browser=True, headless=True)
+            
+            # Update operation state for non-status commands
+            if command != 'status':
+                OPERATION_STATE['current_operation'] = command
+                OPERATION_STATE['start_time'] = time.time()
+                OPERATION_STATE['pid'] = os.getpid()
+            
+            result_data = {
+                'success': True,
+                'command': command,
+                'mode': mode,
+                'pid': os.getpid(),
+                'timestamp': time.time()
+            }
+            
+            try:
+                if command == 'start':
+                    agent, instructions = orchestrator.get_continue_agent()
+                    result_data.update({
+                        'message': f'Workflow started with agent: {agent}',
+                        'agent': agent,
+                        'instructions': instructions
+                    })
+                    
+                elif command == 'continue':
+                    agent, instructions = orchestrator.get_continue_agent()
+                    result_data.update({
+                        'message': f'Continuing workflow with agent: {agent}',
+                        'agent': agent,
+                        'instructions': instructions
+                    })
+                    
+                elif command == 'status':
+                    orchestrator.status()
+                    result_data.update({
+                        'message': 'Status retrieved successfully',
+                        'operation_state': OPERATION_STATE.copy()
+                    })
+                    
+                elif command == 'clean':
+                    orchestrator.clean_outputs()
+                    result_data.update({
+                        'message': 'Outputs cleaned successfully'
+                    })
+                
+                # Read updated status after command execution
+                if self.status_reader:
+                    workflow_state = self.status_reader.read_status(mode)
+                    result_data['workflow_state'] = workflow_state
+                
+                return result_data
+                
+            except Exception as cmd_error:
+                result_data.update({
+                    'success': False,
+                    'error': f'Command execution failed: {str(cmd_error)}'
+                })
+                return result_data
+                
+            finally:
+                # Reset operation state after completion (except for status)
+                if command != 'status':
+                    OPERATION_STATE['current_operation'] = 'idle'
+                    OPERATION_STATE['start_time'] = None
+        
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f'Error executing command: {str(e)}'
+            }
+        
+        finally:
+            # Ensure operation state is reset on any error
+            if command != 'status':
+                OPERATION_STATE['current_operation'] = 'idle'
+    
     def log_message(self, format, *args):
         """Override to customize logging"""
         print(f"[{self.log_date_time_string()}] {format % args}")
@@ -547,6 +702,7 @@ class OrchestratorAPIServer:
             print(f"Starting Claude Code Orchestrator API server on {self.host}:{self.port}")
             print(f"Status endpoint: http://{self.host}:{self.port}/api/status")
             print(f"Gate decision endpoint: http://{self.host}:{self.port}/api/gate-decision")
+            print(f"Command execution endpoint: http://{self.host}:{self.port}/api/execute")
             print(f"With meta mode: http://{self.host}:{self.port}/api/status?mode=meta")
             print("Press Ctrl+C to stop the server")
             
@@ -604,6 +760,7 @@ class OrchestratorAPIServer:
                 print(f"Starting Claude Code Orchestrator API server on {self.host}:{self.port}")
                 print(f"Status endpoint: http://{self.host}:{self.port}/api/status")
                 print(f"Gate decision endpoint: http://{self.host}:{self.port}/api/gate-decision")
+                print(f"Command execution endpoint: http://{self.host}:{self.port}/api/execute")
                 print(f"With meta mode: http://{self.host}:{self.port}/api/status?mode=meta")
                 
                 # Start server without signal handlers (background mode)
