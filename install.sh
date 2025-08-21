@@ -205,6 +205,18 @@ install_orchestrator_runtime() {
         cp "$TEMP_DIR/process_manager.py" "$runtime_dir/process_manager.py"
     fi
     
+    # Copy cc-orchestrate executable if it exists
+    if [ -f "$TEMP_DIR/cc-orchestrate" ]; then
+        cp "$TEMP_DIR/cc-orchestrate" "$runtime_dir/cc-orchestrate"
+        chmod +x "$runtime_dir/cc-orchestrate"
+    fi
+    
+    # Copy cc-morchestrate executable if it exists
+    if [ -f "$TEMP_DIR/cc-morchestrate" ]; then
+        cp "$TEMP_DIR/cc-morchestrate" "$runtime_dir/cc-morchestrate"
+        chmod +x "$runtime_dir/cc-morchestrate"
+    fi
+    
     # The orchestrate.py file is already configured for global installation
     # No path modifications needed
     
@@ -342,23 +354,43 @@ create_wrapper_executable() {
     # Create the wrapper directory
     mkdir -p "$wrapper_dir"
     
-    # Create the wrapper script
-    cat > "$wrapper_dir/cc-orchestrate" << 'EOF'
+    # Create the wrapper scripts - use our Python scripts if available, otherwise fallback to bash wrappers
+    if [ -f "$HOME/.claude-orchestrator/cc-orchestrate" ]; then
+        # Use the Python cc-orchestrate script
+        cp "$HOME/.claude-orchestrator/cc-orchestrate" "$wrapper_dir/cc-orchestrate"
+        chmod +x "$wrapper_dir/cc-orchestrate"
+    else
+        # Fallback to bash wrapper for backward compatibility
+        cat > "$wrapper_dir/cc-orchestrate" << 'EOF'
 #!/bin/bash
 # Claude Code Orchestrator wrapper
 exec python3 "$HOME/.claude-orchestrator/orchestrate.py" "$@"
 EOF
+        chmod +x "$wrapper_dir/cc-orchestrate"
+    fi
     
-    # Make wrapper executable
-    chmod +x "$wrapper_dir/cc-orchestrate"
-    
-    print_success "cc-orchestrate command created in $wrapper_dir"
-    
-    # Check if it's immediately available
-    if command -v cc-orchestrate &> /dev/null; then
-        print_success "cc-orchestrate command is available in PATH"
+    # Create cc-morchestrate wrapper
+    if [ -f "$HOME/.claude-orchestrator/cc-morchestrate" ]; then
+        # Use the Python cc-morchestrate script
+        cp "$HOME/.claude-orchestrator/cc-morchestrate" "$wrapper_dir/cc-morchestrate"
+        chmod +x "$wrapper_dir/cc-morchestrate"
     else
-        print_info "cc-orchestrate will be available after restarting your terminal"
+        # Fallback to bash wrapper for backward compatibility
+        cat > "$wrapper_dir/cc-morchestrate" << 'EOF'
+#!/bin/bash
+# Claude Code Orchestrator Meta Mode wrapper
+exec python3 "$HOME/.claude-orchestrator/orchestrate.py" "$@" meta
+EOF
+        chmod +x "$wrapper_dir/cc-morchestrate"
+    fi
+    
+    print_success "cc-orchestrate and cc-morchestrate commands created in $wrapper_dir"
+    
+    # Check if they're immediately available
+    if command -v cc-orchestrate &> /dev/null && command -v cc-morchestrate &> /dev/null; then
+        print_success "cc-orchestrate and cc-morchestrate commands are available in PATH"
+    else
+        print_info "Commands will be available after restarting your terminal"
         print_info "Or run: export PATH=\"$wrapper_dir:\$PATH\""
     fi
 }
@@ -402,6 +434,8 @@ print_summary() {
     echo "   Terminal: cc-orchestrate bootstrap     # Generate initial tasks"
     echo "   Terminal: cc-orchestrate continue      # Run workflow (headless)"
     echo "   Terminal: cc-orchestrate interactive   # Interactive mode with gates"
+    echo "   Terminal: cc-orchestrate serve         # Start dashboard server"
+    echo "   Terminal: cc-orchestrate stop          # Stop all orchestrator processes"
     echo ""
     if [ -n "$PROJECT_DIR" ]; then
         echo "   Or add tasks manually to: $PROJECT_DIR/.claude/tasks-checklist.md"
@@ -412,6 +446,7 @@ print_summary() {
     echo ""
     echo "📖 Available commands:"
     echo "   Workflow: start, continue, status, clean, complete, fail, bootstrap"
+    echo "   Server: serve, stop"
     echo "   Gates: approve-criteria, modify-criteria, retry-explorer"
     echo "            approve-completion, retry-from-planner, retry-from-coder, retry-from-verifier"
     echo "   Mode: unsupervised, supervised"

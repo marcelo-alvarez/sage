@@ -1054,7 +1054,7 @@ class ClaudeCodeOrchestrator:
         self.dashboard = None
         
         # Initialize process manager for robust subprocess handling
-        self.process_manager = ProcessManager()
+        self.process_manager = ProcessManager(meta_mode=self.meta_mode)
         
         # Register main orchestrator process for tracking
         self.process_manager.register_main_process('orchestrator_main')
@@ -2161,8 +2161,9 @@ def serve_command(args):
     else:
         print(f"Port 8000 busy, using fallback port {api_port}")
     
-    # Initialize process manager
-    process_manager = ProcessManager()
+    # Initialize process manager (check for meta mode via environment)
+    meta_mode = os.getenv('CLAUDE_ORCHESTRATOR_META_MODE') == '1'
+    process_manager = ProcessManager(meta_mode=meta_mode)
     
     # Health monitoring state
     health_monitoring_active = True
@@ -2437,7 +2438,9 @@ def main():
         
     elif command == "stop":
         # Stop all orchestrator processes system-wide
-        process_manager = ProcessManager()
+        # Check if running in meta mode
+        meta_mode = 'meta' in sys.argv
+        process_manager = ProcessManager(meta_mode=meta_mode)
         success = process_manager.cleanup_system_wide()
         if success:
             print("All orchestrator processes have been stopped.")
