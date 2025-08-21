@@ -141,7 +141,7 @@ class AgentRole:
 class AgentConfig:
     """Configuration manager for agent definitions"""
     
-    def __init__(self, config_path: Path = None, enable_dashboard: bool = False, dashboard_port: int = 5678, api_port: int = 8000, no_browser: bool = False):
+    def __init__(self, config_path: Path = None, enable_dashboard: bool = False, dashboard_port: int = 5678, api_port: int = 8000, no_browser: bool = False, process_manager=None):
         self.config_path = config_path or Path('.claude/agent-config.json')
         self.templates_dir = Path('templates/agents')
         self.agents = {}
@@ -153,6 +153,7 @@ class AgentConfig:
         self.api_process = None
         self.dashboard = None
         self.dashboard_available = False
+        self.process_manager = process_manager
         self._load_config()
         
         if self.enable_dashboard:
@@ -353,8 +354,9 @@ class AgentConfig:
                 '--port', str(self.api_port)
             ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             
-            # Register API process with ProcessManager
-            self.process_manager.register_process('api_server', self.api_process)
+            # Register API process with ProcessManager if available
+            if self.process_manager:
+                self.process_manager.register_process('api_server', self.api_process)
             print(f"API server started as subprocess (PID: {self.api_process.pid}) on port {self.api_port}")
             
             # Start dashboard server as subprocess
@@ -362,8 +364,9 @@ class AgentConfig:
                 sys.executable, 'test_dashboard_server.py', str(self.dashboard_port)
             ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             
-            # Register dashboard process with ProcessManager
-            self.process_manager.register_process('dashboard_server', self.dashboard_process)
+            # Register dashboard process with ProcessManager if available
+            if self.process_manager:
+                self.process_manager.register_process('dashboard_server', self.dashboard_process)
             print(f"Dashboard server started as subprocess (PID: {self.dashboard_process.pid}) on port {self.dashboard_port}")
             
             # Give servers time to start
@@ -415,14 +418,23 @@ class AgentConfig:
     def stop_dashboard(self):
         """Stop dashboard and API server subprocesses"""
         try:
-            # Use ProcessManager for clean shutdown
-            dashboard_stopped = self.process_manager.terminate_process('dashboard_server')
-            api_stopped = self.process_manager.terminate_process('api_server')
-            
-            if dashboard_stopped:
-                self.dashboard_process = None
-            if api_stopped:
-                self.api_process = None
+            # Use ProcessManager for clean shutdown if available
+            if self.process_manager:
+                dashboard_stopped = self.process_manager.terminate_process('dashboard_server')
+                api_stopped = self.process_manager.terminate_process('api_server')
+                
+                if dashboard_stopped:
+                    self.dashboard_process = None
+                if api_stopped:
+                    self.api_process = None
+            else:
+                # Fallback to direct process termination
+                if self.dashboard_process:
+                    self.dashboard_process.terminate()
+                    self.dashboard_process = None
+                if self.api_process:
+                    self.api_process.terminate()
+                    self.api_process = None
                 
         except Exception as e:
             print(f"Error stopping servers: {e}")
@@ -774,6 +786,14 @@ class AgentExecutor:
         else:
             error_parts.append("No stderr output from Claude CLI")
         
+        # Agent log file status for debugging
+        log_file = self.outputs_dir / f"{agent_type}-log.txt"
+        if log_file.exists():
+            size = log_file.stat().st_size
+            error_parts.append(f"Agent log file exists ({size} bytes): {log_file}")
+        else:
+            error_parts.append(f"No agent log file found: {log_file}")
+        
         return " | ".join(error_parts)
 
     def _sanitize_error_message(self, message):
@@ -959,8 +979,14 @@ class ClaudeCodeOrchestrator:
         self.api_process = None
         self.dashboard = None
         
+        # Initialize process manager for robust subprocess handling
+        self.process_manager = ProcessManager()
+        
+        # Register main orchestrator process for tracking
+        self.process_manager.register_main_process('orchestrator_main')
+        
         # Initialize configuration systems
-        self.agent_config = AgentConfig(enable_dashboard=self.enable_dashboard, dashboard_port=self.dashboard_port, api_port=self.api_port, no_browser=self.no_browser)
+        self.agent_config = AgentConfig(enable_dashboard=self.enable_dashboard, dashboard_port=self.dashboard_port, api_port=self.api_port, no_browser=self.no_browser, process_manager=self.process_manager)
         self.workflow_config = WorkflowConfig()
         
         # Initialize agent factory with configuration
@@ -972,9 +998,6 @@ class ClaudeCodeOrchestrator:
         # Dashboard is initialized through AgentConfig if enabled
         self.dashboard = self.agent_config.dashboard
         self.dashboard_available = getattr(self.agent_config, 'dashboard_available', False)
-        
-        # Initialize process manager for robust subprocess handling
-        self.process_manager = ProcessManager()
         
         # Install signal handlers for clean shutdown
         self._install_signal_handlers()
@@ -1131,8 +1154,33 @@ class ClaudeCodeOrchestrator:
         # Replace .agent-outputs/ paths with actual outputs directory for meta mode compatibility
         adjusted_work_section = work_section.replace('.agent-outputs/', f'{self.outputs_dir.name}/')
         
+        # Add agent logging instructions for transparency
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+        log_file = f"{self.outputs_dir.name}/{agent_name}-log.txt"
+        
+        logging_instructions = f"""
+AGENT LOGGING (for debugging transparency):
+Throughout your work, append progress updates to {log_file} using this format:
+
+## {timestamp} - {agent_name.upper()} Agent Session
+
+[timestamp] Starting {agent_name} agent work
+[timestamp] Reading required input files...
+[timestamp] [Describe what you found/understood]
+[timestamp] Beginning implementation...
+[timestamp] [Major steps or decisions]
+[timestamp] Writing output files...
+[timestamp] {agent_name.title()} agent work complete
+
+Use actual timestamps in [HH:MM:SS] format for each entry.
+This log helps debug workflow issues - please maintain it as you work.
+
+"""
+        
         # Build clean instructions without interactive commands
         headless_instructions = "You are now the " + agent_name.upper() + " agent.\n\n" + \
+                               logging_instructions + \
                                adjusted_work_section + "\n\n" + \
                                "When complete, output: " + completion_phrase
         
