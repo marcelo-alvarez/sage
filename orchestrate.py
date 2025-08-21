@@ -20,6 +20,9 @@ import time
 import socket
 import argparse
 import signal
+import threading
+import urllib.request
+import urllib.error
 from process_manager import ProcessManager
 
 
@@ -154,6 +157,8 @@ class AgentConfig:
         self.dashboard = None
         self.dashboard_available = False
         self.process_manager = process_manager
+        self.health_check_thread = None
+        self.health_check_running = False
         self._load_config()
         
         if self.enable_dashboard:
@@ -361,7 +366,7 @@ class AgentConfig:
             
             # Start dashboard server as subprocess
             self.dashboard_process = subprocess.Popen([
-                sys.executable, 'test_dashboard_server.py', str(self.dashboard_port)
+                sys.executable, 'dashboard_server.py', str(self.dashboard_port)
             ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             
             # Register dashboard process with ProcessManager if available
@@ -391,6 +396,9 @@ class AgentConfig:
                 # Register cleanup
                 atexit.register(self.stop_dashboard)
                 
+                # Start health monitoring
+                self.start_health_monitoring()
+                
             else:
                 print("Warning: Dashboard servers failed to start properly")
                 print("Orchestrator will continue without web dashboard")
@@ -418,6 +426,9 @@ class AgentConfig:
     def stop_dashboard(self):
         """Stop dashboard and API server subprocesses"""
         try:
+            # Stop health monitoring first
+            self.stop_health_monitoring()
+            
             # Use ProcessManager for clean shutdown if available
             if self.process_manager:
                 dashboard_stopped = self.process_manager.terminate_process('dashboard_server')
@@ -438,6 +449,69 @@ class AgentConfig:
                 
         except Exception as e:
             print(f"Error stopping servers: {e}")
+    
+    def start_health_monitoring(self):
+        """Start health monitoring thread for server processes"""
+        if self.health_check_running:
+            return
+            
+        self.health_check_running = True
+        self.health_check_thread = threading.Thread(target=self._health_monitor_loop, daemon=True)
+        self.health_check_thread.start()
+        print("Health monitoring started - checking every 30 seconds")
+    
+    def stop_health_monitoring(self):
+        """Stop health monitoring thread"""
+        self.health_check_running = False
+        if self.health_check_thread:
+            self.health_check_thread.join(timeout=5)
+    
+    def _health_monitor_loop(self):
+        """Health monitoring loop that runs in background thread"""
+        while self.health_check_running:
+            try:
+                time.sleep(30)  # 30-second intervals
+                if not self.health_check_running:
+                    break
+                    
+                self._check_server_health()
+                
+            except Exception as e:
+                print(f"Health monitoring error: {e}")
+    
+    def _check_server_health(self):
+        """Check health of dashboard and API servers"""
+        if not self.dashboard_available:
+            return
+            
+        # Check process health
+        api_running = self.api_process and self.api_process.poll() is None
+        dashboard_running = self.dashboard_process and self.dashboard_process.poll() is None
+        
+        # Check HTTP endpoint health
+        api_responsive = self._check_http_health(f"http://localhost:{self.api_port}/health")
+        dashboard_responsive = self._check_http_health(f"http://localhost:{self.dashboard_port}/")
+        
+        # Report issues
+        if not api_running:
+            print(f"Health check: API server process not running (PID check failed)")
+        elif not api_responsive:
+            print(f"Health check: API server unresponsive on port {self.api_port}")
+            
+        if not dashboard_running:
+            print(f"Health check: Dashboard server process not running (PID check failed)")
+        elif not dashboard_responsive:
+            print(f"Health check: Dashboard server unresponsive on port {self.dashboard_port}")
+    
+    def _check_http_health(self, url: str, timeout: int = 5) -> bool:
+        """Check if HTTP endpoint is responsive"""
+        try:
+            with urllib.request.urlopen(url, timeout=timeout) as response:
+                return response.status == 200
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError):
+            return False
+        except Exception:
+            return False
 
 
 # Legacy gate options - can be made configurable in future
@@ -1571,16 +1645,32 @@ This log helps debug workflow issues - please maintain it as you work.
             unsupervised_file = self.claude_dir / "unsupervised"
             if unsupervised_file.exists():
                 verification_content = verification_file.read_text()
-                
-                # Check if verification recommends approval
                 verification_lower = verification_content.lower()
-                if "recommend approval" in verification_lower or "ready for approval" in verification_lower or "approve" in verification_lower:
+                
+                # First check for explicit failure indicators - these BLOCK auto-approval
+                failure_indicators = ["fail", "needs_review", "needs review", "error", "not ready", "incomplete"]
+                if any(indicator in verification_lower for indicator in failure_indicators):
+                    # Force interactive gate for failed verification
+                    debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+                    if debug_mode:
+                        print("Unsupervised mode: Verification failed - forcing human review")
+                    # Continue to interactive gate (don't auto-approve)
+                    
+                # Only auto-approve on explicit success indicators
+                elif "pass" in verification_lower or "success" in verification_lower or "complete" in verification_lower:
                     # Auto-approve completion in unsupervised mode
                     debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
                     if debug_mode:
-                        print("Unsupervised mode: Auto-approved completion")
+                        print("Unsupervised mode: Verification passed - auto-approved completion")
                     self.approve_completion()
                     return "complete", "Task automatically completed in unsupervised mode"
+                    
+                else:
+                    # Ambiguous verification - force human review
+                    debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+                    if debug_mode:
+                        print("Unsupervised mode: Ambiguous verification - forcing human review")
+                    # Continue to interactive gate
             
             verification_content = verification_file.read_text()
             
