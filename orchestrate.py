@@ -656,7 +656,7 @@ class AgentExecutor:
                 capture_output=True,
                 text=True,
                 timeout=timeout_seconds,
-                cwd=str(self.outputs_dir),
+                cwd=str(self.project_root),
                 env=subprocess_env
             )
             
