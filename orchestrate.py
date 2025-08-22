@@ -1938,59 +1938,16 @@ CRITICAL REQUIREMENTS:
         
         # Generate contextual task description
         if user_description and user_description.strip():
-            # User provided specific description
+            # User provided specific description - use as-is
             fix_description = user_description.strip()
-            
-            # Check for "see *.md" pattern to include markdown file contents
-            fix_description = self._process_markdown_references(fix_description)
         else:
             # Generate generic fix task
             fix_description = f"Fix issues found during {validation_type} {validation_id}".strip()
         
-        # Create comprehensive task description
-        task_description = f"Fix validation failure: {fix_description}. This addresses issues found during {validation_type} {validation_id} where the test was: {validation_instructions}. Ensure all validation criteria are met before proceeding."
+        # Create simple, clean task description
+        task_description = f"Fix validation failure: {fix_description}"
         
         return task_description
-
-    def _process_markdown_references(self, description):
-        """Process 'see *.md' patterns and include markdown file contents"""
-        
-        import re
-        import glob
-        from pathlib import Path
-        
-        # Look for "see *.md" patterns
-        see_pattern = re.compile(r'\bsee\s+([\w\-_.]+\.md)\b', re.IGNORECASE)
-        matches = see_pattern.finditer(description)
-        
-        processed_description = description
-        
-        for match in matches:
-            markdown_filename = match.group(1)
-            reference_text = match.group(0)  # Full "see filename.md" text
-            
-            # Look for the file in the project root directory
-            project_root = Path.cwd()
-            markdown_file = project_root / markdown_filename
-            
-            if markdown_file.exists() and markdown_file.is_file():
-                try:
-                    markdown_content = markdown_file.read_text(encoding='utf-8')
-                    
-                    # Replace "see filename.md" with file contents
-                    replacement = f"see {markdown_filename}:\n\n```markdown\n{markdown_content.strip()}\n```"
-                    processed_description = processed_description.replace(reference_text, replacement)
-                    
-                    print(f"📄 Included contents of {markdown_filename} in task description")
-                    
-                except Exception as e:
-                    print(f"⚠️ Could not read {markdown_filename}: {e}")
-                    # Leave the original "see filename.md" text if file can't be read
-            else:
-                print(f"⚠️ Markdown file not found: {markdown_filename}")
-                # Leave the original "see filename.md" text if file doesn't exist
-        
-        return processed_description
 
     def _insert_task_before_user_validation(self, new_task_description):
         """Insert a new task before the current USER validation task in the checklist"""
