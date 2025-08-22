@@ -533,10 +533,9 @@ GATE_OPTIONS = {
     ],
     
     "user_validation": [
-        "user-approve - Mark validation passed and continue",
-        "retry-from-explorer - Validation failed, restart from exploration",
-        "retry-from-planner - Validation failed, restart from planner",
-        "retry-from-coder - Validation failed, restart from coder", 
+        "user-approve - Tests passed, continue to next task",
+        "new-task [description] - Create new task to fix validation failure",
+        "retry-last-task - Previous implementation task needs fixing",
         "exit - Exit and resume from this gate later"
     ]
 }
@@ -1402,6 +1401,37 @@ CRITICAL REQUIREMENTS:
                     print(f"Exiting. Run 'continue' to resume from {gate_type} gate.")
                     return "exit", "User chose to exit at gate"
                 
+                elif user_input.startswith("new-task"):
+                    # Handle new-task command with optional description
+                    if gate_type == "user_validation":
+                        # Parse optional description after "new-task"
+                        if len(user_input) > 8:  # "new-task" is 8 characters
+                            description = user_input[8:].strip()
+                        else:
+                            description = input("Describe the issue found during validation: ").strip()
+                        
+                        # Generate and insert the fix task
+                        current_user_task = self._get_current_user_validation_task()
+                        if current_user_task:
+                            fix_task = self._generate_fix_task(current_user_task, description)
+                            success = self._insert_task_before_user_validation(fix_task)
+                            
+                            if success:
+                                # Remove pending gate state
+                                gate_state_file = self.outputs_dir / f"pending-{gate_type}-gate.md"
+                                if gate_state_file.exists():
+                                    gate_state_file.unlink()
+                                return "new_task_created", f"Created fix task: {fix_task}"
+                            else:
+                                print("Failed to insert new task. Please try again.")
+                                continue
+                        else:
+                            print("Could not find current USER validation task.")
+                            continue
+                    else:
+                        print("new-task command only available for user validation gates.")
+                        continue
+                        
                 elif user_input in valid_commands:
                     # Remove any pending gate state since we're proceeding
                     gate_state_file = self.outputs_dir / f"pending-{gate_type}-gate.md"
@@ -1446,6 +1476,14 @@ CRITICAL REQUIREMENTS:
                         print("User validation passed, marking task complete...")
                         self.approve_user_validation()
                         return "approved", "User validation passed, continuing workflow"
+                    elif user_input == "retry-last-task":
+                        print("Retrying last implementation task...")
+                        success = self._retry_last_implementation_task()
+                        if success:
+                            return "retry", "Restarting previous implementation task"
+                        else:
+                            print("Could not find previous implementation task to retry.")
+                            continue
                     else:
                         print(f"Command '{user_input}' not implemented yet")
                         continue
@@ -1620,7 +1658,7 @@ CRITICAL REQUIREMENTS:
                 
                 if result_type == "exit":
                     return result_type, result_message
-                elif result_type in ["approved", "modified", "retry", "completed"]:
+                elif result_type in ["approved", "modified", "retry", "completed", "new_task_created"]:
                     # Gate was handled, continue workflow
                     print(f"Gate decision: {result_message}")
                     continue
@@ -1873,6 +1911,171 @@ CRITICAL REQUIREMENTS:
         
         # Return None to trigger gate handling in workflow
         return None
+
+    def _generate_fix_task(self, validation_task, user_description):
+        """Generate a fix task based on validation failure and user input"""
+        
+        # Extract validation context
+        validation_type = "VALIDATION"
+        validation_id = ""
+        
+        import re
+        match = re.match(r'USER\s+(\w+)\s*([A-Z0-9]*)', validation_task)
+        if match:
+            validation_type = match.group(1)
+            validation_id = match.group(2) if match.group(2) else ""
+        
+        # Extract what was being validated
+        if ':' in validation_task:
+            colon_pos = validation_task.find(':')
+            validation_instructions = validation_task[colon_pos + 1:].strip()
+        else:
+            validation_instructions = validation_task
+        
+        # Generate contextual task description
+        if user_description and user_description.strip():
+            # User provided specific description
+            fix_description = user_description.strip()
+        else:
+            # Generate generic fix task
+            fix_description = f"Fix issues found during {validation_type} {validation_id}".strip()
+        
+        # Create comprehensive task description
+        task_description = f"Fix validation failure: {fix_description}. This addresses issues found during {validation_type} {validation_id} where the test was: {validation_instructions}. Ensure all validation criteria are met before proceeding."
+        
+        return task_description
+
+    def _insert_task_before_user_validation(self, new_task_description):
+        """Insert a new task before the current USER validation task in the checklist"""
+        
+        if not self.checklist_file.exists():
+            return False
+        
+        content = self.checklist_file.read_text()
+        lines = content.split('\n')
+        
+        # Find the first incomplete USER validation task
+        user_task_line_index = None
+        user_task = None
+        
+        for i, line in enumerate(lines):
+            if re.match(r'^\s*-\s*\[\s*\]\s*', line):
+                task = re.sub(r'^\s*-\s*\[\s*\]\s*', '', line)
+                task = re.sub(r'\s*\(.*\)\s*$', '', task)
+                task = task.strip()
+                
+                if task.startswith('USER'):
+                    user_task_line_index = i
+                    user_task = task
+                    break
+        
+        if user_task_line_index is None:
+            print("No incomplete USER validation task found")
+            return False
+        
+        # Create new task line with same indentation as USER task
+        user_line = lines[user_task_line_index]
+        indent_match = re.match(r'^(\s*-\s*\[\s*\]\s*)', user_line)
+        indent = indent_match.group(1) if indent_match else '- [ ] '
+        
+        new_task_line = f"{indent}{new_task_description}"
+        
+        # Insert new task before the USER validation task
+        lines.insert(user_task_line_index, new_task_line)
+        
+        # Write back to checklist
+        self.checklist_file.write_text('\n'.join(lines))
+        
+        # Also add to tasks.md if it exists
+        if self.tasks_file.exists():
+            tasks_content = self.tasks_file.read_text()
+            new_task_entry = f"\n## {new_task_description}\n[Added to fix validation failure]\n"
+            
+            # Find a good place to insert in tasks.md - before USER validation section
+            if f"USER {user_task.split()[1]}" in tasks_content:
+                # Insert before the USER validation section
+                insertion_point = tasks_content.find(f"## USER {user_task.split()[1]}")
+                if insertion_point != -1:
+                    tasks_content = tasks_content[:insertion_point] + new_task_entry + tasks_content[insertion_point:]
+                    self.tasks_file.write_text(tasks_content)
+                else:
+                    # Append at end if can't find specific section
+                    self.tasks_file.write_text(tasks_content + new_task_entry)
+            else:
+                # Append at end
+                self.tasks_file.write_text(tasks_content + new_task_entry)
+        
+        print(f"✅ Inserted new task: {new_task_description}")
+        print(f"📍 Positioned before: {user_task}")
+        return True
+
+    def _get_current_user_validation_task(self):
+        """Get the current USER validation task that triggered the gate"""
+        
+        if not self.checklist_file.exists():
+            return None
+        
+        content = self.checklist_file.read_text()
+        lines = content.split('\n')
+        
+        # Find the first incomplete USER validation task
+        for line in lines:
+            if re.match(r'^\s*-\s*\[\s*\]\s*', line):
+                task = re.sub(r'^\s*-\s*\[\s*\]\s*', '', line)
+                task = re.sub(r'\s*\(.*\)\s*$', '', task)
+                task = task.strip()
+                
+                if task.startswith('USER'):
+                    return task
+        
+        return None
+
+    def _retry_last_implementation_task(self):
+        """Mark the previous implementation task (non-USER) as incomplete to retry it"""
+        
+        if not self.checklist_file.exists():
+            return False
+        
+        content = self.checklist_file.read_text()
+        lines = content.split('\n')
+        
+        # Find the last completed non-USER task before current USER validation
+        user_task_found = False
+        last_impl_task_line = None
+        
+        for i, line in enumerate(lines):
+            # Check if this is the current USER validation task
+            if re.match(r'^\s*-\s*\[\s*\]\s*', line):
+                task = re.sub(r'^\s*-\s*\[\s*\]\s*', '', line)
+                task = re.sub(r'\s*\(.*\)\s*$', '', task).strip()
+                if task.startswith('USER'):
+                    user_task_found = True
+                    break
+            
+            # Look for completed implementation tasks
+            if re.match(r'^\s*-\s*\[x\]\s*', line):
+                task = re.sub(r'^\s*-\s*\[x\]\s*', '', line)
+                task = re.sub(r'\s*\(.*\)\s*$', '', task).strip()
+                if not task.startswith('USER'):
+                    last_impl_task_line = i
+        
+        if not user_task_found or last_impl_task_line is None:
+            return False
+        
+        # Mark the last implementation task as incomplete
+        old_line = lines[last_impl_task_line]
+        new_line = old_line.replace('[x]', '[ ]')
+        lines[last_impl_task_line] = new_line
+        
+        # Write back to checklist
+        self.checklist_file.write_text('\n'.join(lines))
+        
+        # Extract task description for logging
+        task_desc = re.sub(r'^\s*-\s*\[\s*\]\s*', '', new_line)
+        task_desc = re.sub(r'\s*\(.*\)\s*$', '', task_desc).strip()
+        
+        print(f"🔄 Marked for retry: {task_desc}")
+        return True
 
     def _has_more_tasks(self):
         """Check if there are any uncompleted tasks in the checklist"""
