@@ -1381,6 +1381,10 @@ CRITICAL REQUIREMENTS:
                 print("Review verification results and choose:")
             elif gate_type == "user_validation":
                 print("Complete the validation testing and choose:")
+                # Show the validation instructions from gate content
+                print()
+                print(gate_content)
+                print()
             
             gate_options = GATE_OPTIONS.get(gate_type, [])
             for option in gate_options:
