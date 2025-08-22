@@ -530,6 +530,14 @@ GATE_OPTIONS = {
         "retry-from-coder - Restart from Coder",
         "retry-from-verifier - Re-verify only",
         "exit - Exit and resume from this gate later"
+    ],
+    
+    "user_validation": [
+        "user-approve - Mark validation passed and continue",
+        "retry-from-explorer - Validation failed, restart from exploration",
+        "retry-from-planner - Validation failed, restart from planner",
+        "retry-from-coder - Validation failed, restart from coder", 
+        "exit - Exit and resume from this gate later"
     ]
 }
 
@@ -1372,6 +1380,8 @@ CRITICAL REQUIREMENTS:
                 print("Review success criteria and choose:")
             elif gate_type == "completion":
                 print("Review verification results and choose:")
+            elif gate_type == "user_validation":
+                print("Complete the validation testing and choose:")
             
             gate_options = GATE_OPTIONS.get(gate_type, [])
             for option in gate_options:
@@ -1432,6 +1442,10 @@ CRITICAL REQUIREMENTS:
                         print("Restarting from verifier...")
                         self.retry_from_verifier()
                         return "retry", "Restarting from verifier"
+                    elif user_input == "user-approve":
+                        print("User validation passed, marking task complete...")
+                        self.approve_user_validation()
+                        return "approved", "User validation passed, continuing workflow"
                     else:
                         print(f"Command '{user_input}' not implemented yet")
                         continue
@@ -1453,6 +1467,7 @@ CRITICAL REQUIREMENTS:
         # Check for pending gate state first (for resume functionality)
         pending_criteria_gate = self.outputs_dir / "pending-criteria-gate.md"
         pending_completion_gate = self.outputs_dir / "pending-completion-gate.md"
+        pending_user_validation_gate = self.outputs_dir / "pending-user_validation-gate.md"
         
         if pending_criteria_gate.exists():
             gate_content = pending_criteria_gate.read_text()
@@ -1460,6 +1475,17 @@ CRITICAL REQUIREMENTS:
         elif pending_completion_gate.exists():
             gate_content = pending_completion_gate.read_text()
             return self._handle_interactive_gate("completion", gate_content)
+        elif pending_user_validation_gate.exists():
+            gate_content = pending_user_validation_gate.read_text()
+            return self._handle_interactive_gate("user_validation", gate_content)
+        
+        # Check for USER tasks before determining workflow phase
+        if self.checklist_file.exists():
+            current_task = self._get_current_task()
+            if current_task is None and pending_user_validation_gate.exists():
+                # A USER validation gate was just created, handle it
+                gate_content = pending_user_validation_gate.read_text()
+                return self._handle_interactive_gate("user_validation", gate_content)
         
         # Check what outputs exist to determine next phase
         current_outputs = {
@@ -1789,9 +1815,9 @@ CRITICAL REQUIREMENTS:
         return None
 
     def _handle_user_validation(self, task):
-        """Handle USER tasks by showing instructions and halting orchestrator"""
+        """Handle USER tasks by creating a user validation gate"""
         
-        # Prevent multiple displays of the same validation in a single execution
+        # Prevent multiple gate creation for the same validation
         validation_key = f"user_validation_{hash(task)}"
         if hasattr(self, '_current_validation_displayed') and self._current_validation_displayed == validation_key:
             return None
@@ -1814,48 +1840,38 @@ CRITICAL REQUIREMENTS:
         else:
             task_details = task
         
-        # Write validation instructions to file for reference
+        # Create gate content for the USER validation
         from datetime import datetime
-        validation_file = self.outputs_dir / f"current-user-{validation_type.lower()}.md"
-        validation_content = f"""# {validation_type} {validation_id} Required
+        gate_content = f"""# 🚪 USER VALIDATION GATE
 
-## Task
+## Validation Required: {validation_type} {validation_id}
+
+### Task Description
 {task}
 
-## Status
-WAITING FOR USER
+### Validation Instructions
+{task_details}
 
-## Instructions
+### What You Need to Do
 1. Execute the validation steps described above
-2. Document results in comments or separate file  
-3. If tests PASS: Mark this task complete in checklist
-4. If tests FAIL: Fix issues before continuing
-5. Run 'cc-orchestrate continue' to proceed
+2. Test all functionality as specified
+3. Document any issues found
+4. Choose your decision below based on results
 
-## Started
+### Decision Required
+- If ALL tests PASS: Choose `user-approve`
+- If tests FAIL: Choose appropriate retry option
+- To exit and resume later: Choose `exit`
+
+### Started
 {datetime.now().isoformat()}
 """
-        validation_file.write_text(validation_content)
         
-        print("\n" + "="*60)
-        print(f"🛑 USER {validation_type} {validation_id} REQUIRED".strip())
-        print("="*60)
-        print("ORCHESTRATOR HALTED - Manual action required")
-        print()
-        print("Task:")
-        print(task_details if task_details else task)
-        print()
-        print("Instructions:")
-        print("1. Execute the steps described in the task")
-        print("2. Document your results")
-        print("3. If PASS: Mark task complete with [x] in checklist")
-        print("4. If FAIL: Fix issues, then mark complete")
-        print("5. Run 'cc-orchestrate continue' to proceed")
-        print()
-        print(f"Full details written to: {validation_file}")
-        print("="*60)
+        # Create pending gate file
+        pending_gate_file = self.outputs_dir / "pending-user_validation-gate.md"
+        pending_gate_file.write_text(gate_content)
         
-        # Return None to signal no agent work should be done
+        # Return None to trigger gate handling in workflow
         return None
 
     def _has_more_tasks(self):
@@ -2076,6 +2092,36 @@ WAITING FOR USER
                 print("Execute the slash-command `/orchestrate clean` to prepare for continue task")
                 print("="*60)
         
+    def approve_user_validation(self):
+        """Approve USER validation and mark task complete"""
+        task = self._get_current_task()
+        if task and task.startswith('USER'):
+            # Mark the USER task as complete in the checklist
+            self._update_checklist(task, completed=True)
+            
+            # Log the approval
+            from datetime import datetime
+            approval_file = self.outputs_dir / "user-validation-approved.md"
+            approval_content = f"""# User Validation Approved
+
+## Task
+{task}
+
+## Status
+APPROVED - Tests passed
+
+## Approved At
+{datetime.now().isoformat()}
+
+## Next Steps
+Continuing to next task in workflow
+"""
+            approval_file.write_text(approval_content)
+            
+            print(f"✅ USER VALIDATION APPROVED")
+            print(f"Task marked complete: {task}")
+            print(f"Continuing to next task...")
+        
     def retry_from_planner(self):
         """Restart from Planner phase (keep criteria)"""
         self._retry_from_phase("planner", "Planner (keeping criteria)")
@@ -2101,7 +2147,8 @@ WAITING FOR USER
             "completion-approved.md",
             "criteria-modification-request.md",
             "pending-criteria-gate.md",
-            "pending-completion-gate.md"
+            "pending-completion-gate.md",
+            "pending-user_validation-gate.md"
             # Note: orchestrator-log.md is preserved across cycles for historical record
         ]
         
