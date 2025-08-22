@@ -1791,6 +1791,12 @@ CRITICAL REQUIREMENTS:
     def _handle_user_validation(self, task):
         """Handle USER tasks by showing instructions and halting orchestrator"""
         
+        # Prevent multiple displays of the same validation in a single execution
+        validation_key = f"user_validation_{hash(task)}"
+        if hasattr(self, '_current_validation_displayed') and self._current_validation_displayed == validation_key:
+            return None
+        self._current_validation_displayed = validation_key
+        
         # Extract validation type and ID if present (e.g., "USER VALIDATION A", "USER TEST 3")
         import re
         match = re.match(r'USER\s+(\w+)\s*([A-Z0-9]*)', task)
