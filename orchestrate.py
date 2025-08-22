@@ -1987,6 +1987,9 @@ CRITICAL REQUIREMENTS:
         # Insert new task before the USER validation task
         lines.insert(user_task_line_index, new_task_line)
         
+        # Add blank line after the new task for proper spacing
+        lines.insert(user_task_line_index + 1, "")
+        
         # Write back to checklist
         self.checklist_file.write_text('\n'.join(lines))
         
@@ -2790,6 +2793,19 @@ def main():
         
     elif command == "continue":
         agent, instructions = orchestrator.get_continue_agent()
+        
+        # Handle new task creation by automatically continuing
+        if agent == "new_task_created":
+            print("\n" + "="*60)
+            print("AGENT: " + agent.upper())
+            print("="*60)
+            print(instructions)
+            print("="*60)
+            print()
+            
+            # Automatically continue to the newly created task
+            agent, instructions = orchestrator.get_continue_agent()
+        
         print("\n" + "="*60)
         print("AGENT: " + agent.upper())
         print("="*60)
