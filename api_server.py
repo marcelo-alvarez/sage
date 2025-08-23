@@ -17,7 +17,7 @@ import subprocess
 import os
 import webbrowser
 import socket
-from orchestrate import ClaudeCodeOrchestrator
+# ClaudeCodeOrchestrator now run in separate process via subprocess
 
 # Global state for concurrent operation tracking
 OPERATION_STATE = {
@@ -125,6 +125,19 @@ class StatusReader:
                     # Determine agent type
                     agent_type = 'gate' if 'gate' in agent_name.lower() else 'agent'
                     
+                    # Special logic for Completion Gate: check if it should be active
+                    if agent_name == "Completion Gate pending" and status == 'pending':
+                        # Check if all previous steps are complete
+                        if self._is_completion_gate_active(workflow):
+                            status = 'in-progress'  # Change to active
+                            agent_name = agent_name.replace(' pending', ' active')
+                    
+                    # Special logic for Criteria Gate: if User Validation Gate exists, Criteria Gate should not be active
+                    if agent_name == "Criteria Gate   active" and self._has_user_validation_gate():
+                        # User Validation supersedes Criteria Gate activity
+                        status = 'completed'
+                        agent_name = agent_name.replace(' active', ' complete')
+                    
                     # Add to workflow
                     workflow_item = {
                         'name': agent_name,
@@ -145,11 +158,45 @@ class StatusReader:
                     
                     break
         
+        # Add User Validation Gate as separate item if it exists
+        if self._has_user_validation_gate():
+            user_validation_item = {
+                'name': 'User Validation Gate',
+                'status': 'in-progress',
+                'type': 'gate', 
+                'icon': '👤'
+            }
+            workflow.append(user_validation_item)
+        
         return {
             'currentTask': current_task,
             'workflow': workflow,
             'agents': agents
         }
+    
+    def _is_completion_gate_active(self, workflow):
+        """Check if Completion Gate should be active based on previous steps"""
+        required_agents = ['Explorer', 'Planner', 'Coder', 'Verifier']
+        
+        for required_agent in required_agents:
+            # Find this agent in workflow
+            agent_found = False
+            for item in workflow:
+                if required_agent.lower() in item['name'].lower() and item['status'] == 'completed':
+                    agent_found = True
+                    break
+            
+            # If any required agent is not complete, Completion Gate should not be active
+            if not agent_found:
+                return False
+        
+        return True
+    
+    def _has_user_validation_gate(self):
+        """Check if pending-user_validation-gate.md exists"""
+        from pathlib import Path
+        validation_file = Path('.agent-outputs') / 'pending-user_validation-gate.md'
+        return validation_file.exists()
     
     def _get_agent_icon(self, agent_name):
         """Get appropriate icon for agent"""
@@ -350,7 +397,8 @@ class StatusHandler(BaseHTTPRequestHandler):
             # Validate decision type
             valid_decisions = [
                 'approve-criteria', 'modify-criteria', 'retry-explorer',
-                'approve-completion', 'retry-from-planner', 'retry-from-coder', 'retry-from-verifier'
+                'approve-completion', 'retry-from-planner', 'retry-from-coder', 'retry-from-verifier',
+                'user-approve', 'new-task', 'retry-last-task', 'exit'
             ]
             if decision_type not in valid_decisions:
                 self._send_error(400, f'Invalid decision_type. Must be one of: {", ".join(valid_decisions)}')
@@ -381,6 +429,10 @@ class StatusHandler(BaseHTTPRequestHandler):
             # Add modification text if provided
             if decision_type == 'modify-criteria' and 'modifications' in decision_data:
                 cmd.append(decision_data['modifications'])
+            
+            # Add task description for new-task decision
+            if decision_type == 'new-task' and 'description' in decision_data:
+                cmd.append(decision_data['description'])
             
             # Execute command
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
@@ -482,7 +534,8 @@ class StatusHandler(BaseHTTPRequestHandler):
             'verification.md',
             'current-status.md',
             'documentation.md',
-            'success-criteria.md'
+            'success-criteria.md',
+            'pending-user_validation-gate.md'
         }
         
         # Check if file is in allowlist
@@ -491,6 +544,10 @@ class StatusHandler(BaseHTTPRequestHandler):
         
         # Check for instructions files pattern
         if filename.endswith('-instructions.md'):
+            return True
+        
+        # Check for log files pattern
+        if filename.endswith('-log.txt'):
             return True
         
         return False
@@ -580,12 +637,9 @@ class StatusHandler(BaseHTTPRequestHandler):
             self._send_error(500, 'Internal Server Error')
     
     def _execute_orchestrator_command(self, command, mode, execute_data):
-        """Execute orchestrator command directly"""
+        """Execute orchestrator command in separate process"""
         try:
             global OPERATION_STATE
-            
-            # Initialize orchestrator
-            orchestrator = ClaudeCodeOrchestrator(no_browser=True, headless=True)
             
             # Update operation state for non-status commands
             if command != 'status':
@@ -603,33 +657,68 @@ class StatusHandler(BaseHTTPRequestHandler):
             
             try:
                 if command == 'start':
-                    agent, instructions = orchestrator.get_continue_agent()
+                    # Run orchestrator in separate process to avoid blocking API server
+                    import subprocess
+                    cmd = [sys.executable, 'orchestrate.py', 'start']
+                    if mode == 'meta':
+                        cmd.append('--meta')
+                    
+                    # Start the process in background
+                    process = subprocess.Popen(cmd, 
+                                               stdout=subprocess.PIPE, 
+                                               stderr=subprocess.PIPE,
+                                               cwd=os.getcwd())
+                    
                     result_data.update({
-                        'message': f'Workflow started with agent: {agent}',
-                        'agent': agent,
-                        'instructions': instructions
+                        'message': f'Workflow started in background process (PID: {process.pid})',
+                        'process_pid': process.pid
                     })
                     
                 elif command == 'continue':
-                    agent, instructions = orchestrator.get_continue_agent()
+                    # Run orchestrator continue in separate process
+                    import subprocess
+                    cmd = [sys.executable, 'orchestrate.py', 'continue']
+                    if mode == 'meta':
+                        cmd.append('--meta')
+                    
+                    process = subprocess.Popen(cmd, 
+                                               stdout=subprocess.PIPE, 
+                                               stderr=subprocess.PIPE,
+                                               cwd=os.getcwd())
+                    
                     result_data.update({
-                        'message': f'Continuing workflow with agent: {agent}',
-                        'agent': agent,
-                        'instructions': instructions
+                        'message': f'Continue workflow started in background process (PID: {process.pid})',
+                        'process_pid': process.pid
                     })
                     
                 elif command == 'status':
-                    orchestrator.status()
+                    # Status can be handled directly as it's read-only
                     result_data.update({
                         'message': 'Status retrieved successfully',
                         'operation_state': OPERATION_STATE.copy()
                     })
                     
                 elif command == 'clean':
-                    orchestrator.clean_outputs()
-                    result_data.update({
-                        'message': 'Outputs cleaned successfully'
-                    })
+                    # Run clean in separate process
+                    import subprocess
+                    cmd = [sys.executable, 'orchestrate.py', 'clean']
+                    if mode == 'meta':
+                        cmd.append('--meta')
+                    
+                    process = subprocess.run(cmd, 
+                                           capture_output=True, 
+                                           text=True,
+                                           cwd=os.getcwd())
+                    
+                    if process.returncode == 0:
+                        result_data.update({
+                            'message': 'Outputs cleaned successfully'
+                        })
+                    else:
+                        result_data.update({
+                            'success': False,
+                            'message': f'Clean failed: {process.stderr}'
+                        })
                 
                 # Read updated status after command execution
                 if self.status_reader:
@@ -711,11 +800,12 @@ class OrchestratorAPIServer:
                 signal.signal(signal.SIGINT, self._signal_handler)
                 signal.signal(signal.SIGTERM, self._signal_handler)
             
-            # Open dashboard in browser
-            try:
-                webbrowser.open('http://localhost:5678/dashboard/index.html')
-            except Exception as e:
-                print(f"Failed to open dashboard in browser: {e}")
+            # Open dashboard in browser (unless disabled)
+            if not getattr(self, 'no_browser', False):
+                try:
+                    webbrowser.open('http://localhost:5678/dashboard/index.html')
+                except Exception as e:
+                    print(f"Failed to open dashboard in browser: {e}")
             
             # Start server
             print(f"[API Server] Starting serve_forever() on {self.host}:{self.port}")
@@ -815,10 +905,14 @@ def main():
     parser.add_argument('--port', type=int, default=8000, help='Port to run server on (default: 8000)')
     parser.add_argument('--host', default='localhost', help='Host to bind to (default: localhost)')
     parser.add_argument('--background', action='store_true', help='Run server in background')
+    parser.add_argument('--no-browser', action='store_true', help='Do not automatically open browser')
     
     args = parser.parse_args()
     
     server = OrchestratorAPIServer(port=args.port, host=args.host)
+    
+    # Set browser preference
+    server.no_browser = args.no_browser
     
     if args.background:
         if server.start_background():

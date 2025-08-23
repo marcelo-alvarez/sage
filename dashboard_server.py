@@ -25,30 +25,37 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
     
     def do_GET(self):
         """Handle GET requests with custom routing for dashboard"""
-        if self.path == '/health':
-            # Health check endpoint
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
-            health_data = {
-                'status': 'healthy',
-                'service': 'dashboard',
-                'timestamp': time.time()
-            }
-            self.wfile.write(json.dumps(health_data).encode())
-            return
-        elif self.path == '/dashboard/index.html' or self.path == '/dashboard/':
-            # Serve dashboard.html when dashboard path is requested
-            self.path = '/dashboard.html'
-        elif self.path == '/':
-            # Redirect root to dashboard
-            self.send_response(302)
-            self.send_header('Location', '/dashboard.html')
-            self.end_headers()
-            return
-        
-        # Let the parent handler serve the file
-        super().do_GET()
+        try:
+            if self.path == '/health':
+                # Health check endpoint
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                health_data = {
+                    'status': 'healthy',
+                    'service': 'dashboard',
+                    'timestamp': time.time()
+                }
+                self.wfile.write(json.dumps(health_data).encode())
+                return
+            elif self.path == '/dashboard/index.html' or self.path == '/dashboard/':
+                # Serve dashboard.html when dashboard path is requested
+                self.path = '/dashboard.html'
+            elif self.path == '/':
+                # Redirect root to dashboard
+                self.send_response(302)
+                self.send_header('Location', '/dashboard.html')
+                self.end_headers()
+                return
+            
+            # Let the parent handler serve the file
+            super().do_GET()
+        except (BrokenPipeError, ConnectionResetError):
+            # Client closed connection while we were sending data - ignore this
+            pass
+        except Exception as e:
+            # Log other errors but don't crash
+            print(f"[Dashboard] Error handling request {self.path}: {e}")
     
     def log_message(self, format, *args):
         """Log requests with timestamp"""
@@ -96,6 +103,7 @@ def start_dashboard_server(port=5678, host='localhost'):
         
         with ReusableTCPServer((host, port), DashboardHandler) as httpd:
             print(f"Dashboard server started on {host}:{port}")
+            print(f"Dashboard server registered (PID: {os.getpid()})")
             print(f"Dashboard available at: http://{host}:{port}")
             if dashboard_file.exists():
                 print(f"Dashboard UI at: http://{host}:{port}/dashboard.html")

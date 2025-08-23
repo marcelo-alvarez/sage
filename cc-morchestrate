@@ -7,9 +7,9 @@ import sys
 import os
 import argparse
 
-# Add the directory containing this script to the Python path
-script_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, script_dir)
+# Add the global orchestrator directory to the Python path
+orchestrator_dir = os.path.expanduser("~/.claude-orchestrator")
+sys.path.insert(0, orchestrator_dir)
 
 # Import the main orchestrate functionality
 try:
@@ -17,7 +17,8 @@ try:
     from process_manager import ProcessManager
 except ImportError as e:
     print(f"Error: Could not import orchestrator modules: {e}")
-    print("Make sure you're running this from the claude-orchestrator directory")
+    print(f"Make sure the orchestrator is properly installed in {orchestrator_dir}")
+    print("Try running the installer: curl -fsSL https://raw.githubusercontent.com/marcelo-alvarez/claude-orchestrator/main/install.sh | bash")
     sys.exit(1)
 
 

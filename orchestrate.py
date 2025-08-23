@@ -793,6 +793,10 @@ class AgentExecutor:
                 stop_log = f"\n## {end_timestamp} - {agent_type.upper()} Agent Session Complete (Duration: {duration:.1f}s, Exit Code: {exit_code})\n"
                 with open(log_file, 'a') as f:
                     f.write(stop_log)
+                
+                # Update status file immediately when agent completes
+                self.orchestrator._update_status_file()
+                
                 return f"✅ {agent_type.upper()} completed successfully"
             else:
                 # Build detailed error report for better debugging
@@ -1511,23 +1515,27 @@ CRITICAL REQUIREMENTS:
         pending_completion_gate = self.outputs_dir / "pending-completion-gate.md"
         pending_user_validation_gate = self.outputs_dir / "pending-user_validation-gate.md"
         
-        if pending_criteria_gate.exists():
+        if pending_user_validation_gate.exists():
+            gate_content = pending_user_validation_gate.read_text()
+            return self._handle_interactive_gate("user_validation", gate_content)
+        elif pending_criteria_gate.exists():
             gate_content = pending_criteria_gate.read_text()
             return self._handle_interactive_gate("criteria", gate_content)
         elif pending_completion_gate.exists():
             gate_content = pending_completion_gate.read_text()
             return self._handle_interactive_gate("completion", gate_content)
-        elif pending_user_validation_gate.exists():
-            gate_content = pending_user_validation_gate.read_text()
-            return self._handle_interactive_gate("user_validation", gate_content)
         
         # Check for USER tasks before determining workflow phase
         if self.checklist_file.exists():
-            current_task = self._get_current_task()
-            if current_task is None and pending_user_validation_gate.exists():
-                # A USER validation gate was just created, handle it
-                gate_content = pending_user_validation_gate.read_text()
-                return self._handle_interactive_gate("user_validation", gate_content)
+            # Check if a user validation was just approved - if so, continue workflow
+            approval_file = self.outputs_dir / "user-validation-approved.md"
+            if approval_file.exists():
+                approval_file.unlink()  # Remove approval file so we don't loop
+                # Remove pending gate file if it exists
+                if pending_user_validation_gate.exists():
+                    pending_user_validation_gate.unlink()
+                # Continue to next task
+                print("User validation approved, continuing to next task...")
         
         # Check what outputs exist to determine next phase
         current_outputs = {
@@ -1539,6 +1547,24 @@ CRITICAL REQUIREMENTS:
             "verification.md": (self.outputs_dir / "verification.md").exists(),
             "completion-approved.md": (self.outputs_dir / "completion-approved.md").exists()
         }
+        
+        # Check if current task is a USER validation task before determining workflow phase
+        current_task_raw = self._get_current_task_raw()
+        if current_task_raw and current_task_raw.startswith('USER') and not current_outputs.get("success-criteria.md", False):
+            # This is a USER task and we haven't created success criteria yet
+            # Skip criteria_gate and handle as user validation instead
+            result = self._handle_user_validation(current_task_raw)
+            if result is None:
+                # Gate was created, check for pending user validation gate
+                if pending_user_validation_gate.exists():
+                    gate_content = pending_user_validation_gate.read_text()
+                    return self._handle_interactive_gate("user_validation", gate_content)
+                else:
+                    # Gate should exist, something went wrong
+                    return "error", "User validation gate creation failed"
+            else:
+                # Handle the result from user validation
+                return result
         
         # Use workflow configuration to determine next agent
         next_agent = self.workflow_config.get_next_agent(current_outputs, self.outputs_dir)
@@ -1569,7 +1595,7 @@ CRITICAL REQUIREMENTS:
 
     def _show_workflow_header(self):
         """Show clean workflow header with task description"""
-        task = self._get_current_task()
+        task = self._get_current_task_raw()
         if task:
             print(f"\nClaude Code Orchestrator running on task: {task}")
             print()
@@ -1594,6 +1620,10 @@ CRITICAL REQUIREMENTS:
                     print(f"✓ {agent_display[agent_type]} complete")
                 elif status == "failed":
                     print(f"✗ {agent_display[agent_type]} failed")
+        
+        # Update status file to reflect current agent state
+        if status == "running":
+            self._update_status_file_with_running_agent(agent_type)
 
     def _show_verification_status(self):
         """Show verification pass/fail status"""
@@ -1626,6 +1656,21 @@ CRITICAL REQUIREMENTS:
         
         while iteration < max_iterations:
             iteration += 1
+            
+            # First, check for pending gates before determining next phase
+            pending_criteria_gate = self.outputs_dir / "pending-criteria-gate.md"
+            pending_completion_gate = self.outputs_dir / "pending-completion-gate.md"
+            pending_user_validation_gate = self.outputs_dir / "pending-user_validation-gate.md"
+            
+            if pending_user_validation_gate.exists():
+                gate_content = pending_user_validation_gate.read_text()
+                return self._handle_interactive_gate("user_validation", gate_content)
+            elif pending_criteria_gate.exists():
+                gate_content = pending_criteria_gate.read_text()
+                return self._handle_interactive_gate("criteria", gate_content)
+            elif pending_completion_gate.exists():
+                gate_content = pending_completion_gate.read_text()
+                return self._handle_interactive_gate("completion", gate_content)
             
             # Check what outputs exist to determine next phase
             current_outputs = {
@@ -1717,9 +1762,27 @@ CRITICAL REQUIREMENTS:
                     return "user_checkpoint", "User validation checkpoint reached. Complete manual testing before continuing."
                 else:
                     return "complete", "All tasks have been completed successfully! No more tasks in checklist."
+            
+            # Check if this is a USER validation task - handle specially
+            if task.startswith('USER'):
+                result = self._handle_user_validation(task)
+                if result is None:
+                    # Gate was created, return checkpoint status
+                    return "user_checkpoint", "User validation checkpoint reached. Complete manual testing before continuing."
+                
             return self.agent_factory.create_agent("explorer", task=task)
             
         elif agent_type == "criteria_gate":
+            # Check if current task is a USER validation task - if so, skip criteria gate
+            current_task_raw = self._get_current_task_raw()
+            if current_task_raw and current_task_raw.startswith('USER'):
+                # This is a USER task, skip criteria gate and handle as user validation
+                result = self._handle_user_validation(current_task_raw)
+                if result is None:
+                    return "user_checkpoint", "User validation checkpoint reached. Complete manual testing before continuing."
+                else:
+                    return result
+                    
             exploration_file = self.outputs_dir / "exploration.md"
             if not exploration_file.exists():
                 return "error", "No exploration.md found for criteria approval"
@@ -1834,6 +1897,22 @@ CRITICAL REQUIREMENTS:
         else:
             # Generic agent preparation for work agents
             return self.agent_factory.create_agent(agent_type)
+
+    def _get_current_task_raw(self):
+        """Extract current task from checklist without handling it"""
+        
+        if self.checklist_file.exists():
+            content = self.checklist_file.read_text()
+            lines = content.split('\n')
+            
+            for line in lines:
+                if re.match(r'^\s*-\s*\[\s*\]\s*', line):
+                    task = re.sub(r'^\s*-\s*\[\s*\]\s*', '', line)
+                    task = re.sub(r'\s*\(.*\)\s*$', '', task)
+                    task = task.strip()
+                    if task:
+                        return task
+        return None
 
     def _get_current_task(self):
         """Extract current task from checklist, recognizing validation tasks"""
@@ -2169,7 +2248,37 @@ CRITICAL REQUIREMENTS:
         
         for filename, agent in files:
             filepath = self.outputs_dir / filename
-            if filepath.exists():
+            
+            # Check if this is a gate that's currently active
+            is_active_gate = False
+            if "Gate" in agent:
+                # Check for active gate files
+                gate_type = agent.lower().replace(" gate", "").replace(" ", "-")
+                active_gate_file = self.outputs_dir / f"current-{gate_type}-gate.md"
+                pending_gate_file = self.outputs_dir / f"pending-{gate_type}-gate.md"
+                pending_validation_file = self.outputs_dir / "pending-user_validation-gate.md"
+                
+                if active_gate_file.exists() or pending_gate_file.exists() or (gate_type == "criteria" and pending_validation_file.exists()):
+                    is_active_gate = True
+                
+                # Special case for Completion Gate: active when all previous steps are done but completion file doesn't exist
+                elif agent == "Completion Gate" and not filepath.exists():
+                    # Check if all previous steps are complete
+                    all_previous_complete = True
+                    for prev_filename, prev_agent in files:
+                        if prev_agent == "Completion Gate":
+                            break  # Stop at completion gate
+                        prev_filepath = self.outputs_dir / prev_filename
+                        if not prev_filepath.exists():
+                            all_previous_complete = False
+                            break
+                    
+                    if all_previous_complete:
+                        is_active_gate = True
+            
+            if is_active_gate:
+                status_info += "🔄 " + agent.ljust(15) + " active\n"
+            elif filepath.exists():
                 size = filepath.stat().st_size
                 status_info += "✓ " + agent.ljust(15) + " complete (" + str(size) + " bytes)\n"
             else:
@@ -2180,6 +2289,48 @@ CRITICAL REQUIREMENTS:
             status_info += "\nCurrent task: " + current_task[:60] + "\n"
             
         # Write status to file without displaying
+        status_filepath = self.outputs_dir / "current-status.md"
+        status_filepath.write_text(status_info)
+
+    def _update_status_file_with_running_agent(self, running_agent_type):
+        """Update status file to show a specific agent as running"""
+        status_info = "# Orchestration Status\n\n"
+        
+        agent_mapping = {
+            "explorer": ("exploration.md", "Explorer"),
+            "planner": ("plan.md", "Planner"), 
+            "coder": ("changes.md", "Coder"),
+            "verifier": ("verification.md", "Verifier"),
+            "scribe": ("orchestrator-log.md", "Scribe")
+        }
+        
+        files = [
+            ("exploration.md", "Explorer"),
+            ("success-criteria.md", "Criteria Gate"),
+            ("plan.md", "Planner"),
+            ("changes.md", "Coder"),
+            ("verification.md", "Verifier"),
+            ("completion-approved.md", "Completion Gate")
+        ]
+        
+        for filename, agent in files:
+            filepath = self.outputs_dir / filename
+            agent_type_key = agent.lower().replace(" gate", "").replace(" ", "_")
+            
+            if agent_type_key == running_agent_type or (agent_type_key == "criteria" and running_agent_type == "criteria_gate"):
+                # This agent is currently running
+                status_info += "🔄 " + agent.ljust(15) + " running\n"
+            elif filepath.exists():
+                size = filepath.stat().st_size
+                status_info += "✓ " + agent.ljust(15) + " complete (" + str(size) + " bytes)\n"
+            else:
+                status_info += "⏳ " + agent.ljust(15) + " pending\n"
+        
+        current_task = self._get_current_task_raw()
+        if current_task:
+            status_info += "\nCurrent task: " + current_task[:60] + "\n"
+            
+        # Write status to file
         status_filepath = self.outputs_dir / "current-status.md"
         status_filepath.write_text(status_info)
 
@@ -2306,8 +2457,14 @@ CRITICAL REQUIREMENTS:
         """Approve USER validation and mark task complete"""
         task = self._get_current_task()
         if task and task.startswith('USER'):
-            # Mark the USER task as complete in the checklist
-            self._update_checklist(task, completed=True)
+            # Find the actual task line in the checklist for better matching
+            original_task = self._find_user_task_in_checklist()
+            if original_task:
+                # Mark the USER task as complete in the checklist
+                self._update_checklist(original_task, completed=True)
+            else:
+                # Fallback to the processed task
+                self._update_checklist(task, completed=True)
             
             # Log the approval
             from datetime import datetime
@@ -2331,6 +2488,22 @@ Continuing to next task in workflow
             print(f"✅ USER VALIDATION APPROVED")
             print(f"Task marked complete: {task}")
             print(f"Continuing to next task...")
+        else:
+            print("No current USER task found to approve")
+    
+    def _find_user_task_in_checklist(self):
+        """Find the current USER task line in the checklist"""
+        if self.checklist_file.exists():
+            content = self.checklist_file.read_text()
+            lines = content.split('\n')
+            
+            for line in lines:
+                if re.match(r'^\s*-\s*\[\s*\]\s*', line) and 'USER' in line:
+                    # Extract the task text without the checkbox
+                    task = re.sub(r'^\s*-\s*\[\s*\]\s*', '', line)
+                    task = re.sub(r'\s*\(.*\)\s*$', '', task).strip()
+                    return task
+        return None
         
     def retry_from_planner(self):
         """Restart from Planner phase (keep criteria)"""
@@ -2358,7 +2531,13 @@ Continuing to next task in workflow
             "criteria-modification-request.md",
             "pending-criteria-gate.md",
             "pending-completion-gate.md",
-            "pending-user_validation-gate.md"
+            "pending-user_validation-gate.md",
+            "current-status.md",
+            "current-criteria-gate.md",
+            "current-user-validation.md",
+            "explorer-log.txt",
+            "next-command.txt",
+            "status.txt"
             # Note: orchestrator-log.md is preserved across cycles for historical record
         ]
         
@@ -2559,11 +2738,17 @@ Begin by analyzing the current directory and asking about the goal.
         task_found = False
         
         for i, line in enumerate(lines):
-            if task[:50] in line and '- [ ]' in line:
+            # More robust task matching - check if the line contains the task start and is unchecked
+            if '- [ ]' in line and (task[:50] in line or task.split(':')[0] in line):
                 if completed:
-                    lines[i] = "- [x] " + task + " (Completed: " + timestamp + ")"
+                    # Extract existing task text and add completion timestamp
+                    existing_task = re.sub(r'^\s*-\s*\[\s*\]\s*', '', line)
+                    existing_task = re.sub(r'\s*\(.*\)\s*$', '', existing_task).strip()
+                    lines[i] = f"- [x] {existing_task} (Completed: {timestamp})"
                 else:
-                    lines[i] = "- [ ] " + task + " (Attempted: " + timestamp + ")"
+                    existing_task = re.sub(r'^\s*-\s*\[\s*\]\s*', '', line)
+                    existing_task = re.sub(r'\s*\(.*\)\s*$', '', existing_task).strip()
+                    lines[i] = f"- [ ] {existing_task} (Attempted: {timestamp})"
                 task_found = True
                 break
                 
@@ -2596,6 +2781,8 @@ def serve_command(args):
     # Health check function
     def check_server_health(host, port, endpoint="/", timeout=5):
         try:
+            import urllib.request
+            import urllib.error
             url = f"http://{host}:{port}{endpoint}"
             response = urllib.request.urlopen(url, timeout=timeout)
             return response.getcode() == 200
@@ -2638,7 +2825,7 @@ def serve_command(args):
                 # Check API server health if it's running
                 running_processes = process_manager.get_running_processes()
                 if 'api_server' in running_processes:
-                    if not check_server_health('localhost', api_port, '/health'):
+                    if not check_server_health('localhost', api_port, '/api/status'):
                         print(f"Warning: API server on port {api_port} is unresponsive")
                         
             except Exception as e:
@@ -2656,8 +2843,8 @@ def serve_command(args):
         if health_check_thread and health_check_thread.is_alive():
             health_check_thread.join(timeout=2)
         
-        # Cleanup all processes
-        success = process_manager.cleanup_all_processes()
+        # Cleanup all processes with shorter timeout for web servers
+        success = process_manager.cleanup_all_processes(graceful_timeout=3, force_timeout=2)
         if success:
             print("All servers stopped successfully")
         else:
@@ -2670,47 +2857,21 @@ def serve_command(args):
     signal.signal(signal.SIGTERM, cleanup_and_exit)
     
     try:
-        # Start API server as subprocess
+        # Start API server as subprocess using the real api_server.py
         print(f"Starting API server on port {api_port}...")
-        api_cmd = [sys.executable, "-c", f"""
-import subprocess
-import sys
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import json
-
-class APIHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path == '/health':
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
-            self.wfile.write(json.dumps({{'status': 'healthy', 'port': {api_port}}}).encode())
-        else:
-            self.send_response(404)
-            self.end_headers()
-    
-    def log_message(self, format, *args):
-        print(f"[API Server] {{format % args}}")
-
-try:
-    server = HTTPServer(('localhost', {api_port}), APIHandler)
-    print(f"API server started on port {api_port}")
-    server.serve_forever()
-except KeyboardInterrupt:
-    print("API server stopped")
-except Exception as e:
-    print(f"API server error: {{e}}")
-    sys.exit(1)
-"""]
+        orchestrator_dir = os.path.expanduser("~/.claude-orchestrator")
+        api_script = os.path.join(orchestrator_dir, "api_server.py")
+        api_cmd = [sys.executable, api_script, "--port", str(api_port), "--no-browser"]
         
         api_process = subprocess.Popen(api_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         process_manager.register_process('api_server', api_process)
+        print(f"API server registered (PID: {api_process.pid})")
         
         # Give API server time to start
         time.sleep(2)
         
         # Verify API server started
-        if check_server_health('localhost', api_port, '/health'):
+        if check_server_health('localhost', api_port, '/api/status'):
             print(f"API server healthy on http://localhost:{api_port}")
         else:
             print(f"Warning: API server may not have started properly on port {api_port}")
@@ -2719,25 +2880,90 @@ except Exception as e:
         health_check_thread = threading.Thread(target=health_monitor, daemon=True)
         health_check_thread.start()
         
-        # Open browser unless --no-browser flag is set
-        dashboard_url = f"http://localhost:{dashboard_port}"
-        if not args.no_browser:
-            print(f"Opening browser to {dashboard_url}")
-            try:
-                webbrowser.open(dashboard_url)
-            except Exception as e:
-                print(f"Could not open browser: {e}")
-        else:
-            print(f"Dashboard available at: {dashboard_url}")
-        
-        # Start dashboard server (this will block)
+        # Start dashboard server in background first
         print(f"Starting dashboard server on port {dashboard_port}...")
         print("Press Ctrl+C to stop all servers")
         print("-" * 50)
         
-        # Import and start dashboard server
+        # Import and start dashboard server in a separate process
         import dashboard_server
-        success = dashboard_server.start_dashboard_server(dashboard_port, 'localhost')
+        dashboard_process = subprocess.Popen([
+            sys.executable, "-c", f"""
+import sys
+import os
+orchestrator_dir = os.path.expanduser('~/.claude-orchestrator')
+sys.path.insert(0, orchestrator_dir)
+import dashboard_server
+dashboard_server.start_dashboard_server({dashboard_port}, 'localhost')
+"""])
+        process_manager.register_process('dashboard_server', dashboard_process)
+        print(f"Dashboard server registered (PID: {dashboard_process.pid})")
+        
+        # Wait for dashboard server to be ready to serve actual pages
+        print("Waiting for dashboard server to start...")
+        dashboard_ready = False
+        
+        # Give the subprocess time to actually start
+        time.sleep(2)
+        
+        # Import urllib modules at the top level
+        import urllib.request
+        import urllib.error
+        
+        for i in range(40):  # Wait up to 20 more seconds
+            try:
+                # Test the actual dashboard page, not just health
+                test_url = f"http://localhost:{dashboard_port}/dashboard.html"
+                try:
+                    response = urllib.request.urlopen(test_url, timeout=3)
+                    if response.getcode() == 200:
+                        # Try multiple times to be absolutely sure
+                        success_count = 0
+                        for verify in range(3):
+                            try:
+                                verify_response = urllib.request.urlopen(test_url, timeout=1)
+                                if verify_response.getcode() == 200:
+                                    success_count += 1
+                            except:
+                                break
+                            time.sleep(0.1)
+                        
+                        if success_count == 3:
+                            dashboard_ready = True
+                            print("Dashboard server is ready!")
+                            break
+                except (urllib.error.URLError, urllib.error.HTTPError, OSError):
+                    pass
+                    
+            except Exception:
+                pass
+            time.sleep(0.5)
+        
+        if not dashboard_ready:
+            print(f"Warning: Dashboard server may not have started properly on port {dashboard_port}")
+        
+        # Open browser immediately once dashboard is confirmed ready
+        dashboard_url = f"http://localhost:{dashboard_port}"
+        if not args.no_browser and dashboard_ready:
+            print(f"Opening browser to {dashboard_url}")
+            try:
+                webbrowser.open(dashboard_url)
+                print("Browser opened successfully")
+            except Exception as e:
+                print(f"Could not open browser: {e}")
+        
+        print(f"Dashboard available at: {dashboard_url}")
+        
+        print(f"Dashboard available at: {dashboard_url}")
+        print(f"Dashboard UI at: {dashboard_url}/dashboard.html") 
+        print(f"Health check at: {dashboard_url}/health")
+        
+        # Keep the main process alive and wait for signals
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            pass
         
         # If dashboard server exits, cleanup
         cleanup_and_exit()
@@ -2755,6 +2981,7 @@ def show_help():
     print("  Workflow: start, continue, interactive, status, clean, complete, fail, bootstrap")
     print("  Gates: approve-criteria, modify-criteria, retry-explorer")
     print("         approve-completion, retry-from-planner, retry-from-coder, retry-from-verifier")
+    print("         new-task [description] - Create new task during user validation")
     print("  Mode: unsupervised, supervised")
     print("  Interactive mode: Runs persistent workflow with interactive gates")
 
@@ -2893,6 +3120,41 @@ def main():
         
     elif command == "retry-from-verifier":
         orchestrator.retry_from_verifier()
+        
+    elif command == "new-task":
+        # Handle new-task command with description
+        description = " ".join(sys.argv[2:]) if len(sys.argv) > 2 else None
+        if not description:
+            print("Error: new-task command requires a description")
+            print("Usage: new-task [description]")
+            sys.exit(1)
+        
+        # Execute the new-task logic directly from the interactive gate handling
+        current_user_task = orchestrator._get_current_user_validation_task()
+        if current_user_task:
+            fix_task = orchestrator._generate_fix_task(current_user_task, description)
+            success = orchestrator._insert_task_before_user_validation(fix_task)
+            
+            if success:
+                # Remove pending gate state
+                gate_state_file = orchestrator.outputs_dir / "pending-user_validation-gate.md"
+                if gate_state_file.exists():
+                    gate_state_file.unlink()
+                
+                # Clean the workflow state for the new task (like CLI does)
+                orchestrator.clean_outputs()
+                
+                # Update orchestrator status to reflect the clean state
+                orchestrator._update_status_file()
+                
+                print(f"✅ Created fix task: {fix_task}")
+                print("🔄 Workflow reset - Explorer will handle the new task")
+            else:
+                print("❌ Failed to insert new task. Please try again.")
+                sys.exit(1)
+        else:
+            print("❌ Could not find current USER validation task.")
+            sys.exit(1)
         
     elif command == "bootstrap":
         # Check for bootstrap mode flag

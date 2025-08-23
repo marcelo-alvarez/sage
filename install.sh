@@ -205,6 +205,19 @@ install_orchestrator_runtime() {
         cp "$TEMP_DIR/process_manager.py" "$runtime_dir/process_manager.py"
     fi
     
+    # Copy dashboard server files if they exist
+    if [ -f "$TEMP_DIR/dashboard_server.py" ]; then
+        cp "$TEMP_DIR/dashboard_server.py" "$runtime_dir/dashboard_server.py"
+    fi
+    
+    if [ -f "$TEMP_DIR/api_server.py" ]; then
+        cp "$TEMP_DIR/api_server.py" "$runtime_dir/api_server.py"
+    fi
+    
+    if [ -f "$TEMP_DIR/dashboard.html" ]; then
+        cp "$TEMP_DIR/dashboard.html" "$runtime_dir/dashboard.html"
+    fi
+    
     # Copy cc-orchestrate executable if it exists
     if [ -f "$TEMP_DIR/cc-orchestrate" ]; then
         cp "$TEMP_DIR/cc-orchestrate" "$runtime_dir/cc-orchestrate"
