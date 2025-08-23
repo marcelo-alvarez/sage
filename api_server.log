@@ -1,2 +1,39 @@
-Error starting server: [Errno 48] Address already in use
-Port 8000 is already in use. Try a different port.
+[2025-08-23 13:05:44,705] [6105264128-Thread-1 (process_request_thread)] [APIServer_4395991600] [17ab7c15] GET /api/status started
+[2025-08-23 13:05:44,705] [6105264128-Thread-1 (process_request_thread)] [APIServer_4395991600] [17ab7c15] Processing status request: /api/status?
+[2025-08-23 13:05:44,713] [6105264128-Thread-1 (process_request_thread)] [APIServer_4395991600] [17ab7c15] GET /api/status completed
+[2025-08-23 13:05:44,717] [6105264128-Thread-2 (process_request_thread)] [APIServer_4395299184] [686b7465] GET /api/status?mode=regular started
+[2025-08-23 13:05:44,718] [6105264128-Thread-2 (process_request_thread)] [APIServer_4395299184] [686b7465] Processing status request: /api/status?mode=regular
+[2025-08-23 13:05:44,718] [6105264128-Thread-2 (process_request_thread)] [APIServer_4395299184] [686b7465] GET /api/status?mode=regular completed
+[2025-08-23 13:05:44,722] [6105264128-Thread-3 (process_request_thread)] [APIServer_4395299184] [b38265ae] GET /api/outputs/pending-user_validation-gate.md?mode=regular started
+[2025-08-23 13:05:44,722] [6105264128-Thread-3 (process_request_thread)] [APIServer_4395299184] [b38265ae] Outputs request: /api/outputs/pending-user_validation-gate.md
+[2025-08-23 13:05:44,723] [6105264128-Thread-3 (process_request_thread)] [APIServer_4395299184] [b38265ae] GET /api/outputs/pending-user_validation-gate.md?mode=regular completed
+[2025-08-23 13:06:13,713] [6105264128-Thread-4 (process_request_thread)] [APIServer_4395299184] [0cd8b089] GET /api/status?mode=regular started
+[2025-08-23 13:06:13,714] [6105264128-Thread-4 (process_request_thread)] [APIServer_4395299184] [0cd8b089] Processing status request: /api/status?mode=regular
+[2025-08-23 13:06:13,715] [6105264128-Thread-4 (process_request_thread)] [APIServer_4395299184] [0cd8b089] GET /api/status?mode=regular completed
+[2025-08-23 13:06:13,727] [6105264128-Thread-5 (process_request_thread)] [APIServer_4395299184] [fa8e6afa] GET /api/outputs/pending-user_validation-gate.md?mode=regular started
+[2025-08-23 13:06:13,727] [6105264128-Thread-5 (process_request_thread)] [APIServer_4395299184] [fa8e6afa] Outputs request: /api/outputs/pending-user_validation-gate.md
+[2025-08-23 13:06:13,728] [6105264128-Thread-5 (process_request_thread)] [APIServer_4395299184] [fa8e6afa] GET /api/outputs/pending-user_validation-gate.md?mode=regular completed
+[2025-08-23 13:06:43,715] [6105264128-Thread-6 (process_request_thread)] [APIServer_4395299184] [06cde48a] GET /api/status?mode=regular started
+[2025-08-23 13:06:43,716] [6105264128-Thread-6 (process_request_thread)] [APIServer_4395299184] [06cde48a] Processing status request: /api/status?mode=regular
+[2025-08-23 13:06:43,718] [6105264128-Thread-6 (process_request_thread)] [APIServer_4395299184] [06cde48a] GET /api/status?mode=regular completed
+[2025-08-23 13:06:43,734] [6105264128-Thread-7 (process_request_thread)] [APIServer_4395299184] [c01f4bbd] GET /api/outputs/pending-user_validation-gate.md?mode=regular started
+[2025-08-23 13:06:43,735] [6105264128-Thread-7 (process_request_thread)] [APIServer_4395299184] [c01f4bbd] Outputs request: /api/outputs/pending-user_validation-gate.md
+[2025-08-23 13:06:43,735] [6105264128-Thread-7 (process_request_thread)] [APIServer_4395299184] [c01f4bbd] GET /api/outputs/pending-user_validation-gate.md?mode=regular completed
+[2025-08-23 13:07:13,720] [6105264128-Thread-8 (process_request_thread)] [APIServer_4395299184] [d174499d] GET /api/status?mode=regular started
+[2025-08-23 13:07:13,721] [6105264128-Thread-8 (process_request_thread)] [APIServer_4395299184] [d174499d] Processing status request: /api/status?mode=regular
+[2025-08-23 13:07:13,722] [6105264128-Thread-8 (process_request_thread)] [APIServer_4395299184] [d174499d] GET /api/status?mode=regular completed
+[2025-08-23 13:07:13,731] [6105264128-Thread-9 (process_request_thread)] [APIServer_4395299184] [e5fb6d0d] GET /api/outputs/pending-user_validation-gate.md?mode=regular started
+[2025-08-23 13:07:13,731] [6105264128-Thread-9 (process_request_thread)] [APIServer_4395299184] [e5fb6d0d] Outputs request: /api/outputs/pending-user_validation-gate.md
+[2025-08-23 13:07:13,732] [6105264128-Thread-9 (process_request_thread)] [APIServer_4395299184] [e5fb6d0d] GET /api/outputs/pending-user_validation-gate.md?mode=regular completed
+[2025-08-23 13:07:43,724] [6105264128-Thread-10 (process_request_thread)] [APIServer_4395299184] [4644b9d4] GET /api/status?mode=regular started
+[2025-08-23 13:07:43,725] [6105264128-Thread-10 (process_request_thread)] [APIServer_4395299184] [4644b9d4] Processing status request: /api/status?mode=regular
+[2025-08-23 13:07:43,726] [6105264128-Thread-10 (process_request_thread)] [APIServer_4395299184] [4644b9d4] GET /api/status?mode=regular completed
+[2025-08-23 13:07:43,739] [6105264128-Thread-11 (process_request_thread)] [APIServer_4395299184] [c4efb4d3] GET /api/outputs/pending-user_validation-gate.md?mode=regular started
+[2025-08-23 13:07:43,739] [6105264128-Thread-11 (process_request_thread)] [APIServer_4395299184] [c4efb4d3] Outputs request: /api/outputs/pending-user_validation-gate.md
+[2025-08-23 13:07:43,739] [6105264128-Thread-11 (process_request_thread)] [APIServer_4395299184] [c4efb4d3] GET /api/outputs/pending-user_validation-gate.md?mode=regular completed
+[2025-08-23 13:08:13,730] [6105264128-Thread-12 (process_request_thread)] [APIServer_4395299184] [33181cdb] GET /api/status?mode=regular started
+[2025-08-23 13:08:13,731] [6105264128-Thread-12 (process_request_thread)] [APIServer_4395299184] [33181cdb] Processing status request: /api/status?mode=regular
+[2025-08-23 13:08:13,732] [6105264128-Thread-12 (process_request_thread)] [APIServer_4395299184] [33181cdb] GET /api/status?mode=regular completed
+[2025-08-23 13:08:13,749] [6105264128-Thread-13 (process_request_thread)] [APIServer_4395299184] [9575ef2a] GET /api/outputs/pending-user_validation-gate.md?mode=regular started
+[2025-08-23 13:08:13,750] [6105264128-Thread-13 (process_request_thread)] [APIServer_4395299184] [9575ef2a] Outputs request: /api/outputs/pending-user_validation-gate.md
+[2025-08-23 13:08:13,752] [6105264128-Thread-13 (process_request_thread)] [APIServer_4395299184] [9575ef2a] GET /api/outputs/pending-user_validation-gate.md?mode=regular completed
