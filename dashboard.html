@@ -1863,7 +1863,7 @@
             <div class="modal-header">
                 <h2 class="modal-title" id="logModalTitle">
                     <span id="logModalIcon">📝</span>
-                    <span id="logModalTitleText">Agent Log</span>
+                    <span id="logModalTitleText">Agent Report</span>
                 </h2>
                 <button class="modal-close" onclick="closeLogModal()">&times;</button>
             </div>
@@ -3551,7 +3551,7 @@
             
             // Set title and icon based on agent (clean up the name)
             const cleanName = agentName.replace(/\s*(complete|pending|running|active)\s*(\(\d+\s*bytes\))?\s*/gi, '').trim();
-            titleText.textContent = `${cleanName} Log`;
+            titleText.textContent = `${cleanName} Execution Log`;
             
             // Set lucide icon properly
             const iconName = getAgentIcon(agentName);
@@ -3661,9 +3661,20 @@
             console.log('Modal element:', modal);
             console.log('Content element:', content);
             
-            // Set title and icon based on agent (clean up the name)
+            // Set title and icon based on agent (clean up the name and determine report type)
             const cleanName = agentName.replace(/\s*(complete|pending|running|active)\s*(\(\d+\s*bytes\))?\s*/gi, '').trim();
-            titleText.textContent = `${cleanName} Log`;
+            
+            // Create more descriptive titles based on agent type
+            const agentTitles = {
+                'Explorer': 'Exploration Report',
+                'Planner': 'Planning Report', 
+                'Coder': 'Implementation Report',
+                'Scribe': 'Documentation Report',
+                'Verifier': 'Verification Report'
+            };
+            
+            const reportTitle = agentTitles[cleanName] || `${cleanName} Report`;
+            titleText.textContent = reportTitle;
             
             // Set lucide icon properly
             const iconName = getAgentIcon(agentName);

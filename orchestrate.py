@@ -2812,23 +2812,45 @@ def clear_ui_command(args):
         subprocess.run(['pkill', '-f', 'orchestrate serve'], capture_output=True)
         print("✓ Stopped orchestrate serve processes")
         
-        # Give processes time to terminate
+        # Give processes time to terminate and verify cleanup
         import time
-        time.sleep(2)
         
-        # Check if any are still running and report
-        remaining = subprocess.run(['pgrep', '-f', 'api_server|dashboard_server'], 
-                                 capture_output=True, text=True)
-        if remaining.stdout.strip():
-            print("⚠ Warning: Some processes may still be running:")
-            subprocess.run(['ps', 'aux'], stdout=subprocess.PIPE, text=True)
-            result = subprocess.run(['ps', 'aux'], capture_output=True, text=True)
-            for line in result.stdout.split('\n'):
-                if 'api_server' in line or 'dashboard_server' in line:
-                    if 'grep' not in line:
-                        print(f"  Still running: {line.strip()}")
-        else:
-            print("All UI server processes have been stopped.")
+        # Wait progressively for all processes to fully terminate
+        for attempt in range(5):  # Check up to 5 times over 10 seconds
+            time.sleep(2)
+            
+            # Check if any are still actually running (not just terminating)
+            remaining = subprocess.run(['ps', 'aux'], capture_output=True, text=True)
+            running_processes = []
+            
+            for line in remaining.stdout.split('\n'):
+                if ('api_server' in line or 'dashboard_server' in line) and 'grep' not in line:
+                    # Double-check the process is actually responsive
+                    try:
+                        pid = line.split()[1]
+                        # Try to get process status
+                        status_check = subprocess.run(['ps', '-o', 'stat', '-p', pid], 
+                                                    capture_output=True, text=True)
+                        if status_check.returncode == 0 and 'Z' not in status_check.stdout:
+                            running_processes.append(line.strip())
+                    except:
+                        pass
+            
+            if not running_processes:
+                print("✓ All UI server processes have been stopped.")
+                return
+            elif attempt == 4:  # Last attempt
+                print(f"⚠ Warning: {len(running_processes)} process(es) still running after cleanup:")
+                for proc in running_processes:
+                    print(f"  {proc}")
+                print("These processes may be unresponsive. You can force-kill them with:")
+                for proc in running_processes:
+                    pid = proc.split()[1]
+                    print(f"  kill -9 {pid}")
+            else:
+                print(f"Waiting for {len(running_processes)} process(es) to finish terminating... (attempt {attempt + 1}/5)")
+        
+        print("Process cleanup completed.")
         
     except Exception as e:
         print(f"Error stopping processes: {e}")
