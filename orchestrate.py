@@ -2923,7 +2923,9 @@ def serve_command(args):
         api_script = os.path.join(orchestrator_dir, "api_server.py")
         api_cmd = [sys.executable, api_script, "--port", str(api_port), "--no-browser"]
         
-        api_process = subprocess.Popen(api_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        # Start API server from current project directory to read .agent-outputs files
+        current_dir = os.getcwd()
+        api_process = subprocess.Popen(api_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=current_dir)
         process_manager.register_process('api_server', api_process)
         print(f"API server registered (PID: {api_process.pid})")
         

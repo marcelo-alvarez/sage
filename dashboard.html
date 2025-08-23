@@ -10,7 +10,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/markdown-it/dist/markdown-it.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/github-markdown-css@5.0.0/github-markdown-light.css">
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
     <style>
         /* Global Styles */
@@ -34,15 +35,16 @@
 
         body.meta {
             background: #0f0606;
-            padding-top: 40px;
+            padding: 0;
         }
 
         .container {
-            max-width: 1200px;
-            margin: 0 auto;
+            width: 100%;
+            margin: 0;
             background: #1a1a1b;
-            border-radius: 8px;
+            border-radius: 0;
             overflow: hidden;
+            min-height: 100vh;
         }
 
         /* Header */
@@ -127,8 +129,8 @@
             font-weight: 500;
         }
 
-        .btn-skip-discovery {
-            background: #34495e;
+        .btn-refresh {
+            background: #2563eb;
             color: white;
             border: none;
             border-radius: 6px;
@@ -140,12 +142,14 @@
             margin-left: 15px;
         }
 
-        .btn-skip-discovery:hover {
-            background: #2c3e50;
+        .btn-refresh:hover {
+            background: #1d4ed8;
         }
 
-        .btn-skip-discovery.active {
-            background: rgba(239, 68, 68, 0.2);
+        .btn-refresh:disabled {
+            background: #6b7280;
+            cursor: not-allowed;
+            opacity: 0.6;
         }
 
         /* Main Content */
@@ -172,15 +176,17 @@
         }
 
         .task-description {
-            color: rgba(255, 255, 255, 0.7);
-            font-size: 1.1em;
-            line-height: 1.5;
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 1.0em;
+            line-height: 1.6;
             white-space: pre-wrap !important;
             word-wrap: break-word !important;
             max-height: none !important;
             height: auto !important;
             overflow: visible !important;
             text-overflow: unset !important;
+            margin-top: 8px;
+            padding: 8px 0;
         }
 
         .task-description.clickable {
@@ -214,79 +220,95 @@
         .workflow-timeline {
             display: flex;
             justify-content: space-between;
-            align-items: center;
-            background: #1a1a1b;
-            padding: 30px;
-            border-radius: 12px;
+            align-items: flex-start;
+            background: linear-gradient(135deg, rgba(26, 26, 27, 0.8), rgba(31, 41, 55, 0.6));
+            padding: 40px;
+            border-radius: 16px;
             overflow-x: auto;
-            min-height: 120px;
+            min-height: 140px;
+            border: 1px solid rgba(75, 85, 99, 0.2);
+            backdrop-filter: blur(10px);
         }
 
         .workflow-step {
             display: flex;
             flex-direction: column;
             align-items: center;
-            min-width: 140px;
+            min-width: 120px;
             position: relative;
             flex-shrink: 0;
+            align-self: flex-start;
         }
 
         .step-icon {
-            width: 60px;
-            height: 60px;
-            border-radius: 50%;
+            width: 80px;
+            height: 80px;
+            border-radius: 16px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 1.5em;
+            font-size: 2em;
             font-weight: bold;
             margin-bottom: 15px;
             transition: all 0.3s ease;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(8px);
         }
 
-        .step-icon i {
-            width: 24px;
-            height: 24px;
+        .step-icon.gate {
+            border-radius: 8px;
+            border-width: 3px;
+            border-style: double;
+        }
+
+        .step-icon i,
+        .step-icon svg {
+            width: 32px;
+            height: 32px;
         }
 
         .step-icon.pending {
-            background: rgba(71, 85, 105, 0.2);
-            color: #94a3b8;
-            border: 1px solid rgba(71, 85, 105, 0.4);
+            background: linear-gradient(135deg, rgba(71, 85, 105, 0.15), rgba(100, 116, 139, 0.1));
+            color: #cbd5e1;
+            border: 1px solid rgba(100, 116, 139, 0.3);
         }
 
         .step-icon.in-progress {
-            background: rgba(99, 102, 241, 0.2);
-            color: #6366f1;
-            border: 1px solid rgba(99, 102, 241, 0.6);
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.3), rgba(147, 51, 234, 0.2));
+            color: #60a5fa;
+            border: 1px solid rgba(59, 130, 246, 0.5);
             animation: pulse 2s infinite;
+            box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
         }
 
         .step-icon.completed {
-            background: rgba(34, 197, 94, 0.2);
-            color: #22c55e;
-            border: 1px solid rgba(34, 197, 94, 0.6);
+            background: linear-gradient(135deg, rgba(34, 197, 94, 0.25), rgba(16, 185, 129, 0.15));
+            color: #34d399;
+            border: 1px solid rgba(34, 197, 94, 0.4);
+            box-shadow: 0 0 15px rgba(34, 197, 94, 0.2);
         }
 
         .step-icon.gate.pending {
-            background: rgba(245, 158, 11, 0.2);
-            color: #f59e0b;
-            border: 1px solid rgba(245, 158, 11, 0.6);
+            background: linear-gradient(135deg, rgba(251, 191, 36, 0.3), rgba(245, 158, 11, 0.2));
+            color: #fbbf24;
+            border: 1px solid rgba(251, 191, 36, 0.5);
             animation: gate-pulse 1.5s infinite;
+            box-shadow: 0 0 20px rgba(251, 191, 36, 0.3);
         }
 
         .step-icon.gate.pending-inactive {
-            background: rgba(71, 85, 105, 0.15);
+            background: linear-gradient(135deg, rgba(71, 85, 105, 0.1), rgba(100, 116, 139, 0.05));
             color: #64748b;
-            border: 1px solid rgba(71, 85, 105, 0.3);
+            border: 1px solid rgba(71, 85, 105, 0.2);
             animation: none;
         }
 
         .step-icon.gate.completed {
-            background: rgba(34, 197, 94, 0.2);
-            color: #22c55e;
-            border: 1px solid rgba(34, 197, 94, 0.6);
+            background: linear-gradient(135deg, rgba(34, 197, 94, 0.25), rgba(16, 185, 129, 0.15));
+            color: #34d399;
+            border: 1px solid rgba(34, 197, 94, 0.4);
             animation: none;
+            box-shadow: 0 0 15px rgba(34, 197, 94, 0.2);
         }
 
         @keyframes gate-pulse {
@@ -320,23 +342,30 @@
             color: #ffffff;
             max-width: 120px;
             line-height: 1.3;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         .workflow-connector {
             flex: 1;
-            height: 4px;
-            background: rgba(255, 255, 255, 0.2);
-            margin: 0 15px;
+            height: 2px;
+            background: rgba(255, 255, 255, 0.1);
+            margin: 0 8px;
             position: relative;
-            top: -30px;
+            top: -50px;
+            border-radius: 1px;
+            max-width: 60px;
+            align-self: center;
         }
 
         .workflow-connector.active {
-            background: #3498db;
+            background: rgba(52, 152, 219, 0.6);
         }
 
         .workflow-connector.completed {
-            background: #27ae60;
+            background: rgba(39, 174, 96, 0.4);
         }
 
         /* Agent Details */
@@ -417,6 +446,11 @@
             color: rgba(255, 255, 255, 0.4);
             margin-top: 8px;
             font-style: italic;
+        }
+
+        /* Simple markdown content - no fighting with defaults */
+        .simple-markdown {
+            /* All styling is inline - no CSS conflicts */
         }
 
         /* Controls */
@@ -934,11 +968,54 @@
             background: #0d1117;
             border-radius: 8px;
             padding: 24px;
+        }
+        
+        /* Plain text fallback styling */
+        .log-content .plain-text {
             font-family: 'JetBrains Mono', 'Courier New', monospace;
-            font-size: 14px;
-            line-height: 1.6;
-            color: #ffffff !important;
+            font-size: 16px;
+            line-height: 1.4;
+            color: #ffffff;
             white-space: pre-wrap;
+        }
+        
+        /* Clean GitHub markdown styling for dark theme */
+        .log-content .markdown-body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            font-size: 21px;
+            line-height: inherit;
+            color: #c9d1d9;
+            background-color: transparent;
+        }
+        
+        .log-content .markdown-body h1,
+        .log-content .markdown-body h2,
+        .log-content .markdown-body h3,
+        .log-content .markdown-body h4,
+        .log-content .markdown-body h5,
+        .log-content .markdown-body h6 {
+            color: #f0f6fc;
+            border-bottom-color: #21262d;
+        }
+        
+        .log-content .markdown-body code {
+            background-color: rgba(110, 118, 129, 0.4);
+            color: #f0f6fc;
+            border-radius: 6px;
+            font-size: 85%;
+            padding: 0.2em 0.4em;
+        }
+        
+        .log-content .markdown-body pre {
+            background-color: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+        }
+        
+        .log-content .markdown-body blockquote {
+            border-left: 0.25em solid #30363d;
+            color: #7d8590;
+        }
             overflow-y: auto;
             overflow-x: auto;
             min-height: 500px;
@@ -959,6 +1036,8 @@
             align-items: center !important;
             justify-content: center !important;
             z-index: 999999 !important;
+            visibility: hidden !important;
+            opacity: 0 !important;
         }
 
         .task-modal.active, .task-list-modal.active {
@@ -1381,9 +1460,9 @@
             }
 
             .step-icon {
-                width: 50px;
-                height: 50px;
-                font-size: 1.2em;
+                width: 70px;
+                height: 70px;
+                font-size: 1.8em;
             }
         }
 
@@ -1638,8 +1717,8 @@
                     <span class="slider"></span>
                 </label>
                 <span class="mode-label">Meta</span>
-                <button class="btn-skip-discovery" id="skipDiscoveryBtn" onclick="skipAPIDiscovery()" title="Use mock data instead of discovering API server">
-                    📶 Mock Mode
+                <button class="btn-refresh" id="refreshBtn" onclick="refreshDashboard()" title="Refresh dashboard data">
+                    🔄 Refresh
                 </button>
             </div>
             <h1>Claude Code Orchestrator</h1>
@@ -1649,7 +1728,7 @@
         <main class="main-content">
             <div class="status-overview">
                 <div class="current-task">Current Task</div>
-                <div class="task-description clickable" id="currentTask" onclick="showTaskModal()">
+                <div class="task-description" id="currentTask">
                     Create dashboard HTML interface implementing the visual workflow progress design
                 </div>
             </div>
@@ -1848,12 +1927,12 @@
                 currentTask: "Create dashboard HTML interface implementing the visual workflow progress design",
                 workflow: [
                     { name: "Explorer", status: "completed", type: "agent", icon: "search" },
-                    { name: "Criteria Gate", status: "completed", type: "gate", icon: "shield-check" },
-                    { name: "Planner", status: "completed", type: "agent", icon: "📋" },
-                    { name: "Coder", status: "in-progress", type: "agent", icon: "💻" },
-                    { name: "Scribe", status: "pending", type: "agent", icon: "📝" },
+                    { name: "Criteria Gate", status: "completed", type: "gate", icon: "diamond" },
+                    { name: "Planner", status: "completed", type: "agent", icon: "clipboard" },
+                    { name: "Coder", status: "in-progress", type: "agent", icon: "code" },
+                    { name: "Scribe", status: "pending", type: "agent", icon: "file-text" },
                     { name: "Verifier", status: "pending", type: "agent", icon: "check-circle" },
-                    { name: "Completion Gate", status: "pending", type: "gate", icon: "🏁" }
+                    { name: "Completion Gate", status: "pending", type: "gate", icon: "octagon" }
                 ],
                 agents: [
                     {
@@ -1887,12 +1966,12 @@
                 currentTask: "Meta-mode: Create dashboard HTML interface implementing the visual workflow progress design",
                 workflow: [
                     { name: "Explorer", status: "completed", type: "agent", icon: "search" },
-                    { name: "Criteria Gate", status: "completed", type: "gate", icon: "shield-check" },
-                    { name: "Planner", status: "completed", type: "agent", icon: "📋" },
-                    { name: "Coder", status: "in-progress", type: "agent", icon: "💻" },
-                    { name: "Scribe", status: "pending", type: "agent", icon: "📝" },
+                    { name: "Criteria Gate", status: "completed", type: "gate", icon: "diamond" },
+                    { name: "Planner", status: "completed", type: "agent", icon: "clipboard" },
+                    { name: "Coder", status: "in-progress", type: "agent", icon: "code" },
+                    { name: "Scribe", status: "pending", type: "agent", icon: "file-text" },
                     { name: "Verifier", status: "pending", type: "agent", icon: "check-circle" },
-                    { name: "Completion Gate", status: "pending", type: "gate", icon: "🏁" }
+                    { name: "Completion Gate", status: "pending", type: "gate", icon: "octagon" }
                 ],
                 agents: [
                     {
@@ -2019,20 +2098,28 @@
             throw new Error('No API server found on any port after retries');
         }
 
-        // Skip API discovery and use mock data
-        function skipAPIDiscovery() {
-            forceMockMode = true;
-            useRealAPI = false;
-            discoveredAPIPort = null;
+        // Refresh dashboard by fetching fresh data
+        async function refreshDashboard() {
+            console.log('Refreshing dashboard data...');
             
-            // Update button state
-            const btn = document.getElementById('skipDiscoveryBtn');
-            btn.classList.add('active');
-            btn.textContent = '📶 Mock Active';
+            const btn = document.getElementById('refreshBtn');
+            btn.textContent = '⟳ Refreshing...';
+            btn.disabled = true;
             
-            console.log('Switched to mock mode - using fallback data');
-            renderMockData();
-            // File viewer removed - using log modals instead
+            try {
+                if (useRealAPI && discoveredAPIPort) {
+                    await fetchRealStatus();
+                    console.log('Dashboard refreshed successfully');
+                } else {
+                    // Try to reconnect to API
+                    await initDashboard();
+                }
+            } catch (error) {
+                console.error('Failed to refresh dashboard:', error);
+            } finally {
+                btn.textContent = '🔄 Refresh';
+                btn.disabled = false;
+            }
         }
 
         // Get API Base URL
@@ -2078,11 +2165,10 @@
                 return;
             }
             
-            // Step 2: Check if already in forced mock mode
+            // Step 2: Check if API is available
             if (forceMockMode) {
-                console.log('Already in mock mode, skipping discovery');
-                renderMockData();
-                // File viewer removed - using log modals instead
+                console.log('API unavailable, showing no API state');
+                showNoAPIState();
                 return;
             }
             
@@ -2126,9 +2212,9 @@
                 await fetchRealStatus();
             } catch (error) {
                 console.warn('API server discovery failed:', error.message);
-                console.log('Using mock data as fallback');
+                console.log('Dashboard requires API connection');
                 useRealAPI = false;
-                renderMockData();
+                showNoAPIState();
             }
             
             // File viewer removed - using log modals instead
@@ -2182,10 +2268,10 @@
                         errorMessage.classList.remove('visible');
                     }, 5000);
                     
-                    // Fall back to current data or mock data if no data exists
+                    // Fall back to no API state if no data exists
                     if (!realTimeData) {
-                        console.log('No previous data available, using mock data');
-                        renderMockData();
+                        console.log('No previous data available, API connection required');
+                        showNoAPIState();
                     }
                 }
             }
@@ -2221,12 +2307,71 @@
             updateLastUpdated();
         }
 
+        // Show loading state
+        function showLoadingState() {
+            const timeline = document.getElementById('workflowTimeline');
+            const agentsGrid = document.getElementById('agentsGrid');
+            const currentTask = document.getElementById('currentTask');
+            
+            timeline.innerHTML = '<div style="text-align: center; color: #888; padding: 40px;">Loading workflow...</div>';
+            agentsGrid.innerHTML = '<div style="text-align: center; color: #888; padding: 40px;">Loading agents...</div>';
+            currentTask.textContent = 'Loading current task...';
+        }
+        
+        // Show no API state
+        function showNoAPIState() {
+            const timeline = document.getElementById('workflowTimeline');
+            const agentsGrid = document.getElementById('agentsGrid');
+            const currentTask = document.getElementById('currentTask');
+            
+            timeline.innerHTML = '<div style="text-align: center; color: #ff6b6b; padding: 40px;">API connection required</div>';
+            agentsGrid.innerHTML = '<div style="text-align: center; color: #ff6b6b; padding: 40px;">API connection required</div>';
+            currentTask.textContent = 'API connection required';
+        }
+
+        // Fast mode switching function with shorter timeout
+        async function fetchRealStatusForModeSwitch() {
+            try {
+                const apiUrl = `${getAPIBaseURL()}/api/status?mode=${currentMode}`;
+                const response = await fetch(apiUrl, {
+                    method: 'GET',
+                    signal: AbortSignal.timeout(3000) // 3 second timeout for mode switching
+                });
+                
+                if (response.ok) {
+                    realTimeData = await response.json();
+                    renderRealData();
+                    console.log(`Successfully fetched ${currentMode} mode data`);
+                    return true;
+                } else {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+            } catch (error) {
+                console.log(`Fetch for ${currentMode} mode failed:`, error.message);
+                showNoAPIState();
+                return false;
+            }
+        }
+
         // Mode switching
-        document.getElementById('modeToggle').addEventListener('change', function() {
+        document.getElementById('modeToggle').addEventListener('change', async function() {
             currentMode = this.checked ? 'meta' : 'regular';
+            console.log(`Switching to ${currentMode} mode`);
+            
+            // Update UI immediately
             updateCommandPanelMode();
-            initDashboard();
-            // File viewer removed - using log modals instead
+            
+            // Show loading state
+            showLoadingState();
+            
+            // Fetch real data for the new mode
+            if (useRealAPI && !forceMockMode && discoveredAPIPort) {
+                console.log(`Fetching data for ${currentMode} mode`);
+                await fetchRealStatusForModeSwitch();
+            } else {
+                console.log('API not available - dashboard requires API connection');
+                showNoAPIState();
+            }
         });
         
         // Update command panel mode indicators
@@ -2522,6 +2667,37 @@
             const timeline = document.getElementById('workflowTimeline');
             const workflow = workflowData || mockStatusData[currentMode].workflow;
             
+            // Fix icons in the workflow data
+            if (workflow) {
+                workflow.forEach(step => {
+                    if (step.icon === '⚙️' || !step.icon || step.icon === 'gear') {
+                        // Map based on agent name for better icons
+                        const name = step.name.toLowerCase();
+                        if (name.includes('explorer')) {
+                            step.icon = 'search';
+                        } else if (name.includes('planner')) {
+                            step.icon = 'clipboard';
+                        } else if (name.includes('coder')) {
+                            step.icon = 'code';
+                        } else if (name.includes('scribe')) {
+                            step.icon = 'file-text';
+                        } else if (name.includes('verifier')) {
+                            step.icon = 'check-circle';
+                        } else if (step.type === 'gate') {
+                            if (name.includes('criteria')) {
+                                step.icon = 'diamond-minus';
+                            } else if (name.includes('completion')) {
+                                step.icon = 'stop-circle';
+                            } else {
+                                step.icon = 'shield-check';
+                            }
+                        } else {
+                            step.icon = 'circle';
+                        }
+                    }
+                });
+            }
+            
             timeline.innerHTML = '';
             
             // Find the currently active gate to apply animation only to it
@@ -2548,12 +2724,11 @@
                     statusClass = 'pending-inactive';
                 }
                 iconDiv.className = `step-icon ${statusClass}${step.type === 'gate' ? ' gate' : ''}`;
-                // Create Lucide icon if step.icon is a string name, otherwise use textContent for emojis
-                if (step.icon && !step.icon.includes('️') && !step.icon.match(/[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F700}-\u{1F77F}]|[\u{1F780}-\u{1F7FF}]|[\u{1F800}-\u{1F8FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/u)) {
-                    iconDiv.innerHTML = `<i data-lucide="${step.icon}"></i>`;
-                } else {
-                    iconDiv.textContent = step.icon;
-                }
+                // Use lucide icons properly - convert agent names to proper icon names
+                const iconElement = document.createElement('i');
+                const iconName = getAgentIcon(step.name);
+                iconElement.setAttribute('data-lucide', iconName);
+                iconDiv.appendChild(iconElement);
                 
                 const labelDiv = document.createElement('div');
                 labelDiv.className = 'step-label';
@@ -2562,7 +2737,7 @@
                 // Add click handler for completed and in-progress steps to show log
                 if ((step.status === 'completed' || step.status === 'in-progress') && step.type === 'agent') {
                     stepDiv.style.cursor = 'pointer';
-                    stepDiv.addEventListener('click', () => showLogModal(step.name, step.status));
+                    stepDiv.addEventListener('click', () => showAgentLogModal(step.name, step.status));
                 }
                 
                 stepDiv.appendChild(iconDiv);
@@ -2577,10 +2752,29 @@
                 }
             });
             
-            // Re-initialize Lucide icons for new workflow elements
-            if (typeof lucide !== 'undefined') {
-                lucide.createIcons();
-            }
+            // Initialize lucide icons specifically for the timeline container
+            // Use multiple attempts with different timing for browser compatibility
+            const initializeIcons = () => {
+                if (typeof lucide !== 'undefined') {
+                    const icons = timeline.querySelectorAll('[data-lucide]');
+                    console.log(`Found ${icons.length} lucide icons to initialize`);
+                    lucide.createIcons();
+                    console.log('Lucide icons initialized');
+                    
+                    // Firefox sometimes needs a second pass
+                    setTimeout(() => {
+                        const stillMissingIcons = timeline.querySelectorAll('[data-lucide]:not(svg)');
+                        if (stillMissingIcons.length > 0) {
+                            console.log(`Reinitializing ${stillMissingIcons.length} missing icons for Firefox compatibility`);
+                            lucide.createIcons();
+                        }
+                    }, 100);
+                }
+            };
+            
+            // Try multiple timing approaches for browser compatibility
+            setTimeout(initializeIcons, 10);
+            setTimeout(initializeIcons, 100);
         }
 
         // Get connector status based on adjacent steps
@@ -2635,9 +2829,8 @@
             const taskElement = document.getElementById('currentTask');
             taskElement.textContent = currentTask;
             
-            // Ensure click handler and styling are preserved
-            taskElement.className = 'task-description clickable';
-            taskElement.onclick = showTaskModal;
+            // Show full task description without modal
+            taskElement.className = 'task-description';
         }
 
         // Update last updated time
@@ -2957,8 +3150,9 @@
             // Render markdown content as HTML
             let renderedContent;
             try {
-                if (filename.endsWith('.md') && typeof marked !== 'undefined') {
-                    renderedContent = marked.parse(content);
+                if (filename.endsWith('.md') && typeof markdownit !== 'undefined') {
+                    const md = markdownit();
+                    renderedContent = `<div class="markdown-body" style="background: transparent; color: #ffffff;">${md.render(content)}</div>`;
                 } else {
                     // For non-markdown files, escape HTML and preserve formatting
                     renderedContent = '<pre>' + content
@@ -3048,7 +3242,7 @@
         }
         
         function getCurrentRunningAgent() {
-            // Find the currently running agent from workflow data
+            // Find the currently running agent from real workflow data only
             if (realTimeData && realTimeData.workflow) {
                 const runningAgent = realTimeData.workflow.find(step => step.status === 'in-progress');
                 if (runningAgent) {
@@ -3066,7 +3260,7 @@
                 logStatus.textContent = `Watching ${runningAgent.charAt(0).toUpperCase() + runningAgent.slice(1)} agent logs`;
                 logStatus.className = 'log-status active';
                 
-                const logFile = `${runningAgent}-log.txt`;
+                const logFile = `${runningAgent}-log.md`;
                 if (logFile !== currentLogFile) {
                     currentLogFile = logFile;
                     if (logViewerVisible) {
@@ -3343,7 +3537,120 @@
 
         // ============ LOG MODAL FUNCTIONALITY ============
         
-        // Show log modal for an agent
+        // Show log modal for agent log files (workflow icons)
+        async function showAgentLogModal(agentName, status) {
+            console.log('showAgentLogModal called for:', agentName);
+            
+            const modal = document.getElementById('logModal');
+            const titleText = document.getElementById('logModalTitleText');
+            const icon = document.getElementById('logModalIcon');
+            const content = document.getElementById('logContent');
+            
+            console.log('Modal element:', modal);
+            console.log('Content element:', content);
+            
+            // Set title and icon based on agent (clean up the name)
+            const cleanName = agentName.replace(/\s*(complete|pending|running|active)\s*(\(\d+\s*bytes\))?\s*/gi, '').trim();
+            titleText.textContent = `${cleanName} Log`;
+            
+            // Set lucide icon properly
+            const iconName = getAgentIcon(agentName);
+            icon.innerHTML = `<i data-lucide="${iconName}"></i>`;
+            
+            // Re-initialize lucide icons for the modal
+            if (typeof lucide !== 'undefined') {
+                lucide.createIcons();
+            }
+            
+            // Show loading
+            content.innerHTML = '<div style="text-align: center; color: #fff; padding: 40px; font-size: 16px;">Loading log...</div>';
+            content.style.display = 'block';
+            
+            // Force modal to be visible
+            modal.style.display = 'flex';
+            modal.style.visibility = 'visible';
+            modal.style.opacity = '1';
+            modal.style.zIndex = '99999';
+            modal.classList.add('active');
+            
+            try {
+                // Get LOG filename for workflow icons
+                const logFilename = getLogFilename(agentName);
+                const apiUrl = `${getAPIBaseURL()}/api/outputs/${logFilename}?mode=${currentMode}`;
+                
+                console.log('Modal Debug - Agent Name:', agentName);
+                console.log('Modal Debug - Generated Filename:', logFilename);
+                console.log('Modal Debug - Current Mode:', currentMode);
+                console.log('Modal Debug - API URL:', apiUrl);
+                
+                const response = await fetch(apiUrl);
+                console.log('Response status:', response.status);
+                
+                if (response.ok) {
+                    const logText = await response.text();
+                    console.log('Log text length:', logText.length);
+                    
+                    if (logText.trim()) {
+                        // Render as markdown for log files
+                        if (typeof markdownit !== 'undefined') {
+                            const md = markdownit();
+                            const renderedMarkdown = md.render(logText);
+                            content.innerHTML = `<div class="markdown-body">${renderedMarkdown}</div>`;
+                        } else {
+                            // Fallback to plain text if markdown-it is not available
+                            const escapedText = logText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                            content.innerHTML = `<div class="plain-text">${escapedText}</div>`;
+                        }
+                        
+                        content.style.display = 'block';
+                        content.style.visibility = 'visible';
+                        content.style.opacity = '1';
+                    } else {
+                        content.innerHTML = '<div style="text-align: center; color: #fbbf24; padding: 40px; font-size: 16px;">Log file is empty.</div>';
+                    }
+                } else if (response.status === 400 || response.status === 404) {
+                    // File might not exist yet or be in process of creation
+                    console.log(`Log file ${logFilename} not yet available (${response.status}), will retry...`);
+                    content.innerHTML = `<div style="text-align: center; color: #fbbf24; padding: 40px; font-size: 16px;">Log file not yet available<br>Checking again in a moment...</div>`;
+                    
+                    // Retry after a short delay
+                    setTimeout(async () => {
+                        try {
+                            const retryResponse = await fetch(apiUrl);
+                            if (retryResponse.ok) {
+                                const logText = await retryResponse.text();
+                                if (logText.trim()) {
+                                    // Render as markdown for log files
+                                    if (typeof markdownit !== 'undefined') {
+                                        const md = markdownit();
+                                        const renderedMarkdown = md.render(logText);
+                                        content.innerHTML = `<div class="markdown-body">${renderedMarkdown}</div>`;
+                                    } else {
+                                        const escapedText = logText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                                        content.innerHTML = `<div class="plain-text">${escapedText}</div>`;
+                                    }
+                                } else {
+                                    content.innerHTML = '<div style="text-align: center; color: #fbbf24; padding: 40px; font-size: 16px;">Log file is empty.</div>';
+                                }
+                            } else {
+                                content.innerHTML = `<div style="text-align: center; color: #f87171; padding: 40px; font-size: 16px;">Log file not found: ${logFilename}<br>Status: ${retryResponse.status}</div>`;
+                            }
+                        } catch (retryError) {
+                            content.innerHTML = `<div style="text-align: center; color: #f87171; padding: 40px; font-size: 16px;">Error loading log file: ${retryError.message}</div>`;
+                        }
+                    }, 2000);
+                } else {
+                    const errorText = await response.text();
+                    console.error('API response error:', errorText);
+                    content.innerHTML = `<div style="text-align: center; color: #f87171; padding: 40px; font-size: 16px;">API Error: ${response.status}<br>${errorText}</div>`;
+                }
+            } catch (error) {
+                console.error('Error loading log:', error);
+                content.innerHTML = `<div style="text-align: center; color: #f87171; padding: 40px; font-size: 16px;">Error loading log file: ${error.message}</div>`;
+            }
+        }
+        
+        // Show output modal for agent output files (agent cards)
         async function showLogModal(agentName, status) {
             const modal = document.getElementById('logModal');
             const titleText = document.getElementById('logModalTitleText');
@@ -3357,7 +3664,15 @@
             // Set title and icon based on agent (clean up the name)
             const cleanName = agentName.replace(/\s*(complete|pending|running|active)\s*(\(\d+\s*bytes\))?\s*/gi, '').trim();
             titleText.textContent = `${cleanName} Log`;
-            icon.textContent = getAgentIcon(agentName);
+            
+            // Set lucide icon properly
+            const iconName = getAgentIcon(agentName);
+            icon.innerHTML = `<i data-lucide="${iconName}"></i>`;
+            
+            // Re-initialize lucide icons for the modal
+            if (typeof lucide !== 'undefined') {
+                lucide.createIcons();
+            }
             
             // Show loading
             content.innerHTML = '<div style="text-align: center; color: #fff; padding: 40px; font-size: 16px;">Loading log...</div>';
@@ -3374,9 +3689,9 @@
             console.log('Modal computed styles:', window.getComputedStyle(modal));
             
             try {
-                // Determine log filename based on agent name
-                const logFilename = getLogFilename(agentName);
-                const apiUrl = `${getAPIBaseURL()}/api/outputs/${logFilename}?mode=${currentMode}`;
+                // Determine output filename based on agent name
+                const outputFilename = getAgentOutputFilename(agentName);
+                const apiUrl = `${getAPIBaseURL()}/api/outputs/${outputFilename}?mode=${currentMode}`;
                 
                 console.log('Fetching log from URL:', apiUrl);
                 
@@ -3389,9 +3704,17 @@
                     console.log('Log text preview:', logText.substring(0, 200));
                     
                     if (logText.trim()) {
-                        // Escape HTML and display with proper styling
-                        const escapedText = logText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                        content.innerHTML = `<div style="color: #ffffff; font-size: 14px; font-family: 'JetBrains Mono', 'Courier New', monospace; line-height: 1.6; white-space: pre-wrap; padding: 0;">${escapedText}</div>`;
+                        // Render all files as markdown now (both output and log files)
+                        if (typeof markdownit !== 'undefined') {
+                            // Use markdown-it for markdown rendering
+                            const md = markdownit();
+                            const renderedMarkdown = md.render(logText);
+                            content.innerHTML = `<div class="markdown-body">${renderedMarkdown}</div>`;
+                        } else {
+                            // Fallback to plain text if markdown-it is not available
+                            const escapedText = logText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                            content.innerHTML = `<div class="plain-text">${escapedText}</div>`;
+                        }
                         
                         // Ensure visibility
                         content.style.display = 'block';
@@ -3413,7 +3736,7 @@
                 } else {
                     const errorText = await response.text();
                     console.error('API response error:', errorText);
-                    content.innerHTML = `<div style="text-align: center; color: #f87171; padding: 40px; font-size: 16px;">Log file not found: ${logFilename}<br>Status: ${response.status}</div>`;
+                    content.innerHTML = `<div style="text-align: center; color: #f87171; padding: 40px; font-size: 16px;">File not found: ${outputFilename}<br>Status: ${response.status}</div>`;
                 }
             } catch (error) {
                 console.error('Error loading log:', error);
@@ -3444,22 +3767,51 @@
             name = name.replace(/\s*(complete|pending|running|active)\s*(\(\d+\s*bytes\))?\s*/g, '').trim();
             name = name.split(' ')[0]; // Get first word
             
-            const filename = `${name}-log.txt`;
+            const filename = `${name}-log.md`;
             console.log('Generated filename:', filename);
+            return filename;
+        }
+        
+        // Get output filename for agent (exploration.md, plan.md, etc.)
+        function getAgentOutputFilename(agentName) {
+            console.log('Getting output filename for agent:', agentName);
+            
+            // Extract the actual agent name (remove status and byte count)
+            let name = agentName.toLowerCase();
+            
+            // Remove common status words and extract base agent name
+            name = name.replace(/\s*(complete|pending|running|active)\s*(\(\d+\s*bytes\))?\s*/g, '').trim();
+            name = name.split(' ')[0]; // Get first word
+            
+            // Map agent names to their output files
+            const agentFileMap = {
+                'explorer': 'exploration.md',
+                'planner': 'plan.md',
+                'coder': 'changes.md',
+                'verifier': 'verification.md',
+                'scribe': 'documentation.md'
+            };
+            
+            const filename = agentFileMap[name] || `${name}.md`;
+            console.log('Generated output filename:', filename);
             return filename;
         }
         
         // Get icon for agent
         function getAgentIcon(agentName) {
             const iconMap = {
-                'explorer': '🔍',
-                'planner': '📋',
-                'coder': '💻',
-                'scribe': '📝',
-                'verifier': '✅'
+                'explorer': 'search',
+                'planner': 'clipboard',
+                'coder': 'code',
+                'scribe': 'file-text',
+                'verifier': 'check-circle',
+                'criteria': 'diamond',
+                'completion': 'octagon',
+                'user': 'shield',
+                'validation': 'shield'
             };
             const name = agentName.toLowerCase().split(' ')[0];
-            return iconMap[name] || '⚙️';
+            return iconMap[name] || 'circle';
         }
         
         // Close modal when clicking outside
@@ -3533,8 +3885,10 @@
                 if (response.ok) {
                     const checklistText = await response.text();
                     // Convert markdown to HTML and display
-                    if (typeof marked !== 'undefined') {
-                        content.innerHTML = marked.parse(checklistText);
+                    if (typeof markdownit !== 'undefined') {
+                        const md = markdownit();
+                        const renderedMarkdown = md.render(checklistText);
+                        content.innerHTML = `<div class="markdown-body">${renderedMarkdown}</div>`;
                     } else {
                         // Fallback without markdown parsing
                         content.innerHTML = `<pre style="color: #fff; white-space: pre-wrap;">${checklistText}</pre>`;
