@@ -6,7 +6,7 @@ Provides HTTP endpoint for workflow status retrieval
 
 import json
 import re
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import HTTPServer, BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 import sys
@@ -17,7 +17,11 @@ import subprocess
 import os
 import webbrowser
 import socket
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from workflow_status import StatusReader, get_workflow_status
+import uuid
+import logging
+from datetime import datetime
 # ClaudeCodeOrchestrator now run in separate process via subprocess
 
 # Global state for concurrent operation tracking
@@ -70,29 +74,125 @@ class StatusHandler(BaseHTTPRequestHandler):
             # Store project_root even if StatusReader fails
             self.project_root = Path(os.getcwd())
             self.status_reader = None
+        # Thread pool for non-blocking subprocess and file operations
+        self._subprocess_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix='SubprocessPool')
+        # Thread-safe logging and request tracking
+        self._setup_thread_safe_logging()
+        self._request_lock = threading.RLock()
         super().__init__(*args, **kwargs)
+
+    def _setup_thread_safe_logging(self):
+        """Configure thread-safe logging for concurrent operations"""
+        # Configure logger with thread-safe handler
+        self.logger = logging.getLogger(f'APIServer_{id(self)}')
+        self.logger.setLevel(logging.INFO)
+        
+        # Clear existing handlers to avoid duplicates
+        self.logger.handlers.clear()
+        
+        # Create thread-safe console handler
+        handler = logging.StreamHandler()
+        handler.setLevel(logging.INFO)
+        
+        # Format with thread information for debugging
+        formatter = logging.Formatter(
+            '[%(asctime)s] [%(thread)d-%(threadName)s] [%(name)s] %(message)s'
+        )
+        handler.setFormatter(formatter)
+        
+        self.logger.addHandler(handler)
+        self.logger.propagate = False  # Prevent duplicate logs
+
+    def _log_request(self, request_id, message, level='info'):
+        """Thread-safe logging with request ID tracking"""
+        with self._request_lock:
+            log_message = f"[{request_id}] {message}"
+            getattr(self.logger, level)(log_message)
+
+    def _run_subprocess_safely(self, cmd, timeout=15):
+        """Run subprocess in thread pool to prevent blocking other requests"""
+        def _run_cmd():
+            try:
+                return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            except subprocess.TimeoutExpired as e:
+                return None, f"Command timed out after {timeout} seconds"
+            except Exception as e:
+                return None, str(e)
+        
+        future = self._subprocess_executor.submit(_run_cmd)
+        try:
+            result = future.result(timeout=timeout + 5)  # Add 5 seconds buffer
+            if isinstance(result, tuple):  # Error case
+                return None, result[1]
+            return result, None
+        except FutureTimeoutError:
+            return None, f"Subprocess execution timed out after {timeout + 5} seconds"
+        except Exception as e:
+            return None, str(e)
+
+    def _read_file_safely(self, file_path, encoding='utf-8'):
+        """Read file in thread pool to prevent blocking other requests"""
+        def _read_file():
+            try:
+                with open(file_path, 'r', encoding=encoding) as f:
+                    return f.read()
+            except Exception as e:
+                return None, str(e)
+        
+        future = self._subprocess_executor.submit(_read_file)
+        try:
+            result = future.result(timeout=10.0)  # 10 second timeout for file reads
+            if isinstance(result, tuple):  # Error case
+                return None, result[1]
+            return result, None
+        except FutureTimeoutError:
+            return None, "File read timed out after 10 seconds"
+        except Exception as e:
+            return None, str(e)
     
     def do_GET(self):
-        """Handle GET requests"""
+        """Handle GET requests with thread-safe request ID tracking"""
+        request_id = str(uuid.uuid4())[:8]  # Short UUID for logging
         parsed_url = urlparse(self.path)
         
-        if parsed_url.path == '/api/status':
-            self._handle_status_request(parsed_url)
-        elif parsed_url.path.startswith('/api/outputs/'):
-            self._handle_outputs_request(parsed_url)
-        else:
-            self._send_error(404, 'Not Found')
+        self._log_request(request_id, f"GET {self.path} started")
+        
+        try:
+            if parsed_url.path == '/api/status':
+                self._handle_status_request(parsed_url, request_id)
+            elif parsed_url.path == '/api/health':
+                self._handle_health_request(request_id)
+            elif parsed_url.path.startswith('/api/outputs/'):
+                self._handle_outputs_request(parsed_url, request_id)
+            else:
+                self._send_error(404, 'Not Found')
+                self._log_request(request_id, f"GET {self.path} - 404 Not Found")
+        except Exception as e:
+            self._log_request(request_id, f"GET {self.path} - Error: {e}", 'error')
+            self._send_error(500, 'Internal Server Error')
+        finally:
+            self._log_request(request_id, f"GET {self.path} completed")
     
     def do_POST(self):
-        """Handle POST requests"""
+        """Handle POST requests with thread-safe request ID tracking"""
+        request_id = str(uuid.uuid4())[:8]  # Short UUID for logging
         parsed_url = urlparse(self.path)
         
-        if parsed_url.path == '/api/gate-decision':
-            self._handle_gate_decision_request(parsed_url)
-        elif parsed_url.path == '/api/execute':
-            self._handle_execute_request(parsed_url)
-        else:
-            self._send_error(404, 'Not Found')
+        self._log_request(request_id, f"POST {self.path} started")
+        
+        try:
+            if parsed_url.path == '/api/gate-decision':
+                self._handle_gate_decision_request(parsed_url, request_id)
+            elif parsed_url.path == '/api/execute':
+                self._handle_execute_request(parsed_url, request_id)
+            else:
+                self._send_error(404, 'Not Found')
+                self._log_request(request_id, f"POST {self.path} - 404 Not Found")
+        except Exception as e:
+            self._log_request(request_id, f"POST {self.path} - Error: {e}", 'error')
+            self._send_error(500, 'Internal Server Error')
+        finally:
+            self._log_request(request_id, f"POST {self.path} completed")
     
     def do_OPTIONS(self):
         """Handle CORS preflight requests"""
@@ -102,10 +202,10 @@ class StatusHandler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
     
-    def _handle_status_request(self, parsed_url):
-        """Handle /api/status endpoint"""
+    def _handle_status_request(self, parsed_url, request_id):
+        """Handle /api/status endpoint with request tracking"""
         try:
-            print(f"[API] Processing status request: {parsed_url.path}?{parsed_url.query}")
+            self._log_request(request_id, f"Processing status request: {parsed_url.path}?{parsed_url.query}")
             
             # Use fallback method if status reader is unavailable
             if self.status_reader is None:
@@ -179,9 +279,65 @@ class StatusHandler(BaseHTTPRequestHandler):
         
         self.wfile.write(response_body)
     
-    def _handle_gate_decision_request(self, parsed_url):
-        """Handle /api/gate-decision endpoint"""
+    def _handle_health_request(self, request_id):
+        """Handle /api/health endpoint - lightweight health check with request tracking"""
         try:
+            self._log_request(request_id, "Health check requested")
+            import psutil
+            import time
+            from threading import active_count
+            
+            # Get basic health information without file I/O
+            health_data = {
+                'status': 'ok',
+                'timestamp': time.time(),
+                'server': {
+                    'active_threads': active_count(),
+                    'process_id': os.getpid(),
+                    'memory_usage_mb': round(psutil.Process().memory_info().rss / 1024 / 1024, 1)
+                }
+            }
+            
+            # Send successful response
+            response_body = json.dumps(health_data, indent=2).encode('utf-8')
+            
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(response_body)))
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            
+            self.wfile.write(response_body)
+            
+        except ImportError:
+            # Fallback if psutil is not available
+            health_data = {
+                'status': 'ok',
+                'timestamp': time.time(),
+                'server': {
+                    'active_threads': active_count(),
+                    'process_id': os.getpid()
+                }
+            }
+            
+            response_body = json.dumps(health_data, indent=2).encode('utf-8')
+            
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(response_body)))
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            
+            self.wfile.write(response_body)
+            
+        except Exception as e:
+            print(f"[API] Health check error: {e}")
+            self._send_error(500, f'Health check failed: {str(e)}')
+    
+    def _handle_gate_decision_request(self, parsed_url, request_id):
+        """Handle /api/gate-decision endpoint with request tracking"""
+        try:
+            self._log_request(request_id, f"Gate decision request: {parsed_url.query}")
             # Parse query parameters for mode
             query_params = parse_qs(parsed_url.query)
             mode = query_params.get('mode', ['regular'])[0]
@@ -252,10 +408,10 @@ class StatusHandler(BaseHTTPRequestHandler):
             if decision_type == 'new-task' and 'description' in decision_data:
                 cmd.append(decision_data['description'])
             
-            # Execute command with reduced timeout to prevent blocking
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+            # Execute command with non-blocking subprocess call
+            result, error = self._run_subprocess_safely(cmd, timeout=15)
             
-            if result.returncode == 0:
+            if result is not None and result.returncode == 0:
                 # Read updated status after decision processing
                 status_data = get_workflow_status(project_root=self.project_root, mode=mode)
                 
@@ -268,12 +424,16 @@ class StatusHandler(BaseHTTPRequestHandler):
                     'orchestrator_output': result.stdout.strip()
                 }
             else:
+                # Handle subprocess error
+                error_msg = error if error else "Unknown subprocess error"
+                if result is not None:
+                    error_msg = f'Orchestrator command failed: {result.stderr.strip() or result.stdout.strip()}'
                 return {
                     'success': False,
-                    'error': f'Orchestrator command failed: {result.stderr.strip() or result.stdout.strip()}'
+                    'error': error_msg
                 }
         
-        except subprocess.TimeoutExpired:
+        except Exception as e:
             return {
                 'success': False,
                 'error': 'Gate decision processing timed out after 15 seconds. Try again or check orchestrator logs.'
@@ -284,9 +444,10 @@ class StatusHandler(BaseHTTPRequestHandler):
                 'error': f'Error processing gate decision: {str(e)}'
             }
     
-    def _handle_outputs_request(self, parsed_url):
-        """Handle /api/outputs/{filename} endpoint"""
+    def _handle_outputs_request(self, parsed_url, request_id):
+        """Handle /api/outputs/{filename} endpoint with request tracking"""
         try:
+            self._log_request(request_id, f"Outputs request: {parsed_url.path}")
             # Extract filename from path
             path_parts = parsed_url.path.split('/')
             if len(path_parts) != 4 or path_parts[3] == '':
@@ -328,17 +489,15 @@ class StatusHandler(BaseHTTPRequestHandler):
                     self._send_error(404, f'File "{filename}" not found')
                     return
             
-            # Read file content
-            try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                
+            # Read file content using non-blocking file read
+            content, error = self._read_file_safely(file_path)
+            
+            if content is not None:
                 # Send markdown response
                 self._send_markdown_response(content)
-                
-            except Exception as e:
-                print(f"Error reading file {file_path}: {e}")
-                self._send_error(500, 'Error reading file')
+            else:
+                print(f"Error reading file {file_path}: {error}")
+                self._send_error(500, f'Error reading file: {error}')
             
         except Exception as e:
             print(f"Error handling outputs request: {e}")
@@ -346,12 +505,16 @@ class StatusHandler(BaseHTTPRequestHandler):
     
     def _validate_output_filename(self, filename):
         """Validate that filename is safe and allowed"""
+        print(f"[DEBUG] Validating filename: '{filename}'")
+        
         # Check for path separators and relative path components
         if '/' in filename or '\\' in filename or '..' in filename:
+            print(f"[DEBUG] Failed path separator check")
             return False
         
         # Check for absolute paths or hidden files
         if filename.startswith('/') or filename.startswith('.'):
+            print(f"[DEBUG] Failed absolute/hidden path check")
             return False
         
         # Define allowlist of permitted agent output files
@@ -369,16 +532,20 @@ class StatusHandler(BaseHTTPRequestHandler):
         
         # Check if file is in allowlist
         if filename in allowed_files:
+            print(f"[DEBUG] Matched allowlist file")
             return True
         
         # Check for instructions files pattern
         if filename.endswith('-instructions.md'):
+            print(f"[DEBUG] Matched instructions pattern")
             return True
         
         # Check for log files pattern
-        if filename.endswith('-log.txt'):
+        if filename.endswith('-log.md'):
+            print(f"[DEBUG] Matched log pattern")
             return True
         
+        print(f"[DEBUG] No pattern matched, rejecting")
         return False
     
     def _get_outputs_directory(self, mode):
@@ -402,9 +569,10 @@ class StatusHandler(BaseHTTPRequestHandler):
         
         self.wfile.write(response_body)
     
-    def _handle_execute_request(self, parsed_url):
-        """Handle /api/execute endpoint for command execution"""
+    def _handle_execute_request(self, parsed_url, request_id):
+        """Handle /api/execute endpoint for command execution with request tracking"""
         try:
+            self._log_request(request_id, f"Execute request: {parsed_url.path}")
             # Read request body first
             content_length = int(self.headers.get('Content-Length', 0))
             if content_length == 0:
@@ -550,19 +718,21 @@ class StatusHandler(BaseHTTPRequestHandler):
                     if mode == 'meta':
                         cmd.append('--meta')
                     
-                    process = subprocess.run(cmd, 
-                                           capture_output=True, 
-                                           text=True,
-                                           cwd=os.getcwd())
+                    # Use non-blocking subprocess call for clean command
+                    process, error = self._run_subprocess_safely(cmd, timeout=30)
                     
-                    if process.returncode == 0:
+                    if process is not None and process.returncode == 0:
                         result_data.update({
                             'message': 'Outputs cleaned successfully'
                         })
                     else:
+                        # Handle clean command error
+                        error_msg = error if error else "Unknown clean command error"
+                        if process is not None:
+                            error_msg = f'Clean failed: {process.stderr}'
                         result_data.update({
                             'success': False,
-                            'message': f'Clean failed: {process.stderr}'
+                            'message': error_msg
                         })
                 
                 # Read updated status after command execution
@@ -622,12 +792,22 @@ class OrchestratorAPIServer:
                 print(f"Error finding available port: {e}")
                 return False
                 
-            print(f"[API Server] Initializing HTTPServer on {self.host}:{self.port}")
-            self.server = HTTPServer((self.host, self.port), StatusHandler)
+            print(f"[API Server] Initializing ThreadingHTTPServer on {self.host}:{self.port}")
+            self.server = ThreadingHTTPServer((self.host, self.port), StatusHandler)
+            
+            # Configure server timeout and connection parameters
+            self.server.timeout = 30.0  # 30 second request timeout
+            self.server.allow_reuse_address = True
+            
+            # Configure threading parameters for connection pooling
+            if hasattr(self.server, 'daemon_threads'):
+                self.server.daemon_threads = True
+            
+            print(f"[API Server] Configured timeout: {self.server.timeout}s")
             
             # Validate server was created successfully
             if not self.server:
-                print(f"[API Server] Failed to create HTTPServer instance")
+                print(f"[API Server] Failed to create ThreadingHTTPServer instance")
                 return False
             
             print(f"[API Server] HTTPServer created successfully")
@@ -680,8 +860,18 @@ class OrchestratorAPIServer:
         # Create a separate start method for background that doesn't use signals
         def start_without_signals():
             try:
-                print(f"[API Server Background] Initializing HTTPServer on {self.host}:{self.port}")
-                self.server = HTTPServer((self.host, self.port), StatusHandler)
+                print(f"[API Server Background] Initializing ThreadingHTTPServer on {self.host}:{self.port}")
+                self.server = ThreadingHTTPServer((self.host, self.port), StatusHandler)
+                
+                # Configure server timeout and connection parameters
+                self.server.timeout = 30.0  # 30 second request timeout
+                self.server.allow_reuse_address = True
+                
+                # Configure threading parameters for connection pooling
+                if hasattr(self.server, 'daemon_threads'):
+                    self.server.daemon_threads = True
+                
+                print(f"[API Server Background] Configured timeout: {self.server.timeout}s")
                 
                 # Validate server was created successfully
                 if not self.server:

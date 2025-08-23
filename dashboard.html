@@ -10,6 +10,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://get.fontspace.co/webfont/yYxa5/12345678901234567890123456789012/cyber-techno-demo.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/markdown-it/dist/markdown-it.min.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/github-markdown-css@5.0.0/github-markdown-light.css">
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
@@ -25,11 +26,12 @@
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
+            text-rendering: optimizeLegibility;
             background: #0a0a0a;
             min-height: 100vh;
             padding: 20px;
             color: #ffffff;
-            font-size: 14px;
+            font-size: 16px;
             font-weight: 400;
         }
 
@@ -58,14 +60,17 @@
         }
 
         .header h1 {
-            font-size: 20px;
+            font-family: 'Cyber Techno Demo', 'Inter', sans-serif;
+            font-size: 28px;
             font-weight: 600;
             margin-bottom: 4px;
+            text-rendering: optimizeLegibility;
+            letter-spacing: 1px;
         }
 
         .header p {
             color: #a0a0a0;
-            font-size: 14px;
+            font-size: 16px;
             font-weight: 400;
         }
 
@@ -125,7 +130,7 @@
         }
 
         .mode-label {
-            font-size: 14px;
+            font-size: 16px;
             font-weight: 500;
         }
 
@@ -134,8 +139,8 @@
             color: white;
             border: none;
             border-radius: 6px;
-            padding: 8px 12px;
-            font-size: 12px;
+            padding: 10px 14px;
+            font-size: 14px;
             font-weight: 500;
             cursor: pointer;
             transition: all 0.3s ease;
@@ -169,38 +174,28 @@
         }
 
         .current-task {
-            font-size: 1.3em;
+            font-size: 1.5em;
             font-weight: 600;
             color: #ffffff;
             margin-bottom: 10px;
+            text-rendering: optimizeLegibility;
         }
 
-        .task-description {
-            color: rgba(255, 255, 255, 0.8);
-            font-size: 1.0em;
-            line-height: 1.6;
-            white-space: pre-wrap !important;
-            word-wrap: break-word !important;
-            max-height: none !important;
-            height: auto !important;
-            overflow: visible !important;
-            text-overflow: unset !important;
+        .task-content {
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 1.2em;
+            line-height: 1.7;
             margin-top: 8px;
             padding: 8px 0;
+            text-rendering: optimizeLegibility;
+        }
+        
+        .task-content .markdown-body {
+            background: transparent;
+            color: inherit;
+            font-size: inherit;
         }
 
-        .task-description.clickable {
-            cursor: pointer;
-            transition: all 0.2s ease;
-            border-radius: 8px;
-            padding: 12px;
-            margin: -12px;
-        }
-
-        .task-description.clickable:hover {
-            background: rgba(255, 255, 255, 0.05);
-            color: rgba(255, 255, 255, 0.9);
-        }
 
         /* Workflow Timeline */
         .workflow-section {
@@ -210,11 +205,12 @@
         }
 
         .section-title {
-            font-size: 16px;
+            font-size: 20px;
             font-weight: 600;
             color: #ffffff;
             margin-bottom: 20px;
             text-align: left;
+            text-rendering: optimizeLegibility;
         }
 
         .workflow-timeline {
@@ -336,16 +332,17 @@
         }
 
         .step-label {
-            font-size: 0.9em;
+            font-size: 1.0em;
             font-weight: 600;
             text-align: center;
             color: #ffffff;
             max-width: 120px;
-            line-height: 1.3;
+            line-height: 1.4;
             height: 40px;
             display: flex;
             align-items: center;
             justify-content: center;
+            text-rendering: optimizeLegibility;
         }
 
         .workflow-connector {
@@ -962,6 +959,7 @@
             flex-grow: 1;
             display: flex;
             flex-direction: column;
+            font-size: 16px;
         }
 
         .log-content {
@@ -973,10 +971,11 @@
         /* Plain text fallback styling */
         .log-content .plain-text {
             font-family: 'JetBrains Mono', 'Courier New', monospace;
-            font-size: 16px;
-            line-height: 1.4;
+            font-size: 18px;
+            line-height: 1.5;
             color: #ffffff;
             white-space: pre-wrap;
+            text-rendering: optimizeLegibility;
         }
         
         /* Clean GitHub markdown styling for dark theme */
@@ -1024,100 +1023,7 @@
             border: 1px solid #30363d;
         }
 
-        /* Task Modal Styles */
-        .task-modal, .task-list-modal {
-            position: fixed !important;
-            top: 0 !important;
-            left: 0 !important;
-            right: 0 !important;
-            bottom: 0 !important;
-            background: rgba(0, 0, 0, 0.8) !important;
-            display: none !important;
-            align-items: center !important;
-            justify-content: center !important;
-            z-index: 999999 !important;
-            visibility: hidden !important;
-            opacity: 0 !important;
-        }
 
-        .task-modal.active, .task-list-modal.active {
-            display: flex !important;
-            visibility: visible !important;
-            opacity: 1 !important;
-        }
-
-        .task-modal-dialog {
-            background: #1a1a1b !important;
-            border-radius: 16px !important;
-            max-width: 600px !important;
-            width: 90% !important;
-            max-height: 80vh !important;
-            overflow-y: auto !important;
-            margin: 20px !important;
-            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5) !important;
-        }
-
-        .task-list-modal-dialog {
-            background: #1a1a1b !important;
-            border-radius: 16px !important;
-            max-width: 900px !important;
-            width: 90% !important;
-            max-height: 80vh !important;
-            overflow-y: auto !important;
-            margin: 20px !important;
-            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5) !important;
-        }
-
-        .task-info h3 {
-            color: #fff !important;
-            margin-bottom: 16px !important;
-            font-size: 1.2em !important;
-        }
-
-        .current-task-full {
-            background: #0d1117 !important;
-            border-radius: 8px !important;
-            padding: 16px !important;
-            color: #e6edf3 !important;
-            line-height: 1.6 !important;
-            margin-bottom: 24px !important;
-        }
-
-        .task-actions {
-            text-align: center !important;
-        }
-
-        .task-list-content {
-            background: #0d1117 !important;
-            border-radius: 8px !important;
-            padding: 20px !important;
-            color: #e6edf3 !important;
-            line-height: 1.6 !important;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
-            max-height: 60vh !important;
-            overflow-y: auto !important;
-        }
-
-        .task-list-content h1, .task-list-content h2, .task-list-content h3 {
-            color: #fff !important;
-            margin-top: 24px !important;
-            margin-bottom: 12px !important;
-        }
-
-        .task-list-content ul {
-            padding-left: 20px !important;
-        }
-
-        .task-list-content li {
-            margin-bottom: 16px !important;
-            padding-left: 8px !important;
-        }
-
-        .task-list-content li[data-completed="true"] {
-            color: #4ade80 !important;
-            text-decoration: line-through !important;
-            opacity: 0.7 !important;
-        }
 
         .modal-dialog {
             background: #1a1a1b;
@@ -1151,17 +1057,20 @@
         }
 
         .modal-title {
-            font-size: 1.5em;
+            font-size: 1.8em;
             font-weight: 600;
             margin: 0;
             display: flex;
             align-items: center;
             justify-content: center;
             gap: 10px;
+            text-rendering: optimizeLegibility;
         }
 
         .modal-body {
             padding: 30px;
+            font-size: 16px;
+            text-rendering: optimizeLegibility;
         }
 
         .validation-content {
@@ -1170,13 +1079,14 @@
             padding: 20px;
             margin-bottom: 25px;
             font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
-            font-size: 0.9em;
-            line-height: 1.6;
+            font-size: 1.1em;
+            line-height: 1.7;
             color: #ffffff;
             white-space: pre-wrap;
             word-wrap: break-word;
             max-height: 300px;
             overflow-y: auto;
+            text-rendering: optimizeLegibility;
         }
 
         .modal-buttons {
@@ -1722,14 +1632,13 @@
                 </button>
             </div>
             <h1>Claude Code Orchestrator</h1>
-            <p>Workflow Progress Dashboard</p>
         </header>
 
         <main class="main-content">
             <div class="status-overview">
                 <div class="current-task">Current Task</div>
-                <div class="task-description" id="currentTask">
-                    Create dashboard HTML interface implementing the visual workflow progress design
+                <div class="task-content" id="currentTask">
+                    <!-- Current task markdown will be rendered here -->
                 </div>
             </div>
 
@@ -1875,50 +1784,6 @@
         </div>
     </div>
 
-    <!-- Task Modal -->
-    <div class="task-modal" id="taskModal">
-        <div class="modal-dialog task-modal-dialog">
-            <div class="modal-header">
-                <h2 class="modal-title">
-                    <span>📋</span>
-                    <span>Task Details</span>
-                </h2>
-                <button class="modal-close" onclick="closeTaskModal()">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="task-info">
-                    <h3>Current Task</h3>
-                    <div class="current-task-full" id="currentTaskFull">
-                        <!-- Current task will be loaded here -->
-                    </div>
-                </div>
-                <div class="task-actions">
-                    <button class="btn-modal" onclick="showTaskListModal()">
-                        <span>📝</span>
-                        <span>View All Tasks</span>
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Task List Modal -->
-    <div class="task-list-modal" id="taskListModal">
-        <div class="modal-dialog task-list-modal-dialog">
-            <div class="modal-header">
-                <h2 class="modal-title">
-                    <span>📋</span>
-                    <span>All Tasks - <span id="taskListMode">Regular</span> Mode</span>
-                </h2>
-                <button class="modal-close" onclick="closeTaskListModal()">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="task-list-content" id="taskListContent">
-                    <!-- Task list will be loaded here -->
-                </div>
-            </div>
-        </div>
-    </div>
 
     <script>
         // Mock data structures matching .agent-outputs/ file formats
@@ -2827,10 +2692,17 @@
             fullTaskText = currentTask; // Store the full text
             
             const taskElement = document.getElementById('currentTask');
-            taskElement.textContent = currentTask;
             
-            // Show full task description without modal
-            taskElement.className = 'task-description';
+            // Render current task as markdown
+            if (currentTask && typeof markdownit !== 'undefined') {
+                const md = markdownit();
+                const renderedMarkdown = md.render(currentTask);
+                taskElement.innerHTML = `<div class="markdown-body">${renderedMarkdown}</div>`;
+            } else {
+                taskElement.textContent = currentTask || 'No current task';
+            }
+            
+            taskElement.className = 'task-content';
         }
 
         // Update last updated time
@@ -3840,105 +3712,6 @@
             }
         });
 
-        // ============ TASK MODAL FUNCTIONALITY ============
-        
-        // Show task modal with current task details
-        function showTaskModal() {
-            console.log('showTaskModal called');
-            
-            const modal = document.getElementById('taskModal');
-            const currentTaskFull = document.getElementById('currentTaskFull');
-            
-            console.log('Modal element:', modal);
-            console.log('Full task text:', fullTaskText);
-            
-            if (!modal) {
-                console.error('Task modal not found!');
-                return;
-            }
-            
-            // Use the stored full task text instead of the truncated display text
-            currentTaskFull.textContent = fullTaskText || 'No task description available';
-            
-            modal.classList.add('active');
-            console.log('Task modal opened with full text');
-        }
-        
-        // Close task modal
-        function closeTaskModal() {
-            const modal = document.getElementById('taskModal');
-            modal.classList.remove('active');
-        }
-        
-        // Show task list modal
-        async function showTaskListModal() {
-            const modal = document.getElementById('taskListModal');
-            const content = document.getElementById('taskListContent');
-            const modeIndicator = document.getElementById('taskListMode');
-            
-            if (!modal) {
-                console.error('Task list modal not found!');
-                return;
-            }
-            
-            // Update mode indicator
-            modeIndicator.textContent = currentMode.charAt(0).toUpperCase() + currentMode.slice(1);
-            
-            // Show loading
-            content.innerHTML = '<div style="text-align: center; color: #666; padding: 20px;">Loading tasks...</div>';
-            modal.classList.add('active');
-            
-            try {
-                // Load checklist file (API will handle mode-based directory lookup)
-                const apiUrl = `${getAPIBaseURL()}/api/outputs/tasks-checklist.md?mode=${currentMode}`;
-                
-                const response = await fetch(apiUrl);
-                if (response.ok) {
-                    const checklistText = await response.text();
-                    // Convert markdown to HTML and display
-                    if (typeof markdownit !== 'undefined') {
-                        const md = markdownit();
-                        const renderedMarkdown = md.render(checklistText);
-                        content.innerHTML = `<div class="markdown-body">${renderedMarkdown}</div>`;
-                    } else {
-                        // Fallback without markdown parsing
-                        content.innerHTML = `<pre style="color: #fff; white-space: pre-wrap;">${checklistText}</pre>`;
-                    }
-                    
-                    // Style completed tasks
-                    const listItems = content.querySelectorAll('li');
-                    listItems.forEach(li => {
-                        if (li.textContent.includes('[x]')) {
-                            li.setAttribute('data-completed', 'true');
-                        }
-                    });
-                } else {
-                    content.innerHTML = '<div style="text-align: center; color: #f87171; padding: 20px;">Task list not found or could not be loaded.</div>';
-                }
-            } catch (error) {
-                console.error('Error loading task list:', error);
-                content.innerHTML = '<div style="text-align: center; color: #f87171; padding: 20px;">Error loading task list.</div>';
-            }
-        }
-        
-        // Close task list modal
-        function closeTaskListModal() {
-            const modal = document.getElementById('taskListModal');
-            modal.classList.remove('active');
-        }
-        
-        // Close task modals when clicking outside
-        document.getElementById('taskModal').addEventListener('click', function(e) {
-            if (e.target === this) {
-                closeTaskModal();
-            }
-        });
-        
-        document.getElementById('taskListModal').addEventListener('click', function(e) {
-            if (e.target === this) {
-                closeTaskListModal();
-            }
-        });
 
         // Include external API if available
         function loadExternalAPI() {
