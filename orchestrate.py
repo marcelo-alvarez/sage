@@ -748,7 +748,7 @@ class AgentExecutor:
         from datetime import datetime
         start_time = datetime.now()
         timestamp = start_time.strftime("%Y-%m-%dT%H:%M:%SZ")
-        log_file = self.outputs_dir / f"{agent_type}-log.txt"
+        log_file = self.outputs_dir / f"{agent_type}-log.md"
         
         # Add start timestamp
         start_log = f"\n## {timestamp} - {agent_type.upper()} Agent Session\n\n"
@@ -931,7 +931,7 @@ class AgentExecutor:
             error_parts.append("No stderr output from Claude CLI")
         
         # Agent log file status for debugging
-        log_file = self.outputs_dir / f"{agent_type}-log.txt"
+        log_file = self.outputs_dir / f"{agent_type}-log.md"
         if log_file.exists():
             size = log_file.stat().st_size
             error_parts.append(f"Agent log file exists ({size} bytes): {log_file}")
@@ -1306,7 +1306,7 @@ class ClaudeCodeOrchestrator:
         adjusted_work_section = work_section.replace('.agent-outputs/', f'{self.outputs_dir.name}/')
         
         # Add agent logging instructions for transparency
-        log_file = f"{self.outputs_dir.name}/{agent_name}-log.txt"
+        log_file = f"{self.outputs_dir.name}/{agent_name}-log.md"
         
         # Get current time for example
         current_time = datetime.now().strftime("%H:%M:%S")
@@ -2544,7 +2544,7 @@ Continuing to next task in workflow
             "current-user-validation.md",
             "next-command.txt",
             "status.txt"
-            # Note: orchestrator-log.md AND agent-log.txt files are preserved for historical record
+            # Note: orchestrator-log.md AND agent-log.md files are preserved for historical record
         ]
         
         cleaned_count = 0
@@ -2781,6 +2781,60 @@ Begin by analyzing the current directory and asking about the goal.
             print("Already in supervised mode - no unsupervised file found")
 
 
+def clear_ui_command(args):
+    """Kill all dashboard and API server processes"""
+    import subprocess
+    import sys
+    
+    print("Stopping all dashboard and API server processes...")
+    
+    try:
+        # Kill API server processes (multiple patterns to catch all variants)
+        patterns_killed = []
+        result = subprocess.run(['pkill', '-f', 'api_server'], capture_output=True)
+        if result.returncode == 0:
+            patterns_killed.append("api_server processes")
+            
+        # Also kill by exact python script name patterns
+        subprocess.run(['pkill', '-f', 'api_server.py'], capture_output=True)
+        subprocess.run(['pkill', '-f', 'Python.*api_server'], capture_output=True)
+        
+        print("✓ Stopped API server processes")
+        
+        # Kill dashboard server processes  
+        subprocess.run(['pkill', '-f', 'dashboard_server'], capture_output=True)
+        subprocess.run(['pkill', '-f', 'dashboard_server.py'], capture_output=True)
+        subprocess.run(['pkill', '-f', 'Python.*dashboard_server'], capture_output=True)
+        print("✓ Stopped dashboard server processes")
+        
+        # Kill any orchestrate serve processes
+        subprocess.run(['pkill', '-f', 'cc-orchestrate serve'], capture_output=True)
+        subprocess.run(['pkill', '-f', 'orchestrate serve'], capture_output=True)
+        print("✓ Stopped orchestrate serve processes")
+        
+        # Give processes time to terminate
+        import time
+        time.sleep(2)
+        
+        # Check if any are still running and report
+        remaining = subprocess.run(['pgrep', '-f', 'api_server|dashboard_server'], 
+                                 capture_output=True, text=True)
+        if remaining.stdout.strip():
+            print("⚠ Warning: Some processes may still be running:")
+            subprocess.run(['ps', 'aux'], stdout=subprocess.PIPE, text=True)
+            result = subprocess.run(['ps', 'aux'], capture_output=True, text=True)
+            for line in result.stdout.split('\n'):
+                if 'api_server' in line or 'dashboard_server' in line:
+                    if 'grep' not in line:
+                        print(f"  Still running: {line.strip()}")
+        else:
+            print("All UI server processes have been stopped.")
+        
+    except Exception as e:
+        print(f"Error stopping processes: {e}")
+        sys.exit(1)
+
+
 def serve_command(args):
     """Start dashboard and API servers with health monitoring"""
     
@@ -2891,17 +2945,19 @@ def serve_command(args):
         print("Press Ctrl+C to stop all servers")
         print("-" * 50)
         
-        # Import and start dashboard server in a separate process
-        import dashboard_server
+        # Start dashboard server using local version to serve current directory files
+        current_dir = os.getcwd()
+        local_dashboard_script = os.path.join(current_dir, "dashboard_server.py")
+        
+        # Check if local dashboard_server.py exists, fall back to global if not
+        if os.path.exists(local_dashboard_script):
+            dashboard_script = local_dashboard_script
+        else:
+            dashboard_script = os.path.join(os.path.expanduser("~/.claude-orchestrator"), "dashboard_server.py")
+        
         dashboard_process = subprocess.Popen([
-            sys.executable, "-c", f"""
-import sys
-import os
-orchestrator_dir = os.path.expanduser('~/.claude-orchestrator')
-sys.path.insert(0, orchestrator_dir)
-import dashboard_server
-dashboard_server.start_dashboard_server({dashboard_port}, 'localhost')
-"""])
+            sys.executable, dashboard_script, str(dashboard_port)
+        ], cwd=current_dir)
         process_manager.register_process('dashboard_server', dashboard_process)
         print(f"Dashboard server registered (PID: {dashboard_process.pid})")
         
@@ -2989,6 +3045,8 @@ def show_help():
     print("         approve-completion, retry-from-planner, retry-from-coder, retry-from-verifier")
     print("         user-approve, new-task [description] - Create new task during user validation")
     print("  Mode: unsupervised, supervised")
+    print("  UI: serve - Start dashboard and API servers")
+    print("      clear-ui - Stop all dashboard and API server processes")
     print("  Interactive mode: Runs persistent workflow with interactive gates")
 
 def main():
@@ -3194,6 +3252,9 @@ def main():
         
     elif command == "serve":
         serve_command(args)
+        
+    elif command == "clear-ui":
+        clear_ui_command(args)
         
     elif command == "help":
         show_help()

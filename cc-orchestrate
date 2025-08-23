@@ -13,7 +13,7 @@ sys.path.insert(0, orchestrator_dir)
 
 # Import the main orchestrate functionality
 try:
-    from orchestrate import main as orchestrate_main, ClaudeCodeOrchestrator, serve_command, show_help
+    from orchestrate import main as orchestrate_main, ClaudeCodeOrchestrator, serve_command, clear_ui_command, show_help
     from process_manager import ProcessManager
 except ImportError as e:
     print(f"Error: Could not import orchestrator modules: {e}")
@@ -27,7 +27,7 @@ def main():
     
     parser = argparse.ArgumentParser(description='Claude Code Orchestrator')
     parser.add_argument('command', nargs='?', default='continue',
-                       help='Command to execute (serve, stop, continue, etc.)')
+                       help='Command to execute (serve, stop, clear-ui, continue, etc.)')
     parser.add_argument('--no-browser', action='store_true',
                        help='Suppress browser opening for CI/CD environments')
     parser.add_argument('--interactive', action='store_true',
@@ -52,6 +52,9 @@ def main():
     
     elif command == "serve":
         serve_command(args)
+    
+    elif command == "clear-ui":
+        clear_ui_command(args)
     
     elif command == "help":
         show_help()

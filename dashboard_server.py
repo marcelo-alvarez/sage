@@ -57,6 +57,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             # Log other errors but don't crash
             print(f"[Dashboard] Error handling request {self.path}: {e}")
     
+    
     def log_message(self, format, *args):
         """Log requests with timestamp"""
         print(f"[{self.log_date_time_string()}] {format % args}")
