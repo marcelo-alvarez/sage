@@ -3,8 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Claude Code Orchestrator Dashboard</title>
+    <title>Claude Code Orchestrator Dashboard v2.0</title>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
     <style>
         /* Global Styles */
         * {
@@ -14,40 +21,50 @@
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            background: #0a0a0a;
             min-height: 100vh;
             padding: 20px;
-            color: #333;
+            color: #ffffff;
+            font-size: 14px;
+            font-weight: 400;
+        }
+
+        body.meta {
+            background: #0f0606;
+            padding-top: 40px;
         }
 
         .container {
-            max-width: 1600px;
+            max-width: 1200px;
             margin: 0 auto;
-            background: white;
-            border-radius: 16px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            background: #1a1a1b;
+            border-radius: 8px;
             overflow: hidden;
         }
 
         /* Header */
         .header {
-            background: #2c3e50;
-            color: white;
-            padding: 30px;
+            background: #1a1a1b;
+            color: #ffffff;
+            padding: 24px 32px;
             text-align: center;
             position: relative;
+            border-bottom: 1px solid #2a2a2b;
         }
 
         .header h1 {
-            font-size: 2.2em;
+            font-size: 20px;
             font-weight: 600;
-            margin-bottom: 10px;
+            margin-bottom: 4px;
         }
 
         .header p {
-            opacity: 0.9;
-            font-size: 1.1em;
+            color: #a0a0a0;
+            font-size: 14px;
+            font-weight: 400;
         }
 
         /* Mode Switcher */
@@ -92,7 +109,7 @@
             width: 22px;
             left: 4px;
             bottom: 4px;
-            background-color: white;
+            background-color: #2a2a2b;
             transition: .4s;
             border-radius: 50%;
         }
@@ -128,7 +145,7 @@
         }
 
         .btn-skip-discovery.active {
-            background: #e74c3c;
+            background: rgba(239, 68, 68, 0.2);
         }
 
         /* Main Content */
@@ -138,43 +155,67 @@
 
         /* Status Overview */
         .status-overview {
-            background: #ecf0f1;
+            background: #2a2a2b;
             border-radius: 12px;
             padding: 25px;
             margin-bottom: 30px;
+            height: auto !important;
+            max-height: none !important;
+            overflow: visible !important;
         }
 
         .current-task {
             font-size: 1.3em;
             font-weight: 600;
-            color: #2c3e50;
+            color: #ffffff;
             margin-bottom: 10px;
         }
 
         .task-description {
-            color: #7f8c8d;
+            color: rgba(255, 255, 255, 0.7);
             font-size: 1.1em;
             line-height: 1.5;
+            white-space: pre-wrap !important;
+            word-wrap: break-word !important;
+            max-height: none !important;
+            height: auto !important;
+            overflow: visible !important;
+            text-overflow: unset !important;
+        }
+
+        .task-description.clickable {
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border-radius: 8px;
+            padding: 12px;
+            margin: -12px;
+        }
+
+        .task-description.clickable:hover {
+            background: rgba(255, 255, 255, 0.05);
+            color: rgba(255, 255, 255, 0.9);
         }
 
         /* Workflow Timeline */
         .workflow-section {
-            margin-bottom: 40px;
+            margin: 0;
+            background: #1a1a1b;
+            padding: 24px 32px;
         }
 
         .section-title {
-            font-size: 1.8em;
+            font-size: 16px;
             font-weight: 600;
-            color: #2c3e50;
-            margin-bottom: 25px;
-            text-align: center;
+            color: #ffffff;
+            margin-bottom: 20px;
+            text-align: left;
         }
 
         .workflow-timeline {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            background: #f8f9fa;
+            background: #1a1a1b;
             padding: 30px;
             border-radius: 12px;
             overflow-x: auto;
@@ -203,29 +244,67 @@
             transition: all 0.3s ease;
         }
 
+        .step-icon i {
+            width: 24px;
+            height: 24px;
+        }
+
         .step-icon.pending {
-            background: #ecf0f1;
-            color: #95a5a6;
-            border: 3px solid #bdc3c7;
+            background: rgba(71, 85, 105, 0.2);
+            color: #94a3b8;
+            border: 1px solid rgba(71, 85, 105, 0.4);
         }
 
         .step-icon.in-progress {
-            background: #3498db;
-            color: white;
-            border: 3px solid #2980b9;
+            background: rgba(99, 102, 241, 0.2);
+            color: #6366f1;
+            border: 1px solid rgba(99, 102, 241, 0.6);
             animation: pulse 2s infinite;
         }
 
         .step-icon.completed {
-            background: #27ae60;
-            color: white;
-            border: 3px solid #229954;
+            background: rgba(34, 197, 94, 0.2);
+            color: #22c55e;
+            border: 1px solid rgba(34, 197, 94, 0.6);
         }
 
         .step-icon.gate.pending {
-            background: #ecf0f1;
-            color: #7f8c8d;
-            border: 3px solid #bdc3c7;
+            background: rgba(245, 158, 11, 0.2);
+            color: #f59e0b;
+            border: 1px solid rgba(245, 158, 11, 0.6);
+            animation: gate-pulse 1.5s infinite;
+        }
+
+        .step-icon.gate.pending-inactive {
+            background: rgba(71, 85, 105, 0.15);
+            color: #64748b;
+            border: 1px solid rgba(71, 85, 105, 0.3);
+            animation: none;
+        }
+
+        .step-icon.gate.completed {
+            background: rgba(34, 197, 94, 0.2);
+            color: #22c55e;
+            border: 1px solid rgba(34, 197, 94, 0.6);
+            animation: none;
+        }
+
+        @keyframes gate-pulse {
+            0% { 
+                background: rgba(245, 158, 11, 0.2);
+                transform: scale(1);
+                box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4);
+            }
+            70% {
+                background: rgba(245, 158, 11, 0.3);
+                transform: scale(1.05);
+                box-shadow: 0 0 0 8px rgba(245, 158, 11, 0);
+            }
+            100% { 
+                background: rgba(245, 158, 11, 0.2);
+                transform: scale(1);
+                box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);
+            }
         }
 
         @keyframes pulse {
@@ -238,7 +317,7 @@
             font-size: 0.9em;
             font-weight: 600;
             text-align: center;
-            color: #2c3e50;
+            color: #ffffff;
             max-width: 120px;
             line-height: 1.3;
         }
@@ -246,7 +325,7 @@
         .workflow-connector {
             flex: 1;
             height: 4px;
-            background: #bdc3c7;
+            background: rgba(255, 255, 255, 0.2);
             margin: 0 15px;
             position: relative;
             top: -30px;
@@ -269,8 +348,8 @@
         }
 
         .agent-card {
-            background: white;
-            border: 2px solid #ecf0f1;
+            background: #1a1a1b;
+            border: 1px solid #2a2a2b;
             border-radius: 12px;
             padding: 25px;
             transition: all 0.3s ease;
@@ -282,13 +361,13 @@
         }
 
         .agent-card.active {
-            border-color: #3498db;
-            background: #f8fbff;
+            border-color: rgba(99, 102, 241, 0.5);
+            background: #2a2a2b;
         }
 
         .agent-card.completed {
             border-color: #27ae60;
-            background: #f8fff9;
+            background: #2a2a2b;
         }
 
         .agent-header {
@@ -301,7 +380,7 @@
         .agent-name {
             font-size: 1.3em;
             font-weight: 600;
-            color: #2c3e50;
+            color: #ffffff;
         }
 
         .agent-status {
@@ -313,24 +392,31 @@
         }
 
         .agent-status.pending {
-            background: #ecf0f1;
-            color: #7f8c8d;
+            background: #2a2a2b;
+            color: rgba(255, 255, 255, 0.6);
         }
 
         .agent-status.in-progress {
-            background: #3498db;
-            color: white;
+            background: rgba(99, 102, 241, 0.2);
+            color: #6366f1;
         }
 
         .agent-status.completed {
-            background: #27ae60;
-            color: white;
+            background: rgba(34, 197, 94, 0.2);
+            color: #22c55e;
         }
 
         .agent-description {
-            color: #7f8c8d;
+            color: rgba(255, 255, 255, 0.6);
             line-height: 1.5;
             font-size: 0.95em;
+        }
+        
+        .click-hint {
+            font-size: 0.8em;
+            color: rgba(255, 255, 255, 0.4);
+            margin-top: 8px;
+            font-style: italic;
         }
 
         /* Controls */
@@ -375,34 +461,81 @@
 
         .last-updated {
             text-align: center;
-            color: #7f8c8d;
+            color: rgba(255, 255, 255, 0.6);
             font-size: 0.9em;
             margin-top: 20px;
         }
 
+        .connection-indicator {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(231, 76, 60, 0.9);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            font-weight: bold;
+            z-index: 1001;
+            display: none;
+            animation: pulse 2s infinite;
+        }
+
+        .connection-indicator.visible {
+            display: block;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+
+        .error-message {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(231, 76, 60, 0.95);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 6px;
+            font-size: 0.9em;
+            font-weight: 500;
+            z-index: 1001;
+            display: none;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            max-width: 400px;
+            text-align: center;
+        }
+
+        .error-message.visible {
+            display: block;
+        }
+
         /* Command Panel */
         .command-panel {
-            background: #f8f9fa;
-            border: 2px solid #dee2e6;
+            background: #1a1a1b;
+            border: 1px solid #2a2a2b;
             border-radius: 12px;
             padding: 25px;
             margin: 30px 0;
         }
 
         .command-panel.regular {
-            border-color: #3498db;
-            background: #f0f8ff;
+            border-color: rgba(99, 102, 241, 0.5);
+            background: #2a2a2b;
         }
 
         .command-panel.meta {
             border-color: #e74c3c;
-            background: #fff5f5;
+            background: rgba(15, 8, 8, 0.8);
         }
 
         .panel-title {
             font-size: 1.4em;
             font-weight: 600;
-            color: #2c3e50;
+            color: #ffffff;
             margin-bottom: 15px;
             text-align: center;
             display: flex;
@@ -433,9 +566,30 @@
         }
 
         .mode-indicator.meta {
-            background: #e74c3c;
+            background: rgba(239, 68, 68, 0.2);
             color: white;
         }
+
+        .meta-mode-banner {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: rgba(231, 76, 60, 0.9);
+            color: white;
+            text-align: center;
+            padding: 8px 0;
+            font-weight: bold;
+            font-size: 14px;
+            z-index: 1000;
+            display: none;
+            letter-spacing: 2px;
+        }
+
+        .meta-mode-banner.visible {
+            display: block;
+        }
+
 
         .command-buttons {
             display: grid;
@@ -445,67 +599,75 @@
         }
 
         .btn-command {
-            background: #3498db;
-            color: white;
-            border: none;
-            border-radius: 8px;
-            padding: 12px 20px;
-            font-size: 0.9em;
-            font-weight: 600;
+            background: #2a2a2b;
+            color: #ffffff;
+            border: 1px solid #3a3a3b;
+            border-radius: 4px;
+            padding: 8px 16px;
+            font-size: 14px;
+            font-weight: 500;
             cursor: pointer;
-            transition: all 0.3s ease;
+            transition: background-color 0.15s ease;
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 8px;
-            min-height: 45px;
-            position: relative;
+            gap: 6px;
+            min-height: 32px;
         }
 
         .btn-command:hover:not(:disabled) {
-            background: #2980b9;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(52, 152, 219, 0.3);
+            background: #3a3a3b;
         }
 
         .btn-command:disabled {
-            background: #bdc3c7;
-            color: #7f8c8d;
+            background: #2a2a2b;
+            color: #666666;
             cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
+            opacity: 0.5;
         }
 
         .btn-command.loading {
-            background: #f39c12;
+            background: rgba(245, 158, 11, 0.2);
+            color: #f59e0b;
+            border-color: rgba(245, 158, 11, 0.3);
         }
 
         .btn-command.success {
-            background: #27ae60;
+            background: rgba(34, 197, 94, 0.2);
+            color: #22c55e;
+            border-color: rgba(34, 197, 94, 0.3);
         }
 
         .btn-command.error {
-            background: #e74c3c;
+            background: rgba(239, 68, 68, 0.2);
+            color: #f87171;
+            border-color: rgba(239, 68, 68, 0.3);
         }
 
         .btn-clean {
-            background: #e67e22;
+            background: rgba(251, 146, 60, 0.1) !important;
+            border-color: rgba(251, 146, 60, 0.2) !important;
+            color: #fb923c !important;
         }
 
         .btn-clean:hover:not(:disabled) {
-            background: #d35400;
+            background: rgba(251, 146, 60, 0.15) !important;
+            border-color: rgba(251, 146, 60, 0.3) !important;
         }
 
         .btn-stop {
-            background: #e74c3c;
+            background: rgba(248, 113, 113, 0.1) !important;
+            border-color: rgba(248, 113, 113, 0.2) !important;
+            color: #f87171 !important;
         }
 
         .btn-stop:hover:not(:disabled) {
-            background: #c0392b;
+            background: rgba(248, 113, 113, 0.15) !important;
+            border-color: rgba(248, 113, 113, 0.3) !important;
         }
 
         .command-status {
-            background: #ecf0f1;
+            background: #2a2a2b;
             border-radius: 8px;
             padding: 15px;
             text-align: center;
@@ -518,18 +680,18 @@
         }
 
         .command-status.loading {
-            background: #fff3cd;
-            color: #856404;
+            background: rgba(25, 20, 5, 0.8);
+            color: #fbbf24;
         }
 
         .command-status.success {
-            background: #d4edda;
-            color: #155724;
+            background: rgba(5, 20, 10, 0.8);
+            color: #22c55e;
         }
 
         .command-status.error {
-            background: #f8d7da;
-            color: #721c24;
+            background: rgba(20, 5, 5, 0.8);
+            color: #f87171;
         }
 
         .elapsed-time {
@@ -539,13 +701,17 @@
         }
 
         .command-icon {
-            font-size: 1.1em;
+            width: 18px;
+            height: 18px;
+            margin-right: 8px;
+            display: inline-block;
+            vertical-align: middle;
         }
 
         /* Gate Decision Controls */
         .gate-controls {
-            background: #fff3cd;
-            border: 2px solid #ffc107;
+            background: rgba(25, 20, 5, 0.8);
+            border: 1px solid rgba(245, 158, 11, 0.4);
             border-radius: 12px;
             padding: 25px;
             margin: 30px 0;
@@ -559,13 +725,13 @@
         .gate-title {
             font-size: 1.4em;
             font-weight: 600;
-            color: #856404;
+            color: #fbbf24;
             margin-bottom: 15px;
             text-align: center;
         }
 
         .gate-content {
-            color: #856404;
+            color: #fbbf24;
             margin-bottom: 20px;
             line-height: 1.5;
             text-align: center;
@@ -593,13 +759,13 @@
         }
 
         .btn-gate:hover {
-            background: #e0a800;
+            background: rgba(245, 158, 11, 0.3);
             transform: translateY(-2px);
         }
 
         .btn-gate:disabled {
-            background: #d6d6d6;
-            color: #6c757d;
+            background: rgba(15, 15, 15, 0.4);
+            color: rgba(255, 255, 255, 0.5);
             cursor: not-allowed;
             transform: none;
         }
@@ -625,8 +791,8 @@
 
         /* Log Viewer Styles */
         .log-viewer {
-            background: #f8f9fa;
-            border: 1px solid #dee2e6;
+            background: #1a1a1b;
+            border: 1px solid #2a2a2b;
             border-radius: 8px;
             padding: 20px;
             margin: 20px 0;
@@ -641,7 +807,7 @@
 
         .log-status {
             font-weight: 500;
-            color: #6c757d;
+            color: rgba(255, 255, 255, 0.5);
         }
 
         .log-status.active {
@@ -669,7 +835,7 @@
 
         .log-output:empty:before {
             content: "No log data available";
-            color: #6c757d;
+            color: rgba(255, 255, 255, 0.5);
             font-style: italic;
         }
 
@@ -677,7 +843,7 @@
             display: inline-block;
             width: 16px;
             height: 16px;
-            border: 2px solid #f3f3f3;
+            border: 2px solid #404040;
             border-top: 2px solid #007bff;
             border-radius: 50%;
             animation: spin 1s linear infinite;
@@ -708,8 +874,174 @@
             display: flex;
         }
 
+        .log-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1001;
+        }
+
+        .log-modal.active {
+            display: flex;
+        }
+
+        .log-modal-dialog {
+            background: #1a1a1b;
+            border-radius: 16px;
+            max-width: 1200px;
+            width: 95%;
+            max-height: 90vh;
+            min-height: 600px;
+            overflow-y: auto;
+            margin: 20px auto;
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .modal-close {
+            background: transparent;
+            border: none;
+            color: #666;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-close:hover {
+            color: #999;
+        }
+
+        .log-modal .modal-body {
+            padding: 20px;
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .log-content {
+            background: #0d1117;
+            border-radius: 8px;
+            padding: 24px;
+            font-family: 'JetBrains Mono', 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.6;
+            color: #ffffff !important;
+            white-space: pre-wrap;
+            overflow-y: auto;
+            overflow-x: auto;
+            min-height: 500px;
+            max-height: none;
+            flex-grow: 1;
+            border: 1px solid #30363d;
+        }
+
+        /* Task Modal Styles */
+        .task-modal, .task-list-modal {
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            right: 0 !important;
+            bottom: 0 !important;
+            background: rgba(0, 0, 0, 0.8) !important;
+            display: none !important;
+            align-items: center !important;
+            justify-content: center !important;
+            z-index: 999999 !important;
+        }
+
+        .task-modal.active, .task-list-modal.active {
+            display: flex !important;
+            visibility: visible !important;
+            opacity: 1 !important;
+        }
+
+        .task-modal-dialog {
+            background: #1a1a1b !important;
+            border-radius: 16px !important;
+            max-width: 600px !important;
+            width: 90% !important;
+            max-height: 80vh !important;
+            overflow-y: auto !important;
+            margin: 20px !important;
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5) !important;
+        }
+
+        .task-list-modal-dialog {
+            background: #1a1a1b !important;
+            border-radius: 16px !important;
+            max-width: 900px !important;
+            width: 90% !important;
+            max-height: 80vh !important;
+            overflow-y: auto !important;
+            margin: 20px !important;
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5) !important;
+        }
+
+        .task-info h3 {
+            color: #fff !important;
+            margin-bottom: 16px !important;
+            font-size: 1.2em !important;
+        }
+
+        .current-task-full {
+            background: #0d1117 !important;
+            border-radius: 8px !important;
+            padding: 16px !important;
+            color: #e6edf3 !important;
+            line-height: 1.6 !important;
+            margin-bottom: 24px !important;
+        }
+
+        .task-actions {
+            text-align: center !important;
+        }
+
+        .task-list-content {
+            background: #0d1117 !important;
+            border-radius: 8px !important;
+            padding: 20px !important;
+            color: #e6edf3 !important;
+            line-height: 1.6 !important;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+            max-height: 60vh !important;
+            overflow-y: auto !important;
+        }
+
+        .task-list-content h1, .task-list-content h2, .task-list-content h3 {
+            color: #fff !important;
+            margin-top: 24px !important;
+            margin-bottom: 12px !important;
+        }
+
+        .task-list-content ul {
+            padding-left: 20px !important;
+        }
+
+        .task-list-content li {
+            margin-bottom: 16px !important;
+            padding-left: 8px !important;
+        }
+
+        .task-list-content li[data-completed="true"] {
+            color: #4ade80 !important;
+            text-decoration: line-through !important;
+            opacity: 0.7 !important;
+        }
+
         .modal-dialog {
-            background: white;
+            background: #1a1a1b;
             border-radius: 16px;
             max-width: 600px;
             width: 100%;
@@ -731,11 +1063,12 @@
         }
 
         .modal-header {
-            background: #3498db;
-            color: white;
+            background: #2a2a2b;
+            color: #e6edf3;
             padding: 25px;
             border-radius: 16px 16px 0 0;
             text-align: center;
+            border-bottom: 1px solid #404040;
         }
 
         .modal-title {
@@ -753,14 +1086,14 @@
         }
 
         .validation-content {
-            background: #f8f9fa;
+            background: #1a1a1b;
             border-radius: 8px;
             padding: 20px;
             margin-bottom: 25px;
             font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
             font-size: 0.9em;
             line-height: 1.6;
-            color: #2c3e50;
+            color: #ffffff;
             white-space: pre-wrap;
             word-wrap: break-word;
             max-height: 300px;
@@ -775,70 +1108,77 @@
         }
 
         .btn-modal {
-            background: #3498db;
-            color: white;
-            border: none;
+            background: rgba(255, 255, 255, 0.08);
+            color: #ffffff;
+            border: 1px solid rgba(255, 255, 255, 0.12);
             border-radius: 8px;
             padding: 12px 20px;
-            font-size: 0.9em;
-            font-weight: 600;
+            font-size: 0.875rem;
+            font-weight: 500;
             cursor: pointer;
-            transition: all 0.3s ease;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
             display: flex;
             align-items: center;
             justify-content: center;
             gap: 8px;
-            min-height: 45px;
+            min-height: 44px;
+            letter-spacing: -0.01em;
         }
 
         .btn-modal:hover:not(:disabled) {
-            background: #2980b9;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(52, 152, 219, 0.3);
+            background: rgba(255, 255, 255, 0.12);
+            border-color: rgba(255, 255, 255, 0.2);
         }
 
         .btn-modal:disabled {
-            background: #bdc3c7;
-            color: #7f8c8d;
+            background: rgba(255, 255, 255, 0.04);
+            color: rgba(255, 255, 255, 0.3);
+            border-color: rgba(255, 255, 255, 0.06);
             cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
         }
 
         .btn-modal.approve {
-            background: #27ae60;
+            background: rgba(34, 197, 94, 0.15) !important;
+            border-color: rgba(34, 197, 94, 0.3) !important;
+            color: #22c55e !important;
         }
 
         .btn-modal.approve:hover:not(:disabled) {
-            background: #229954;
-            box-shadow: 0 4px 12px rgba(39, 174, 96, 0.3);
+            background: rgba(34, 197, 94, 0.2) !important;
+            border-color: rgba(34, 197, 94, 0.4) !important;
         }
 
         .btn-modal.new-task {
-            background: #f39c12;
+            background: rgba(245, 158, 11, 0.15) !important;
+            border-color: rgba(245, 158, 11, 0.3) !important;
+            color: #f59e0b !important;
         }
 
         .btn-modal.new-task:hover:not(:disabled) {
-            background: #e67e22;
-            box-shadow: 0 4px 12px rgba(243, 156, 18, 0.3);
+            background: rgba(245, 158, 11, 0.2) !important;
+            border-color: rgba(245, 158, 11, 0.4) !important;
         }
 
         .btn-modal.retry {
-            background: #e74c3c;
+            background: rgba(239, 68, 68, 0.15) !important;
+            border-color: rgba(239, 68, 68, 0.3) !important;
+            color: #ef4444 !important;
         }
 
         .btn-modal.retry:hover:not(:disabled) {
-            background: #c0392b;
-            box-shadow: 0 4px 12px rgba(231, 76, 60, 0.3);
+            background: rgba(239, 68, 68, 0.2) !important;
+            border-color: rgba(239, 68, 68, 0.4) !important;
         }
 
         .btn-modal.exit {
-            background: #95a5a6;
+            background: rgba(100, 116, 139, 0.15) !important;
+            border-color: rgba(100, 116, 139, 0.3) !important;
+            color: #64748b !important;
         }
 
         .btn-modal.exit:hover:not(:disabled) {
-            background: #7f8c8d;
-            box-shadow: 0 4px 12px rgba(149, 165, 166, 0.3);
+            background: rgba(100, 116, 139, 0.2) !important;
+            border-color: rgba(100, 116, 139, 0.4) !important;
         }
 
         .modal-feedback {
@@ -860,11 +1200,78 @@
             color: #dc3545;
         }
 
+        /* Completion Modal Styles */
+        .completion-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1500;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .completion-modal.show {
+            opacity: 1;
+        }
+
+        .completion-content {
+            background: #1a1a1b;
+            border-radius: 20px;
+            padding: 40px;
+            text-align: center;
+            max-width: 500px;
+            width: 90%;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+            animation: celebrationBounce 0.6s ease-out;
+        }
+
+        .completion-header h1 {
+            font-size: 2em;
+            color: #27ae60;
+            margin-bottom: 20px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .completion-body p {
+            font-size: 1.1em;
+            color: rgba(255, 255, 255, 0.6);
+            margin-bottom: 30px;
+            line-height: 1.5;
+        }
+
+        .completion-actions {
+            display: flex;
+            justify-content: center;
+        }
+
+        @keyframes celebrationBounce {
+            0% {
+                transform: scale(0.3) rotate(-10deg);
+                opacity: 0;
+            }
+            50% {
+                transform: scale(1.05) rotate(5deg);
+            }
+            70% {
+                transform: scale(0.95) rotate(-2deg);
+            }
+            100% {
+                transform: scale(1) rotate(0deg);
+                opacity: 1;
+            }
+        }
+
         .task-description-input {
             width: 100%;
             min-height: 80px;
             padding: 12px;
-            border: 2px solid #dee2e6;
+            border: 1px solid #2a2a2b;
             border-radius: 8px;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
             font-size: 0.9em;
@@ -875,7 +1282,7 @@
 
         .task-description-input:focus {
             outline: none;
-            border-color: #3498db;
+            border-color: rgba(99, 102, 241, 0.5);
             box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
         }
 
@@ -890,7 +1297,7 @@
 
         .input-label {
             font-weight: 600;
-            color: #2c3e50;
+            color: #ffffff;
             margin-bottom: 8px;
             display: block;
         }
@@ -982,15 +1389,15 @@
 
         /* File Viewer Panel */
         .file-viewer {
-            background: #f8f9fa;
+            background: #1a1a1b;
             border-radius: 12px;
             overflow: hidden;
         }
 
         .file-tabs {
             display: flex;
-            background: #ecf0f1;
-            border-bottom: 2px solid #bdc3c7;
+            background: #2a2a2b;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
             overflow-x: auto;
             scrollbar-width: thin;
         }
@@ -1000,11 +1407,11 @@
         }
 
         .file-tabs::-webkit-scrollbar-track {
-            background: #ecf0f1;
+            background: #2a2a2b;
         }
 
         .file-tabs::-webkit-scrollbar-thumb {
-            background: #bdc3c7;
+            background: rgba(255, 255, 255, 0.2);
             border-radius: 2px;
         }
 
@@ -1012,32 +1419,39 @@
             display: flex;
             align-items: center;
             gap: 8px;
-            padding: 15px 20px;
-            background: transparent;
-            border: none;
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid #2a2a2b;
+            border-radius: 8px;
             cursor: pointer;
-            font-size: 0.95em;
+            font-size: 0.875rem;
             font-weight: 500;
-            color: #7f8c8d;
-            border-bottom: 3px solid transparent;
-            transition: all 0.3s ease;
-            min-width: 140px;
+            color: rgba(255, 255, 255, 0.6);
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            margin-right: 8px;
+            min-width: 120px;
             white-space: nowrap;
+            letter-spacing: -0.01em;
         }
 
         .file-tab:hover {
-            background: #ddd;
-            color: #2c3e50;
+            background: rgba(255, 255, 255, 0.08);
+            color: rgba(255, 255, 255, 0.8);
+            border-color: rgba(255, 255, 255, 0.12);
         }
 
         .file-tab.active {
-            background: white;
-            color: #3498db;
-            border-bottom-color: #3498db;
+            background: rgba(255, 255, 255, 0.12);
+            color: #ffffff;
+            border-color: rgba(255, 255, 255, 0.2);
         }
 
         .file-tab-icon {
-            font-size: 1.1em;
+            width: 16px;
+            height: 16px;
+            margin-right: 6px;
+            display: inline-block;
+            vertical-align: middle;
         }
 
         .file-content-container {
@@ -1047,17 +1461,17 @@
 
         .file-content {
             padding: 40px;
-            background: white;
+            background: #1a1a1b;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
             font-size: 1.1em;
             line-height: 1.7;
-            color: #2c3e50;
+            color: #ffffff;
             word-wrap: break-word;
             overflow-wrap: break-word;
         }
         
         .file-content h1 {
-            color: #2c3e50;
+            color: #ffffff;
             border-bottom: 2px solid #3498db;
             padding-bottom: 10px;
             margin-bottom: 25px;
@@ -1065,14 +1479,14 @@
         }
         
         .file-content h2 {
-            color: #34495e;
+            color: rgba(255, 255, 255, 0.8);
             margin-top: 30px;
             margin-bottom: 18px;
             font-size: 1.4em;
         }
         
         .file-content h3 {
-            color: #7f8c8d;
+            color: rgba(255, 255, 255, 0.6);
             margin-top: 25px;
             margin-bottom: 12px;
             font-size: 1.2em;
@@ -1089,7 +1503,7 @@
         }
         
         .file-content code {
-            background: #f8f9fa;
+            background: #1a1a1b;
             padding: 3px 8px;
             border-radius: 4px;
             font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
@@ -1097,7 +1511,7 @@
         }
         
         .file-content pre {
-            background: #f8f9fa;
+            background: #1a1a1b;
             padding: 20px;
             border-radius: 8px;
             overflow-x: auto;
@@ -1109,12 +1523,12 @@
             border-left: 4px solid #3498db;
             padding-left: 15px;
             margin: 15px 0;
-            color: #7f8c8d;
+            color: rgba(255, 255, 255, 0.6);
         }
 
         .file-placeholder {
             text-align: center;
-            color: #7f8c8d;
+            color: rgba(255, 255, 255, 0.6);
             font-style: italic;
             padding: 60px 20px;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
@@ -1126,13 +1540,13 @@
             left: 0;
             right: 0;
             bottom: 0;
-            background: white;
+            background: #1a1a1b;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
             gap: 15px;
-            color: #7f8c8d;
+            color: rgba(255, 255, 255, 0.6);
         }
 
         .file-error {
@@ -1141,7 +1555,7 @@
             left: 0;
             right: 0;
             bottom: 0;
-            background: white;
+            background: #1a1a1b;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -1160,7 +1574,7 @@
         }
 
         .btn-retry {
-            background: #e74c3c;
+            background: rgba(239, 68, 68, 0.2);
             color: white;
             border: none;
             padding: 10px 20px;
@@ -1212,6 +1626,9 @@
     </style>
 </head>
 <body>
+    <div class="meta-mode-banner" id="metaModeBanner">META MODE</div>
+    <div class="connection-indicator" id="connectionIndicator">⚠️ Connection Lost</div>
+    <div class="error-message" id="errorMessage"></div>
     <div class="container">
         <header class="header">
             <div class="mode-switcher">
@@ -1232,7 +1649,7 @@
         <main class="main-content">
             <div class="status-overview">
                 <div class="current-task">Current Task</div>
-                <div class="task-description" id="currentTask">
+                <div class="task-description clickable" id="currentTask" onclick="showTaskModal()">
                     Create dashboard HTML interface implementing the visual workflow progress design
                 </div>
             </div>
@@ -1260,52 +1677,37 @@
                     <!-- Agent cards will be dynamically generated -->
                 </div>
             </section>
-
-            <!-- Real-time Agent Log Viewer -->
-            <section class="workflow-section">
-                <h2 class="section-title">Agent Log</h2>
-                <div class="log-viewer" id="logViewer">
-                    <div class="log-header">
-                        <span class="log-status" id="logStatus">No active agent</span>
-                        <button class="btn btn-secondary" onclick="toggleLogViewer()" id="logToggle">Show Logs</button>
-                    </div>
-                    <div class="log-content" id="logContent" style="display: none;">
-                        <div class="log-output" id="logOutput">
-                            <!-- Log content will be displayed here -->
-                        </div>
-                    </div>
-                </div>
-            </section>
+            
 
             <!-- Command Panel -->
             <section class="workflow-section">
                 <h2 class="section-title">Command Panel</h2>
                 <div class="command-panel" id="commandPanel">
                     <div class="panel-title" id="panelTitle">
-                        <span class="command-icon">⚡</span>
+                        <i data-lucide="zap" class="command-icon"></i>
                         <span>Orchestrator Commands</span>
                         <span class="mode-indicator" id="modeIndicator">Regular</span>
                     </div>
                     
                     <div class="command-buttons" id="commandButtons">
                         <button class="btn-command" id="startBtn" onclick="executeCommand('start')">
-                            <span class="command-icon">🚀</span>
+                            <i data-lucide="rocket" class="command-icon"></i>
                             <span>Start</span>
                         </button>
                         <button class="btn-command" id="continueBtn" onclick="executeCommand('continue')">
-                            <span class="command-icon">▶️</span>
+                            <i data-lucide="play" class="command-icon"></i>
                             <span>Continue</span>
                         </button>
                         <button class="btn-command" id="statusBtn" onclick="executeCommand('status')">
-                            <span class="command-icon">📊</span>
+                            <i data-lucide="activity" class="command-icon"></i>
                             <span>Status</span>
                         </button>
                         <button class="btn-command btn-clean" id="cleanBtn" onclick="executeCommand('clean')">
-                            <span class="command-icon">🧹</span>
+                            <i data-lucide="trash-2" class="command-icon"></i>
                             <span>Clean</span>
                         </button>
                         <button class="btn-command btn-stop" id="stopBtn" onclick="stopCurrentOperation()" disabled>
-                            <span class="command-icon">⏹️</span>
+                            <i data-lucide="square" class="command-icon"></i>
                             <span>Stop</span>
                         </button>
                     </div>
@@ -1316,32 +1718,10 @@
                 </div>
             </section>
 
-            <!-- File Viewer Panel -->
-            <section class="workflow-section">
-                <h2 class="section-title">Agent Output Files</h2>
-                <div class="file-viewer">
-                    <div class="file-tabs" id="fileTabs">
-                        <!-- File tabs will be dynamically generated -->
-                    </div>
-                    <div class="file-content-container">
-                        <div class="file-content" id="fileContent">
-                            <div class="file-placeholder">Select a file tab to view its content</div>
-                        </div>
-                        <div class="file-loading" id="fileLoading" style="display: none;">
-                            <div class="loading-spinner"></div>
-                            <span>Loading file content...</span>
-                        </div>
-                        <div class="file-error" id="fileError" style="display: none;">
-                            <div class="error-icon">⚠️</div>
-                            <div class="error-message" id="errorMessage">Failed to load file</div>
-                            <button class="btn-retry" onclick="retryFileLoad()">Retry</button>
-                        </div>
-                    </div>
-                </div>
-            </section>
 
             <div class="controls">
                 <button class="btn btn-primary" onclick="refreshStatus()">Refresh Status</button>
+                <button class="btn btn-secondary" onclick="forceRefresh()">🔄 Force Refresh</button>
                 <button class="btn btn-secondary" onclick="simulateProgress()">Simulate Progress</button>
             </div>
 
@@ -1376,24 +1756,87 @@
                 
                 <div class="modal-buttons" id="modalButtons">
                     <button class="btn-modal approve" onclick="makeUserValidationDecision('user-approve')">
-                        <span>✅</span>
+                        <i data-lucide="check-circle"></i>
                         <span>Approve</span>
                     </button>
                     <button class="btn-modal new-task" onclick="showNewTaskInput()">
-                        <span>📝</span>
+                        <i data-lucide="edit-3"></i>
                         <span>New Task</span>
                     </button>
                     <button class="btn-modal retry" onclick="makeUserValidationDecision('retry-last-task')">
-                        <span>🔄</span>
+                        <i data-lucide="rotate-ccw"></i>
                         <span>Retry Last</span>
                     </button>
                     <button class="btn-modal exit" onclick="makeUserValidationDecision('exit')">
-                        <span>🚪</span>
+                        <i data-lucide="log-out"></i>
                         <span>Exit</span>
                     </button>
                 </div>
                 
                 <div class="modal-feedback" id="modalFeedback"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Log Modal -->
+    <div class="log-modal" id="logModal">
+        <div class="log-modal-dialog">
+            <div class="modal-header">
+                <h2 class="modal-title" id="logModalTitle">
+                    <span id="logModalIcon">📝</span>
+                    <span id="logModalTitleText">Agent Log</span>
+                </h2>
+                <button class="modal-close" onclick="closeLogModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="log-content" id="logContent">
+                    <!-- Log content will be loaded here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Task Modal -->
+    <div class="task-modal" id="taskModal">
+        <div class="modal-dialog task-modal-dialog">
+            <div class="modal-header">
+                <h2 class="modal-title">
+                    <span>📋</span>
+                    <span>Task Details</span>
+                </h2>
+                <button class="modal-close" onclick="closeTaskModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="task-info">
+                    <h3>Current Task</h3>
+                    <div class="current-task-full" id="currentTaskFull">
+                        <!-- Current task will be loaded here -->
+                    </div>
+                </div>
+                <div class="task-actions">
+                    <button class="btn-modal" onclick="showTaskListModal()">
+                        <span>📝</span>
+                        <span>View All Tasks</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Task List Modal -->
+    <div class="task-list-modal" id="taskListModal">
+        <div class="modal-dialog task-list-modal-dialog">
+            <div class="modal-header">
+                <h2 class="modal-title">
+                    <span>📋</span>
+                    <span>All Tasks - <span id="taskListMode">Regular</span> Mode</span>
+                </h2>
+                <button class="modal-close" onclick="closeTaskListModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="task-list-content" id="taskListContent">
+                    <!-- Task list will be loaded here -->
+                </div>
             </div>
         </div>
     </div>
@@ -1404,12 +1847,12 @@
             regular: {
                 currentTask: "Create dashboard HTML interface implementing the visual workflow progress design",
                 workflow: [
-                    { name: "Explorer", status: "completed", type: "agent", icon: "🔍" },
-                    { name: "Criteria Gate", status: "completed", type: "gate", icon: "🚪" },
+                    { name: "Explorer", status: "completed", type: "agent", icon: "search" },
+                    { name: "Criteria Gate", status: "completed", type: "gate", icon: "shield-check" },
                     { name: "Planner", status: "completed", type: "agent", icon: "📋" },
                     { name: "Coder", status: "in-progress", type: "agent", icon: "💻" },
                     { name: "Scribe", status: "pending", type: "agent", icon: "📝" },
-                    { name: "Verifier", status: "pending", type: "agent", icon: "✅" },
+                    { name: "Verifier", status: "pending", type: "agent", icon: "check-circle" },
                     { name: "Completion Gate", status: "pending", type: "gate", icon: "🏁" }
                 ],
                 agents: [
@@ -1443,12 +1886,12 @@
             meta: {
                 currentTask: "Meta-mode: Create dashboard HTML interface implementing the visual workflow progress design",
                 workflow: [
-                    { name: "Explorer", status: "completed", type: "agent", icon: "🔍" },
-                    { name: "Criteria Gate", status: "completed", type: "gate", icon: "🚪" },
+                    { name: "Explorer", status: "completed", type: "agent", icon: "search" },
+                    { name: "Criteria Gate", status: "completed", type: "gate", icon: "shield-check" },
                     { name: "Planner", status: "completed", type: "agent", icon: "📋" },
                     { name: "Coder", status: "in-progress", type: "agent", icon: "💻" },
                     { name: "Scribe", status: "pending", type: "agent", icon: "📝" },
-                    { name: "Verifier", status: "pending", type: "agent", icon: "✅" },
+                    { name: "Verifier", status: "pending", type: "agent", icon: "check-circle" },
                     { name: "Completion Gate", status: "pending", type: "gate", icon: "🏁" }
                 ],
                 agents: [
@@ -1589,7 +2032,7 @@
             
             console.log('Switched to mock mode - using fallback data');
             renderMockData();
-            refreshFileViewer();
+            // File viewer removed - using log modals instead
         }
 
         // Get API Base URL
@@ -1631,7 +2074,7 @@
             if (checkMockParameter()) {
                 console.log('Mock mode requested via URL parameter');
                 skipAPIDiscovery();
-                initFileViewer();
+                // File viewer removed - using log modals instead
                 return;
             }
             
@@ -1639,7 +2082,7 @@
             if (forceMockMode) {
                 console.log('Already in mock mode, skipping discovery');
                 renderMockData();
-                initFileViewer();
+                // File viewer removed - using log modals instead
                 return;
             }
             
@@ -1663,7 +2106,7 @@
                         console.log(`Using cached/existing API port: ${discoveredAPIPort}`);
                         useRealAPI = true;
                         await fetchRealStatus();
-                        initFileViewer();
+                        // File viewer removed - using log modals instead
                         return;
                     } else {
                         console.log('Cached port no longer valid, will rediscover');
@@ -1688,11 +2131,14 @@
                 renderMockData();
             }
             
-            initFileViewer();
+            // File viewer removed - using log modals instead
         }
 
-        // Fetch real status from API
-        async function fetchRealStatus() {
+        // Fetch real status from API with retry logic
+        async function fetchRealStatus(retryCount = 0) {
+            const connectionIndicator = document.getElementById('connectionIndicator');
+            const errorMessage = document.getElementById('errorMessage');
+            
             try {
                 const apiUrl = `${getAPIBaseURL()}/api/status?mode=${currentMode}`;
                 const response = await fetch(apiUrl, {
@@ -1705,18 +2151,42 @@
                     renderRealData();
                     console.log('Successfully fetched real status data');
                     
+                    // Hide connection and error indicators on success
+                    connectionIndicator.classList.remove('visible');
+                    errorMessage.classList.remove('visible');
+                    
                     // Check for user validation gate after data is rendered
                     await checkForUserValidationGate();
                 } else {
                     throw new Error(`API responded with status ${response.status}`);
                 }
             } catch (error) {
-                console.log('API fetch failed, keeping current data:', error.message);
-                // Don't immediately fall back to mock data - just log the error
-                // and keep the current state. The refresh button can retry.
-                if (!realTimeData) {
-                    console.log('No previous data available, using mock data');
-                    renderMockData();
+                console.log('API fetch failed:', error.message);
+                
+                // Show connection lost indicator
+                connectionIndicator.classList.add('visible');
+                
+                // Retry once on failure
+                if (retryCount === 0) {
+                    console.log('Retrying API request...');
+                    setTimeout(async () => {
+                        await fetchRealStatus(1);
+                    }, 1000);
+                } else {
+                    // After retry failure, show error message
+                    errorMessage.textContent = `Failed to connect to API server: ${error.message}`;
+                    errorMessage.classList.add('visible');
+                    
+                    // Auto-hide error message after 5 seconds
+                    setTimeout(() => {
+                        errorMessage.classList.remove('visible');
+                    }, 5000);
+                    
+                    // Fall back to current data or mock data if no data exists
+                    if (!realTimeData) {
+                        console.log('No previous data available, using mock data');
+                        renderMockData();
+                    }
                 }
             }
         }
@@ -1731,6 +2201,14 @@
             renderGateControls(realTimeData.workflow);
             updateLogViewer();
             updateLastUpdated();
+            
+            // Check for workflow completion
+            if (realTimeData.workflowComplete) {
+                console.log('[DEBUG] Workflow completion detected!', realTimeData);
+                console.log('[DEBUG] Mode:', currentMode);
+                console.log('[DEBUG] Checklist should be complete:', realTimeData.workflowComplete);
+                // Temporarily disabled: showWorkflowCompletion();
+            }
         }
 
         // Render mock data (fallback)
@@ -1748,7 +2226,7 @@
             currentMode = this.checked ? 'meta' : 'regular';
             updateCommandPanelMode();
             initDashboard();
-            refreshFileViewer();
+            // File viewer removed - using log modals instead
         });
         
         // Update command panel mode indicators
@@ -1756,12 +2234,23 @@
             const commandPanel = document.getElementById('commandPanel');
             const panelTitle = document.getElementById('panelTitle');
             const modeIndicator = document.getElementById('modeIndicator');
+            const body = document.body;
+            const banner = document.getElementById('metaModeBanner');
             
             // Update panel styling
             commandPanel.className = `command-panel ${currentMode}`;
             panelTitle.className = `panel-title ${currentMode}`;
             modeIndicator.className = `mode-indicator ${currentMode}`;
             modeIndicator.textContent = currentMode.charAt(0).toUpperCase() + currentMode.slice(1);
+            
+            // Update body background and banner visibility
+            if (currentMode === 'meta') {
+                body.classList.add('meta');
+                banner.classList.add('visible');
+            } else {
+                body.classList.remove('meta');
+                banner.classList.remove('visible');
+            }
         }
         
         // Execute command with debouncing and state management
@@ -1799,7 +2288,7 @@
                     // Refresh status after short delay
                     setTimeout(() => {
                         refreshStatus();
-                        refreshFileViewer();
+                        // File viewer removed - using log modals instead
                     }, 1500);
                 } else {
                     throw new Error(result.error || 'Command execution failed');
@@ -1979,6 +2468,55 @@
             console.log('Stop operation requested');
         }
 
+        // Show workflow completion celebration
+        function showWorkflowCompletion() {
+            // Don't show the modal multiple times
+            if (document.getElementById('completionModal')) {
+                return;
+            }
+            
+            // Create completion modal
+            const modal = document.createElement('div');
+            modal.id = 'completionModal';
+            modal.className = 'completion-modal';
+            modal.innerHTML = `
+                <div class="completion-content">
+                    <div class="completion-header">
+                        <h1>🎉 WORKFLOW COMPLETED SUCCESSFULLY! 🎉</h1>
+                    </div>
+                    <div class="completion-body">
+                        <p>All tasks have been completed and the workflow has finished successfully!</p>
+                        <div class="completion-actions">
+                            <button onclick="closeCompletionModal()" class="btn btn-primary">Close</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+            
+            // Show with animation
+            setTimeout(() => {
+                modal.classList.add('show');
+            }, 10);
+            
+            // Auto-close after 10 seconds
+            setTimeout(() => {
+                closeCompletionModal();
+            }, 10000);
+        }
+
+        // Close completion modal
+        function closeCompletionModal() {
+            const modal = document.getElementById('completionModal');
+            if (modal) {
+                modal.classList.remove('show');
+                setTimeout(() => {
+                    modal.remove();
+                }, 300);
+            }
+        }
+
         // Render workflow timeline
         function renderWorkflowTimeline(workflowData) {
             const timeline = document.getElementById('workflowTimeline');
@@ -1986,18 +2524,46 @@
             
             timeline.innerHTML = '';
             
+            // Find the currently active gate to apply animation only to it
+            const hasRunningTasks = workflow.some(step => step.status === 'in-progress' && step.type !== 'gate');
+            const hasCompletedWork = workflow.some(step => step.status === 'completed' || step.status === 'in-progress');
+            
+            const activeGate = workflow.find(step => 
+                step.type === 'gate' && (
+                    step.status === 'in-progress' || // Gate is actively waiting for decision
+                    (step.status === 'pending' && !hasRunningTasks && hasCompletedWork) // Gate is next after some work was done
+                )
+            );
+            
             workflow.forEach((step, index) => {
                 // Create step element
                 const stepDiv = document.createElement('div');
                 stepDiv.className = 'workflow-step';
                 
                 const iconDiv = document.createElement('div');
-                iconDiv.className = `step-icon ${step.status}${step.type === 'gate' ? ' gate' : ''}`;
-                iconDiv.textContent = step.icon;
+                // For gates, only apply 'pending' class if this is the currently active gate
+                let statusClass = step.status;
+                if (step.type === 'gate' && step.status === 'pending' && step !== activeGate) {
+                    // This is a pending gate but not the active one, so don't animate it
+                    statusClass = 'pending-inactive';
+                }
+                iconDiv.className = `step-icon ${statusClass}${step.type === 'gate' ? ' gate' : ''}`;
+                // Create Lucide icon if step.icon is a string name, otherwise use textContent for emojis
+                if (step.icon && !step.icon.includes('️') && !step.icon.match(/[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F700}-\u{1F77F}]|[\u{1F780}-\u{1F7FF}]|[\u{1F800}-\u{1F8FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/u)) {
+                    iconDiv.innerHTML = `<i data-lucide="${step.icon}"></i>`;
+                } else {
+                    iconDiv.textContent = step.icon;
+                }
                 
                 const labelDiv = document.createElement('div');
                 labelDiv.className = 'step-label';
                 labelDiv.textContent = step.name;
+                
+                // Add click handler for completed and in-progress steps to show log
+                if ((step.status === 'completed' || step.status === 'in-progress') && step.type === 'agent') {
+                    stepDiv.style.cursor = 'pointer';
+                    stepDiv.addEventListener('click', () => showLogModal(step.name, step.status));
+                }
                 
                 stepDiv.appendChild(iconDiv);
                 stepDiv.appendChild(labelDiv);
@@ -2010,6 +2576,11 @@
                     timeline.appendChild(connector);
                 }
             });
+            
+            // Re-initialize Lucide icons for new workflow elements
+            if (typeof lucide !== 'undefined') {
+                lucide.createIcons();
+            }
         }
 
         // Get connector status based on adjacent steps
@@ -2034,7 +2605,11 @@
             
             agents.forEach(agent => {
                 const card = document.createElement('div');
-                card.className = `agent-card ${agent.status}`;
+                card.className = `agent-card ${agent.status} clickable`;
+                card.style.cursor = 'pointer';
+                
+                // Add click handler to show agent log modal
+                card.onclick = () => showLogModal(agent.name.toLowerCase(), agent.status);
                 
                 card.innerHTML = `
                     <div class="agent-header">
@@ -2042,6 +2617,7 @@
                         <div class="agent-status ${agent.status}">${agent.status.replace('-', ' ')}</div>
                     </div>
                     <div class="agent-description">${agent.description}</div>
+                    <div class="click-hint">Click to view log</div>
                 `;
                 
                 grid.appendChild(card);
@@ -2049,9 +2625,19 @@
         }
 
         // Update current task display
+        // Store full task text for modal display
+        let fullTaskText = '';
+        
         function updateCurrentTask(taskText) {
             const currentTask = taskText || mockStatusData[currentMode].currentTask;
-            document.getElementById('currentTask').textContent = currentTask;
+            fullTaskText = currentTask; // Store the full text
+            
+            const taskElement = document.getElementById('currentTask');
+            taskElement.textContent = currentTask;
+            
+            // Ensure click handler and styling are preserved
+            taskElement.className = 'task-description clickable';
+            taskElement.onclick = showTaskModal;
         }
 
         // Update last updated time
@@ -2082,7 +2668,24 @@
                 console.log(`Using mock data for .agent-outputs${currentMode === 'meta' ? '-meta' : ''}/`);
                 renderMockData();
             }
-            refreshFileViewer();
+            // File viewer removed - using log modals instead
+        }
+
+        // Force refresh - clears errors and retries immediately
+        async function forceRefresh() {
+            const connectionIndicator = document.getElementById('connectionIndicator');
+            const errorMessage = document.getElementById('errorMessage');
+            
+            // Clear any existing error states
+            connectionIndicator.classList.remove('visible');
+            errorMessage.classList.remove('visible');
+            
+            // Reset API discovery flags to force reconnection
+            useRealAPI = false;
+            discoveredAPIPort = null;
+            
+            // Trigger full refresh cycle
+            await refreshStatus();
         }
 
         // Simulate progress for demonstration
@@ -2130,24 +2733,55 @@
             const gateButtons = document.getElementById('gateButtons');
             const gateFeedback = document.getElementById('gateFeedback');
             
+            // Check if workflow is complete - if so, don't show any gates
+            if (realTimeData && realTimeData.workflowComplete) {
+                gateControls.classList.remove('active');
+                return;
+            }
+            
             // Find active gate - only show gate controls when gate is actually blocking
             const hasRunningTasks = workflow.some(step => step.status === 'in-progress' && step.type !== 'gate');
+            const hasCompletedWork = workflow.some(step => step.status === 'completed' || step.status === 'in-progress');
+            
             const activeGate = workflow.find(step => 
                 step.type === 'gate' && (
                     step.status === 'in-progress' || // Gate is actively waiting for decision
-                    (step.status === 'pending' && !hasRunningTasks) // Gate is next and nothing else is running
+                    (step.status === 'pending' && !hasRunningTasks && hasCompletedWork) // Gate is next after some work was done
                 )
             );
             
             if (activeGate && !isProcessingDecision) {
                 // Show gate controls
                 gateControls.classList.add('active');
-                gateTitle.textContent = `${activeGate.name} Decision Required`;
+                
+                // Set gate-specific title
+                if (activeGate.name === 'Criteria Gate') {
+                    gateTitle.textContent = 'Criteria Gate Decision Required';
+                } else {
+                    gateTitle.textContent = `${activeGate.name} Decision Required`;
+                }
+                
                 gateContent.textContent = `Please choose an action to continue the workflow past the ${activeGate.name}.`;
                 
                 // Get available decisions for this gate type
-                const availableDecisions = gateTypeDecisions[activeGate.name] || 
-                    Object.keys(gateDecisionLabels);
+                console.log('Active gate name:', activeGate.name);
+                console.log('Available gate types:', Object.keys(gateTypeDecisions));
+                
+                let availableDecisions;
+                
+                // Force correct buttons based on gate type
+                if (activeGate.name.includes('Criteria')) {
+                    availableDecisions = ['approve-criteria', 'modify-criteria', 'retry-explorer'];
+                } else if (activeGate.name.includes('Completion')) {
+                    availableDecisions = ['approve-completion', 'retry-from-planner', 'retry-from-coder', 'retry-from-verifier'];
+                } else if (activeGate.name.includes('User Validation')) {
+                    availableDecisions = ['user-approve', 'new-task', 'retry-last-task', 'exit'];
+                } else {
+                    // Fallback - should not happen
+                    availableDecisions = ['approve-criteria', 'modify-criteria', 'retry-explorer'];
+                }
+                
+                console.log('Selected decisions for', activeGate.name, ':', availableDecisions);
                 
                 // Generate buttons
                 gateButtons.innerHTML = '';
@@ -2228,10 +2862,10 @@
 
         // File Viewer Configuration
         const FILE_TABS = [
-            { filename: 'exploration.md', label: 'Exploration', icon: '🔍' },
-            { filename: 'plan.md', label: 'Plan', icon: '📋' },
-            { filename: 'changes.md', label: 'Changes', icon: '💻' },
-            { filename: 'verification.md', label: 'Verification', icon: '✅' }
+            { filename: 'exploration.md', label: 'Exploration', icon: 'search' },
+            { filename: 'plan.md', label: 'Plan', icon: 'file-text' },
+            { filename: 'changes.md', label: 'Changes', icon: 'code' },
+            { filename: 'verification.md', label: 'Verification', icon: 'check-circle' }
         ];
 
         let currentActiveFile = null;
@@ -2257,12 +2891,17 @@
                 button.onclick = () => switchFileTab(tab.filename);
                 
                 button.innerHTML = `
-                    <span class="file-tab-icon">${tab.icon}</span>
+                    <i data-lucide="${tab.icon}" class="file-tab-icon"></i>
                     <span>${tab.label}</span>
                 `;
                 
                 tabsContainer.appendChild(button);
             });
+            
+            // Re-initialize Lucide icons for new tabs
+            if (typeof lucide !== 'undefined') {
+                lucide.createIcons();
+            }
         }
 
         // Switch File Tab
@@ -2423,7 +3062,7 @@
             const logStatus = document.getElementById('logStatus');
             const runningAgent = getCurrentRunningAgent();
             
-            if (runningAgent) {
+            if (runningAgent && logStatus) {
                 logStatus.textContent = `Watching ${runningAgent.charAt(0).toUpperCase() + runningAgent.slice(1)} agent logs`;
                 logStatus.className = 'log-status active';
                 
@@ -2434,7 +3073,7 @@
                         fetchLogContent();
                     }
                 }
-            } else {
+            } else if (logStatus) {
                 logStatus.textContent = 'No active agent';
                 logStatus.className = 'log-status';
                 currentLogFile = null;
@@ -2584,7 +3223,11 @@
             // Update button to submit when clicked again
             const newTaskBtn = document.querySelector('.btn-modal.new-task');
             newTaskBtn.onclick = () => submitNewTask();
-            newTaskBtn.innerHTML = '<span>✅</span><span>Submit Task</span>';
+            newTaskBtn.innerHTML = '<i data-lucide="send"></i><span>Submit Task</span>';
+            // Re-initialize Lucide icons for new content
+            if (typeof lucide !== 'undefined') {
+                lucide.createIcons();
+            }
         }
         
         // Submit new task description
@@ -2667,7 +3310,7 @@
                 setTimeout(() => {
                     hideUserValidationModal();
                     refreshStatus();
-                    refreshFileViewer();
+                    // File viewer removed - using log modals instead
                     isProcessingValidationDecision = false;
                 }, 2000);
                 
@@ -2697,12 +3340,238 @@
                 modalFeedback.textContent = message;
             }
         }
+
+        // ============ LOG MODAL FUNCTIONALITY ============
+        
+        // Show log modal for an agent
+        async function showLogModal(agentName, status) {
+            const modal = document.getElementById('logModal');
+            const titleText = document.getElementById('logModalTitleText');
+            const icon = document.getElementById('logModalIcon');
+            const content = document.getElementById('logContent');
+            
+            console.log('showLogModal called for:', agentName);
+            console.log('Modal element:', modal);
+            console.log('Content element:', content);
+            
+            // Set title and icon based on agent (clean up the name)
+            const cleanName = agentName.replace(/\s*(complete|pending|running|active)\s*(\(\d+\s*bytes\))?\s*/gi, '').trim();
+            titleText.textContent = `${cleanName} Log`;
+            icon.textContent = getAgentIcon(agentName);
+            
+            // Show loading
+            content.innerHTML = '<div style="text-align: center; color: #fff; padding: 40px; font-size: 16px;">Loading log...</div>';
+            content.style.display = 'block';
+            
+            // Force modal to be visible
+            modal.style.display = 'flex';
+            modal.style.visibility = 'visible';
+            modal.style.opacity = '1';
+            modal.style.zIndex = '99999';
+            modal.classList.add('active');
+            
+            console.log('Modal classes after adding active:', modal.className);
+            console.log('Modal computed styles:', window.getComputedStyle(modal));
+            
+            try {
+                // Determine log filename based on agent name
+                const logFilename = getLogFilename(agentName);
+                const apiUrl = `${getAPIBaseURL()}/api/outputs/${logFilename}?mode=${currentMode}`;
+                
+                console.log('Fetching log from URL:', apiUrl);
+                
+                const response = await fetch(apiUrl);
+                console.log('Response status:', response.status);
+                
+                if (response.ok) {
+                    const logText = await response.text();
+                    console.log('Log text length:', logText.length);
+                    console.log('Log text preview:', logText.substring(0, 200));
+                    
+                    if (logText.trim()) {
+                        // Escape HTML and display with proper styling
+                        const escapedText = logText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                        content.innerHTML = `<div style="color: #ffffff; font-size: 14px; font-family: 'JetBrains Mono', 'Courier New', monospace; line-height: 1.6; white-space: pre-wrap; padding: 0;">${escapedText}</div>`;
+                        
+                        // Ensure visibility
+                        content.style.display = 'block';
+                        content.style.visibility = 'visible';
+                        content.style.opacity = '1';
+                        
+                        // Debug: Check what we actually set
+                        console.log('Content innerHTML after setting:', content.innerHTML.substring(0, 200));
+                        console.log('Content element:', content);
+                        console.log('Content styles:', window.getComputedStyle(content));
+                        
+                        // Double-check after a brief delay
+                        setTimeout(() => {
+                            console.log('Content innerHTML after 100ms:', content.innerHTML.substring(0, 200));
+                        }, 100);
+                    } else {
+                        content.innerHTML = '<div style="text-align: center; color: #fbbf24; padding: 40px; font-size: 16px;">Log file is empty.</div>';
+                    }
+                } else {
+                    const errorText = await response.text();
+                    console.error('API response error:', errorText);
+                    content.innerHTML = `<div style="text-align: center; color: #f87171; padding: 40px; font-size: 16px;">Log file not found: ${logFilename}<br>Status: ${response.status}</div>`;
+                }
+            } catch (error) {
+                console.error('Error loading log:', error);
+                content.innerHTML = `<div style="text-align: center; color: #f87171; padding: 40px; font-size: 16px;">Error loading log file: ${error.message}</div>`;
+            }
+        }
+        
+        // Close log modal
+        function closeLogModal() {
+            const modal = document.getElementById('logModal');
+            modal.classList.remove('active');
+            
+            // Remove forced inline styles that prevent closing
+            modal.style.display = '';
+            modal.style.visibility = '';
+            modal.style.opacity = '';
+            modal.style.zIndex = '';
+        }
+        
+        // Get log filename for agent
+        function getLogFilename(agentName) {
+            console.log('Getting log filename for agent:', agentName);
+            
+            // Extract the actual agent name (remove status and byte count)
+            let name = agentName.toLowerCase();
+            
+            // Remove common status words and extract base agent name
+            name = name.replace(/\s*(complete|pending|running|active)\s*(\(\d+\s*bytes\))?\s*/g, '').trim();
+            name = name.split(' ')[0]; // Get first word
+            
+            const filename = `${name}-log.txt`;
+            console.log('Generated filename:', filename);
+            return filename;
+        }
+        
+        // Get icon for agent
+        function getAgentIcon(agentName) {
+            const iconMap = {
+                'explorer': '🔍',
+                'planner': '📋',
+                'coder': '💻',
+                'scribe': '📝',
+                'verifier': '✅'
+            };
+            const name = agentName.toLowerCase().split(' ')[0];
+            return iconMap[name] || '⚙️';
+        }
         
         // Close modal when clicking outside
         document.getElementById('userValidationModal').addEventListener('click', function(e) {
             if (e.target === this && !isProcessingValidationDecision) {
                 // Don't allow closing during processing
                 console.log('User validation modal cannot be closed while processing');
+            }
+        });
+
+        // Close log modal when clicking outside
+        document.getElementById('logModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeLogModal();
+            }
+        });
+
+        // ============ TASK MODAL FUNCTIONALITY ============
+        
+        // Show task modal with current task details
+        function showTaskModal() {
+            console.log('showTaskModal called');
+            
+            const modal = document.getElementById('taskModal');
+            const currentTaskFull = document.getElementById('currentTaskFull');
+            
+            console.log('Modal element:', modal);
+            console.log('Full task text:', fullTaskText);
+            
+            if (!modal) {
+                console.error('Task modal not found!');
+                return;
+            }
+            
+            // Use the stored full task text instead of the truncated display text
+            currentTaskFull.textContent = fullTaskText || 'No task description available';
+            
+            modal.classList.add('active');
+            console.log('Task modal opened with full text');
+        }
+        
+        // Close task modal
+        function closeTaskModal() {
+            const modal = document.getElementById('taskModal');
+            modal.classList.remove('active');
+        }
+        
+        // Show task list modal
+        async function showTaskListModal() {
+            const modal = document.getElementById('taskListModal');
+            const content = document.getElementById('taskListContent');
+            const modeIndicator = document.getElementById('taskListMode');
+            
+            if (!modal) {
+                console.error('Task list modal not found!');
+                return;
+            }
+            
+            // Update mode indicator
+            modeIndicator.textContent = currentMode.charAt(0).toUpperCase() + currentMode.slice(1);
+            
+            // Show loading
+            content.innerHTML = '<div style="text-align: center; color: #666; padding: 20px;">Loading tasks...</div>';
+            modal.classList.add('active');
+            
+            try {
+                // Load checklist file (API will handle mode-based directory lookup)
+                const apiUrl = `${getAPIBaseURL()}/api/outputs/tasks-checklist.md?mode=${currentMode}`;
+                
+                const response = await fetch(apiUrl);
+                if (response.ok) {
+                    const checklistText = await response.text();
+                    // Convert markdown to HTML and display
+                    if (typeof marked !== 'undefined') {
+                        content.innerHTML = marked.parse(checklistText);
+                    } else {
+                        // Fallback without markdown parsing
+                        content.innerHTML = `<pre style="color: #fff; white-space: pre-wrap;">${checklistText}</pre>`;
+                    }
+                    
+                    // Style completed tasks
+                    const listItems = content.querySelectorAll('li');
+                    listItems.forEach(li => {
+                        if (li.textContent.includes('[x]')) {
+                            li.setAttribute('data-completed', 'true');
+                        }
+                    });
+                } else {
+                    content.innerHTML = '<div style="text-align: center; color: #f87171; padding: 20px;">Task list not found or could not be loaded.</div>';
+                }
+            } catch (error) {
+                console.error('Error loading task list:', error);
+                content.innerHTML = '<div style="text-align: center; color: #f87171; padding: 20px;">Error loading task list.</div>';
+            }
+        }
+        
+        // Close task list modal
+        function closeTaskListModal() {
+            const modal = document.getElementById('taskListModal');
+            modal.classList.remove('active');
+        }
+        
+        // Close task modals when clicking outside
+        document.getElementById('taskModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeTaskModal();
+            }
+        });
+        
+        document.getElementById('taskListModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeTaskListModal();
             }
         });
 
@@ -2720,6 +3589,10 @@
         window.addEventListener('DOMContentLoaded', () => {
             loadExternalAPI();
             initDashboard();
+            // Initialize Lucide icons
+            if (typeof lucide !== 'undefined') {
+                lucide.createIcons();
+            }
         });
     </script>
 </body>

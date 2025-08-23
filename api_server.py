@@ -17,6 +17,7 @@ import subprocess
 import os
 import webbrowser
 import socket
+from workflow_status import StatusReader, get_workflow_status
 # ClaudeCodeOrchestrator now run in separate process via subprocess
 
 # Global state for concurrent operation tracking
@@ -52,205 +53,6 @@ def find_available_port(start_port: int, max_attempts: int = 20) -> int:
     raise OSError(f"No available port found in range {start_port}-{start_port + max_attempts - 1}")
 
 
-class StatusReader:
-    """Reads and parses workflow status from orchestrator files"""
-    
-    def __init__(self):
-        self.status_emoji_map = {
-            '⏳': 'pending',
-            '✅': 'completed',
-            '✓': 'completed',
-            '🔄': 'in-progress'
-        }
-        
-    def read_status(self, mode='regular'):
-        """Read workflow status from appropriate directory"""
-        outputs_dir = '.agent-outputs-meta' if mode == 'meta' else '.agent-outputs'
-        status_file = Path(outputs_dir) / 'current-status.md'
-        
-        print(f"[StatusReader] Reading status for mode '{mode}' from {status_file}")
-        
-        try:
-            if not status_file.exists():
-                print(f"[StatusReader] Status file does not exist: {status_file}")
-                return self._get_default_status()
-                
-            with open(status_file, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            print(f"[StatusReader] Read {len(content)} characters from status file")
-            
-            if not content.strip():
-                print(f"[StatusReader] Status file is empty, using default status")
-                return self._get_default_status()
-                
-            parsed_status = self._parse_status_content(content)
-            print(f"[StatusReader] Successfully parsed status with {len(parsed_status.get('workflow', []))} workflow items")
-            return parsed_status
-            
-        except Exception as e:
-            print(f"[StatusReader] Error reading status file {status_file}: {e}")
-            return self._get_default_status()
-    
-    def _parse_status_content(self, content):
-        """Parse markdown status content into structured data"""
-        lines = content.strip().split('\n')
-        
-        # Extract current task (last non-empty line usually)
-        current_task = "No task specified"
-        for line in reversed(lines):
-            line = line.strip()
-            if line and not line.startswith('#') and not line.startswith('⏳') and not line.startswith('✅') and not line.startswith('🔄'):
-                if line.startswith('Current task:'):
-                    current_task = line.replace('Current task:', '').strip()
-                    break
-                elif not any(emoji in line for emoji in self.status_emoji_map.keys()):
-                    current_task = line
-                    break
-        
-        # Parse workflow steps
-        workflow = []
-        agents = []
-        
-        for line in lines:
-            line = line.strip()
-            if not line or line.startswith('#'):
-                continue
-                
-            # Look for status lines with emojis
-            for emoji, status in self.status_emoji_map.items():
-                if line.startswith(emoji):
-                    agent_name = line.replace(emoji, '').strip()
-                    
-                    # Determine agent type
-                    agent_type = 'gate' if 'gate' in agent_name.lower() else 'agent'
-                    
-                    # Special logic for Completion Gate: check if it should be active
-                    if agent_name == "Completion Gate pending" and status == 'pending':
-                        # Check if all previous steps are complete
-                        if self._is_completion_gate_active(workflow):
-                            status = 'in-progress'  # Change to active
-                            agent_name = agent_name.replace(' pending', ' active')
-                    
-                    # Special logic for Criteria Gate: if User Validation Gate exists, Criteria Gate should not be active
-                    if agent_name == "Criteria Gate   active" and self._has_user_validation_gate():
-                        # User Validation supersedes Criteria Gate activity
-                        status = 'completed'
-                        agent_name = agent_name.replace(' active', ' complete')
-                    
-                    # Add to workflow
-                    workflow_item = {
-                        'name': agent_name,
-                        'status': status,
-                        'type': agent_type,
-                        'icon': self._get_agent_icon(agent_name)
-                    }
-                    workflow.append(workflow_item)
-                    
-                    # Add to agents if not a gate
-                    if agent_type == 'agent':
-                        agent_item = {
-                            'name': agent_name,
-                            'status': status,
-                            'description': self._get_agent_description(agent_name, status)
-                        }
-                        agents.append(agent_item)
-                    
-                    break
-        
-        # Add User Validation Gate as separate item if it exists
-        if self._has_user_validation_gate():
-            user_validation_item = {
-                'name': 'User Validation Gate',
-                'status': 'in-progress',
-                'type': 'gate', 
-                'icon': '👤'
-            }
-            workflow.append(user_validation_item)
-        
-        return {
-            'currentTask': current_task,
-            'workflow': workflow,
-            'agents': agents
-        }
-    
-    def _is_completion_gate_active(self, workflow):
-        """Check if Completion Gate should be active based on previous steps"""
-        required_agents = ['Explorer', 'Planner', 'Coder', 'Verifier']
-        
-        for required_agent in required_agents:
-            # Find this agent in workflow
-            agent_found = False
-            for item in workflow:
-                if required_agent.lower() in item['name'].lower() and item['status'] == 'completed':
-                    agent_found = True
-                    break
-            
-            # If any required agent is not complete, Completion Gate should not be active
-            if not agent_found:
-                return False
-        
-        return True
-    
-    def _has_user_validation_gate(self):
-        """Check if pending-user_validation-gate.md exists"""
-        from pathlib import Path
-        validation_file = Path('.agent-outputs') / 'pending-user_validation-gate.md'
-        return validation_file.exists()
-    
-    def _get_agent_icon(self, agent_name):
-        """Get appropriate icon for agent"""
-        icon_map = {
-            'explorer': '🔍',
-            'criteria gate': '🚪', 
-            'planner': '📋',
-            'coder': '💻',
-            'scribe': '📝',
-            'verifier': '✅',
-            'completion gate': '🏁'
-        }
-        return icon_map.get(agent_name.lower(), '⚙️')
-    
-    def _get_agent_description(self, agent_name, status):
-        """Get description for agent based on name and status"""
-        base_descriptions = {
-            'explorer': 'Analyzes task requirements and identifies patterns, dependencies, and constraints.',
-            'planner': 'Creates detailed implementation plan with step-by-step approach and success criteria.',
-            'coder': 'Implements the planned changes according to specifications.',
-            'scribe': 'Documents the implementation and creates usage instructions.',
-            'verifier': 'Tests functionality and verifies all success criteria are met.'
-        }
-        
-        base = base_descriptions.get(agent_name.lower(), f'Handles {agent_name.lower()} responsibilities.')
-        
-        if status == 'completed':
-            return base.replace('Creates', 'Created').replace('Analyzes', 'Analyzed').replace('Implements', 'Implemented').replace('Documents', 'Documented').replace('Tests', 'Tested')
-        elif status == 'in-progress':
-            return f'Currently working: {base}'
-        else:
-            return f'Will handle: {base}'
-    
-    def _get_default_status(self):
-        """Return default status when files are missing"""
-        return {
-            'currentTask': 'No active task',
-            'workflow': [
-                {'name': 'Explorer', 'status': 'pending', 'type': 'agent', 'icon': '🔍'},
-                {'name': 'Criteria Gate', 'status': 'pending', 'type': 'gate', 'icon': '🚪'},
-                {'name': 'Planner', 'status': 'pending', 'type': 'agent', 'icon': '📋'},
-                {'name': 'Coder', 'status': 'pending', 'type': 'agent', 'icon': '💻'},
-                {'name': 'Scribe', 'status': 'pending', 'type': 'agent', 'icon': '📝'},
-                {'name': 'Verifier', 'status': 'pending', 'type': 'agent', 'icon': '✅'},
-                {'name': 'Completion Gate', 'status': 'pending', 'type': 'gate', 'icon': '🏁'}
-            ],
-            'agents': [
-                {'name': 'Explorer', 'status': 'pending', 'description': 'Will analyze task requirements and identify patterns, dependencies, and constraints.'},
-                {'name': 'Planner', 'status': 'pending', 'description': 'Will create detailed implementation plan with step-by-step approach and success criteria.'},
-                {'name': 'Coder', 'status': 'pending', 'description': 'Will implement the planned changes according to specifications.'},
-                {'name': 'Scribe', 'status': 'pending', 'description': 'Will document the implementation and create usage instructions.'},
-                {'name': 'Verifier', 'status': 'pending', 'description': 'Will test functionality and verify all success criteria are met.'}
-            ]
-        }
 
 
 class StatusHandler(BaseHTTPRequestHandler):
@@ -258,11 +60,15 @@ class StatusHandler(BaseHTTPRequestHandler):
     
     def __init__(self, *args, **kwargs):
         try:
-            self.status_reader = StatusReader()
-            print(f"[API] StatusHandler initialized successfully")
+            # Get project root from current working directory (set by subprocess cwd parameter)
+            project_root = Path(os.getcwd())
+            self.project_root = project_root  # Store for later use
+            self.status_reader = StatusReader(project_root=project_root)
+            print(f"[API] StatusHandler initialized successfully with project_root: {project_root.absolute()}")
         except Exception as e:
             print(f"[API] Error initializing StatusReader: {e}")
-            # Create a minimal fallback reader
+            # Store project_root even if StatusReader fails
+            self.project_root = Path(os.getcwd())
             self.status_reader = None
         super().__init__(*args, **kwargs)
     
@@ -301,10 +107,22 @@ class StatusHandler(BaseHTTPRequestHandler):
         try:
             print(f"[API] Processing status request: {parsed_url.path}?{parsed_url.query}")
             
-            # Check if status reader is available
+            # Use fallback method if status reader is unavailable
             if self.status_reader is None:
-                self._send_error(500, 'StatusReader not initialized. Server may have startup issues.')
-                return
+                print(f"[API] StatusReader unavailable, using fallback method")
+                try:
+                    # Parse query parameters
+                    query_params = parse_qs(parsed_url.query)
+                    mode = query_params.get('mode', ['regular'])[0]
+                    
+                    # Use get_workflow_status as fallback
+                    status_data = get_workflow_status(project_root=self.project_root, mode=mode)
+                    self._send_json_response(status_data)
+                    return
+                except Exception as fallback_error:
+                    print(f"[API] Fallback method also failed: {fallback_error}")
+                    self._send_error(500, 'StatusReader not initialized and fallback failed. Server may have startup issues.')
+                    return
             
             # Parse query parameters
             query_params = parse_qs(parsed_url.query)
@@ -318,7 +136,7 @@ class StatusHandler(BaseHTTPRequestHandler):
             
             # Read status data
             print(f"[API] Reading status data for mode: {mode}")
-            status_data = self.status_reader.read_status(mode)
+            status_data = get_workflow_status(project_root=self.project_root, mode=mode)
             
             # Validate response data
             if not status_data or not isinstance(status_data, dict):
@@ -434,12 +252,12 @@ class StatusHandler(BaseHTTPRequestHandler):
             if decision_type == 'new-task' and 'description' in decision_data:
                 cmd.append(decision_data['description'])
             
-            # Execute command
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            # Execute command with reduced timeout to prevent blocking
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
             
             if result.returncode == 0:
                 # Read updated status after decision processing
-                status_data = self.status_reader.read_status(mode)
+                status_data = get_workflow_status(project_root=self.project_root, mode=mode)
                 
                 return {
                     'success': True,
@@ -458,7 +276,7 @@ class StatusHandler(BaseHTTPRequestHandler):
         except subprocess.TimeoutExpired:
             return {
                 'success': False,
-                'error': 'Gate decision processing timed out'
+                'error': 'Gate decision processing timed out after 15 seconds. Try again or check orchestrator logs.'
             }
         except Exception as e:
             return {
@@ -495,10 +313,20 @@ class StatusHandler(BaseHTTPRequestHandler):
             outputs_dir = self._get_outputs_directory(mode)
             file_path = outputs_dir / filename
             
-            # Check if file exists
+            # Check if file exists in outputs directory, if not try claude directory for checklist files
             if not file_path.exists():
-                self._send_error(404, f'File "{filename}" not found')
-                return
+                if filename == 'tasks-checklist.md':
+                    # Try .claude or .claude-meta directory for checklist files
+                    claude_dir = Path('.claude-meta') if mode == 'meta' else Path('.claude')
+                    claude_file_path = claude_dir / filename
+                    if claude_file_path.exists():
+                        file_path = claude_file_path
+                    else:
+                        self._send_error(404, f'File "{filename}" not found in either outputs or claude directories')
+                        return
+                else:
+                    self._send_error(404, f'File "{filename}" not found')
+                    return
             
             # Read file content
             try:
@@ -535,7 +363,8 @@ class StatusHandler(BaseHTTPRequestHandler):
             'current-status.md',
             'documentation.md',
             'success-criteria.md',
-            'pending-user_validation-gate.md'
+            'pending-user_validation-gate.md',
+            'tasks-checklist.md'
         }
         
         # Check if file is in allowlist
@@ -576,16 +405,7 @@ class StatusHandler(BaseHTTPRequestHandler):
     def _handle_execute_request(self, parsed_url):
         """Handle /api/execute endpoint for command execution"""
         try:
-            # Parse query parameters for mode
-            query_params = parse_qs(parsed_url.query)
-            mode = query_params.get('mode', ['regular'])[0]
-            
-            # Validate mode parameter
-            if mode not in ['regular', 'meta']:
-                self._send_error(400, 'Invalid mode parameter. Use "regular" or "meta".')
-                return
-            
-            # Read request body
+            # Read request body first
             content_length = int(self.headers.get('Content-Length', 0))
             if content_length == 0:
                 self._send_error(400, 'Missing request body')
@@ -598,6 +418,15 @@ class StatusHandler(BaseHTTPRequestHandler):
                 execute_data = json.loads(request_body)
             except json.JSONDecodeError:
                 self._send_error(400, 'Invalid JSON in request body')
+                return
+            
+            # Get mode from request body first, then query params as fallback
+            query_params = parse_qs(parsed_url.query)
+            mode = execute_data.get('mode') or query_params.get('mode', ['regular'])[0]
+            
+            # Validate mode parameter
+            if mode not in ['regular', 'meta']:
+                self._send_error(400, 'Invalid mode parameter. Use "regular" or "meta".')
                 return
             
             # Validate required fields
@@ -619,10 +448,8 @@ class StatusHandler(BaseHTTPRequestHandler):
                     self._send_error(409, f'Operation in progress: {OPERATION_STATE["current_operation"]}')
                     return
             
-            # Force test commands to regular mode for meta-mode isolation
-            if mode == 'meta' and command in ['start', 'continue', 'clean']:
-                mode = 'regular'
-                print(f"[API Execute] Meta-mode isolation: redirecting {command} to regular mode")
+            # Allow meta-mode commands to run in meta mode
+            print(f"[API Execute] Executing {command} in {mode} mode")
             
             # Execute the command
             result = self._execute_orchestrator_command(command, mode, execute_data)
@@ -661,13 +488,22 @@ class StatusHandler(BaseHTTPRequestHandler):
                     import subprocess
                     cmd = [sys.executable, 'orchestrate.py', 'start']
                     if mode == 'meta':
-                        cmd.append('--meta')
+                        cmd.append('meta')
                     
-                    # Start the process in background
-                    process = subprocess.Popen(cmd, 
-                                               stdout=subprocess.PIPE, 
-                                               stderr=subprocess.PIPE,
-                                               cwd=os.getcwd())
+                    # Start the process in background with shorter timeout handling
+                    try:
+                        process = subprocess.Popen(cmd, 
+                                                   stdout=subprocess.PIPE, 
+                                                   stderr=subprocess.PIPE,
+                                                   cwd=os.getcwd(),
+                                                   start_new_session=True)  # Prevent signal propagation
+                    except Exception as start_error:
+                        OPERATION_STATE['current_operation'] = 'idle'
+                        result_data.update({
+                            'success': False,
+                            'error': f'Failed to start process: {str(start_error)}'
+                        })
+                        return result_data
                     
                     result_data.update({
                         'message': f'Workflow started in background process (PID: {process.pid})',
@@ -681,10 +517,19 @@ class StatusHandler(BaseHTTPRequestHandler):
                     if mode == 'meta':
                         cmd.append('--meta')
                     
-                    process = subprocess.Popen(cmd, 
-                                               stdout=subprocess.PIPE, 
-                                               stderr=subprocess.PIPE,
-                                               cwd=os.getcwd())
+                    try:
+                        process = subprocess.Popen(cmd, 
+                                                   stdout=subprocess.PIPE, 
+                                                   stderr=subprocess.PIPE,
+                                                   cwd=os.getcwd(),
+                                                   start_new_session=True)  # Prevent signal propagation
+                    except Exception as continue_error:
+                        OPERATION_STATE['current_operation'] = 'idle'
+                        result_data.update({
+                            'success': False,
+                            'error': f'Failed to start continue process: {str(continue_error)}'
+                        })
+                        return result_data
                     
                     result_data.update({
                         'message': f'Continue workflow started in background process (PID: {process.pid})',
@@ -722,7 +567,7 @@ class StatusHandler(BaseHTTPRequestHandler):
                 
                 # Read updated status after command execution
                 if self.status_reader:
-                    workflow_state = self.status_reader.read_status(mode)
+                    workflow_state = get_workflow_status(project_root=self.project_root, mode=mode)
                     result_data['workflow_state'] = workflow_state
                 
                 return result_data

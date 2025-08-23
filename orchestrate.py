@@ -23,6 +23,7 @@ import signal
 import threading
 import urllib.request
 import urllib.error
+from workflow_status import StatusReader, get_workflow_status
 from process_manager import ProcessManager
 
 
@@ -357,7 +358,7 @@ class AgentConfig:
             self.api_process = subprocess.Popen([
                 sys.executable, 'api_server.py', 
                 '--port', str(self.api_port)
-            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=self.project_root)
             
             # Register API process with ProcessManager if available
             if self.process_manager:
@@ -367,7 +368,7 @@ class AgentConfig:
             # Start dashboard server as subprocess
             self.dashboard_process = subprocess.Popen([
                 sys.executable, 'dashboard_server.py', str(self.dashboard_port)
-            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=self.project_root)
             
             # Register dashboard process with ProcessManager if available
             if self.process_manager:
@@ -1150,6 +1151,9 @@ class ClaudeCodeOrchestrator:
         self.agents_dir.mkdir(exist_ok=True)
         self.outputs_dir.mkdir(exist_ok=True)
         
+        # Initialize shared status reader for consistent workflow state
+        self.status_reader = StatusReader(project_root=self.project_root)
+        
         # Generate default configuration files if they don't exist
         self._ensure_config_files()
 
@@ -1162,6 +1166,10 @@ class ClaudeCodeOrchestrator:
         
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
+
+    def _get_current_mode(self):
+        """Get current mode (regular or meta) based on outputs_dir"""
+        return 'meta' if self.outputs_dir.name == '.agent-outputs-meta' else 'regular'
 
     def _test_api_endpoint(self):
         """Test if API server HTTP endpoint is responding"""
@@ -1403,9 +1411,14 @@ CRITICAL REQUIREMENTS:
                 user_input = input("\nEnter your choice: ").strip().lower()
                 
                 if user_input == "exit":
-                    # Save gate state for resume
+                    # Remove pending gate file and save as exited for potential resume
                     gate_state_file = self.outputs_dir / f"pending-{gate_type}-gate.md"
-                    gate_state_file.write_text(gate_content)
+                    exited_gate_file = self.outputs_dir / f"exited-{gate_type}-gate.md"
+                    
+                    # Move pending to exited state
+                    if gate_state_file.exists():
+                        gate_state_file.rename(exited_gate_file)
+                    
                     print(f"Exiting. Run 'continue' to resume from {gate_type} gate.")
                     return "exit", "User chose to exit at gate"
                 
@@ -1510,19 +1523,20 @@ CRITICAL REQUIREMENTS:
     def get_continue_agent(self):
         """Get the next agent to run and its instructions using configurable workflow"""
         
-        # Check for pending gate state first (for resume functionality)
-        pending_criteria_gate = self.outputs_dir / "pending-criteria-gate.md"
-        pending_completion_gate = self.outputs_dir / "pending-completion-gate.md"
-        pending_user_validation_gate = self.outputs_dir / "pending-user_validation-gate.md"
+        # Check for pending gate state first (for resume functionality) - use shared StatusReader
+        pending_gates = self.status_reader.get_pending_gates(self._get_current_mode())
         
-        if pending_user_validation_gate.exists():
-            gate_content = pending_user_validation_gate.read_text()
+        if 'user_validation' in pending_gates:
+            gate_file = self.outputs_dir / "pending-user_validation-gate.md"
+            gate_content = gate_file.read_text()
             return self._handle_interactive_gate("user_validation", gate_content)
-        elif pending_criteria_gate.exists():
-            gate_content = pending_criteria_gate.read_text()
+        elif 'criteria' in pending_gates:
+            gate_file = self.outputs_dir / "pending-criteria-gate.md"
+            gate_content = gate_file.read_text()
             return self._handle_interactive_gate("criteria", gate_content)
-        elif pending_completion_gate.exists():
-            gate_content = pending_completion_gate.read_text()
+        elif 'completion' in pending_gates:
+            gate_file = self.outputs_dir / "pending-completion-gate.md"
+            gate_content = gate_file.read_text()
             return self._handle_interactive_gate("completion", gate_content)
         
         # Check for USER tasks before determining workflow phase
@@ -1532,21 +1546,14 @@ CRITICAL REQUIREMENTS:
             if approval_file.exists():
                 approval_file.unlink()  # Remove approval file so we don't loop
                 # Remove pending gate file if it exists
-                if pending_user_validation_gate.exists():
-                    pending_user_validation_gate.unlink()
+                if self.status_reader.has_pending_gate('user_validation', self._get_current_mode()):
+                    gate_file = self.outputs_dir / "pending-user_validation-gate.md"
+                    gate_file.unlink()
                 # Continue to next task
                 print("User validation approved, continuing to next task...")
         
-        # Check what outputs exist to determine next phase
-        current_outputs = {
-            "exploration.md": (self.outputs_dir / "exploration.md").exists(),
-            "success-criteria.md": (self.outputs_dir / "success-criteria.md").exists(),
-            "plan.md": (self.outputs_dir / "plan.md").exists(),
-            "changes.md": (self.outputs_dir / "changes.md").exists(),
-            "orchestrator-log.md": (self.outputs_dir / "orchestrator-log.md").exists(),
-            "verification.md": (self.outputs_dir / "verification.md").exists(),
-            "completion-approved.md": (self.outputs_dir / "completion-approved.md").exists()
-        }
+        # Check what outputs exist to determine next phase - use shared StatusReader
+        current_outputs = self.status_reader.get_current_outputs_status(self._get_current_mode())
         
         # Check if current task is a USER validation task before determining workflow phase
         current_task_raw = self._get_current_task_raw()
@@ -1556,8 +1563,9 @@ CRITICAL REQUIREMENTS:
             result = self._handle_user_validation(current_task_raw)
             if result is None:
                 # Gate was created, check for pending user validation gate
-                if pending_user_validation_gate.exists():
-                    gate_content = pending_user_validation_gate.read_text()
+                if self.status_reader.has_pending_gate('user_validation', self._get_current_mode()):
+                    gate_file = self.outputs_dir / "pending-user_validation-gate.md"
+                    gate_content = gate_file.read_text()
                     return self._handle_interactive_gate("user_validation", gate_content)
                 else:
                     # Gate should exist, something went wrong
@@ -1657,31 +1665,24 @@ CRITICAL REQUIREMENTS:
         while iteration < max_iterations:
             iteration += 1
             
-            # First, check for pending gates before determining next phase
-            pending_criteria_gate = self.outputs_dir / "pending-criteria-gate.md"
-            pending_completion_gate = self.outputs_dir / "pending-completion-gate.md"
-            pending_user_validation_gate = self.outputs_dir / "pending-user_validation-gate.md"
+            # First, check for pending gates before determining next phase - use shared StatusReader
+            pending_gates = self.status_reader.get_pending_gates(self._get_current_mode())
             
-            if pending_user_validation_gate.exists():
-                gate_content = pending_user_validation_gate.read_text()
+            if 'user_validation' in pending_gates:
+                gate_file = self.outputs_dir / "pending-user_validation-gate.md"
+                gate_content = gate_file.read_text()
                 return self._handle_interactive_gate("user_validation", gate_content)
-            elif pending_criteria_gate.exists():
-                gate_content = pending_criteria_gate.read_text()
+            elif 'criteria' in pending_gates:
+                gate_file = self.outputs_dir / "pending-criteria-gate.md"
+                gate_content = gate_file.read_text()
                 return self._handle_interactive_gate("criteria", gate_content)
-            elif pending_completion_gate.exists():
-                gate_content = pending_completion_gate.read_text()
+            elif 'completion' in pending_gates:
+                gate_file = self.outputs_dir / "pending-completion-gate.md"
+                gate_content = gate_file.read_text()
                 return self._handle_interactive_gate("completion", gate_content)
             
-            # Check what outputs exist to determine next phase
-            current_outputs = {
-                "exploration.md": (self.outputs_dir / "exploration.md").exists(),
-                "success-criteria.md": (self.outputs_dir / "success-criteria.md").exists(),
-                "plan.md": (self.outputs_dir / "plan.md").exists(),
-                "changes.md": (self.outputs_dir / "changes.md").exists(),
-                "orchestrator-log.md": (self.outputs_dir / "orchestrator-log.md").exists(),
-                "verification.md": (self.outputs_dir / "verification.md").exists(),
-                "completion-approved.md": (self.outputs_dir / "completion-approved.md").exists()
-            }
+            # Check what outputs exist to determine next phase - use shared StatusReader
+            current_outputs = self.status_reader.get_current_outputs_status(self._get_current_mode())
             
             # Use workflow configuration to determine next agent
             next_agent = self.workflow_config.get_next_agent(current_outputs, self.outputs_dir)
@@ -2455,7 +2456,7 @@ CRITICAL REQUIREMENTS:
         
     def approve_user_validation(self):
         """Approve USER validation and mark task complete"""
-        task = self._get_current_task()
+        task = self._get_current_task_raw()
         if task and task.startswith('USER'):
             # Find the actual task line in the checklist for better matching
             original_task = self._find_user_task_in_checklist()
@@ -2484,6 +2485,12 @@ APPROVED - Tests passed
 Continuing to next task in workflow
 """
             approval_file.write_text(approval_content)
+            
+            # Clean up pending gate file immediately
+            pending_gate_file = self.outputs_dir / "pending-user_validation-gate.md"
+            if pending_gate_file.exists():
+                pending_gate_file.unlink()
+                print(f"Removed pending user validation gate file")
             
             print(f"✅ USER VALIDATION APPROVED")
             print(f"Task marked complete: {task}")
@@ -2535,10 +2542,9 @@ Continuing to next task in workflow
             "current-status.md",
             "current-criteria-gate.md",
             "current-user-validation.md",
-            "explorer-log.txt",
             "next-command.txt",
             "status.txt"
-            # Note: orchestrator-log.md is preserved across cycles for historical record
+            # Note: orchestrator-log.md AND agent-log.txt files are preserved for historical record
         ]
         
         cleaned_count = 0
@@ -2981,7 +2987,7 @@ def show_help():
     print("  Workflow: start, continue, interactive, status, clean, complete, fail, bootstrap")
     print("  Gates: approve-criteria, modify-criteria, retry-explorer")
     print("         approve-completion, retry-from-planner, retry-from-coder, retry-from-verifier")
-    print("         new-task [description] - Create new task during user validation")
+    print("         user-approve, new-task [description] - Create new task during user validation")
     print("  Mode: unsupervised, supervised")
     print("  Interactive mode: Runs persistent workflow with interactive gates")
 
@@ -3120,6 +3126,9 @@ def main():
         
     elif command == "retry-from-verifier":
         orchestrator.retry_from_verifier()
+        
+    elif command == "user-approve":
+        orchestrator.approve_user_validation()
         
     elif command == "new-task":
         # Handle new-task command with description
