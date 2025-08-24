@@ -562,7 +562,8 @@
             border: 1px solid rgba(245, 158, 11, 0.4);
             border-radius: 12px;
             padding: 25px;
-            margin: 30px 0;
+            margin: 30px auto;
+            max-width: 600px;
             display: none;
         }
 
@@ -671,7 +672,7 @@
             background: #1e1e1e;
             color: #ffffff;
             font-family: 'Consolas', 'Monaco', monospace;
-            font-size: 15px;
+            font-size: 18px;
             line-height: 1.4;
             padding: 15px;
             border-radius: 4px;
@@ -809,11 +810,12 @@
 
         .server-logs-section .workflow-header {
             display: flex;
-            justify-content: space-between;
+            flex-direction: column;
             align-items: center;
             padding: 0 0 10px 0;
             margin-bottom: 20px;
             border-bottom: 1px solid rgba(75, 85, 99, 0.2);
+            gap: 15px;
         }
 
         .log-controls {
@@ -827,10 +829,10 @@
             border: 1px solid rgba(255, 255, 255, 0.2);
             border-radius: 6px;
             color: #ffffff;
-            padding: 8px 16px;
+            padding: 12px 24px;
             cursor: pointer;
             transition: all 0.2s ease;
-            font-size: 14px;
+            font-size: 18px;
         }
 
         .log-tab:hover {
@@ -870,7 +872,7 @@
 
         .log-viewer .log-content {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            font-size: 14px;
+            font-size: 18px;
             line-height: 1.5;
             color: #e6edf3;
             white-space: pre-wrap;
@@ -1688,23 +1690,6 @@
         </div>
     </div>
 
-    <!-- Log Modal -->
-    <div class="log-modal" id="logModal">
-        <div class="log-modal-dialog">
-            <div class="modal-header">
-                <h2 class="modal-title" id="logModalTitle">
-                    <span id="logModalIcon">📝</span>
-                    <span id="logModalTitleText">Agent Report</span>
-                </h2>
-                <button class="modal-close" onclick="closeLogModal()">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="log-content" id="logContent">
-                    <!-- Log content will be loaded here -->
-                </div>
-            </div>
-        </div>
-    </div>
 
 
     <script>
@@ -2565,7 +2550,7 @@
             }
         }
 
-        // Manual restart servers button (wrapper for UI)
+        // Manual restart servers button (wrapper for UI) - ALWAYS ENABLED FOR EMERGENCY RECOVERY
         async function restartServers() {
             const restartBtn = document.getElementById('restartBtn');
             const originalText = restartBtn.innerHTML;
@@ -2574,27 +2559,44 @@
             restartBtn.disabled = true;
             restartBtn.innerHTML = '<i data-lucide="loader-2" style="animation: spin 1s linear infinite;"></i>';
             
-            showCommandStatus('Restarting servers...', 'info');
+            showCommandStatus('Emergency restart in progress...', 'info');
             
             try {
-                await performServerRestart(false);
+                // Emergency restart - bypass API server communication entirely
+                // Use direct shell execution via dashboard server for maximum reliability
+                const response = await fetch('/emergency-restart', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ mode: getCurrentMode() }),
+                    timeout: 30000
+                });
                 
-                // Refresh dashboard with new connection
-                setTimeout(async () => {
-                    await refreshDashboard();
-                }, 1000);
+                if (response.ok) {
+                    showCommandStatus('Emergency restart initiated - refreshing...', 'success');
+                    // Wait longer for full restart
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 5000);
+                } else {
+                    throw new Error(`Emergency restart failed: ${response.status}`);
+                }
                 
             } catch (error) {
-                // Error already logged by performServerRestart
+                console.error('Emergency restart failed:', error);
+                showCommandStatus('Emergency restart failed - try Clean button or manual restart', 'error');
             } finally {
-                // Restore button
-                restartBtn.disabled = false;
-                restartBtn.innerHTML = originalText;
-                
-                // Re-initialize lucide icons
-                if (typeof lucide !== 'undefined') {
-                    lucide.createIcons();
-                }
+                // Restore button after delay
+                setTimeout(() => {
+                    restartBtn.disabled = false;
+                    restartBtn.innerHTML = originalText;
+                    
+                    // Re-initialize lucide icons
+                    if (typeof lucide !== 'undefined') {
+                        lucide.createIcons();
+                    }
+                }, 3000);
             }
         }
 
@@ -3619,34 +3621,6 @@
             const cleanName = cleanStepName(agentName);
             console.log('showReportModal called for:', cleanName);
             
-            const modal = document.getElementById('logModal');
-            const titleText = document.getElementById('logModalTitleText');
-            const icon = document.getElementById('logModalIcon');
-            const content = document.getElementById('logContent');
-            
-            // Set title and icon for report
-            titleText.textContent = `${cleanName} Report`;
-            
-            // Get appropriate icon for the agent
-            const iconName = getAgentIcon(agentName);
-            icon.innerHTML = `<i data-lucide="${iconName}"></i>`;
-            
-            // Re-initialize lucide icons for the modal
-            if (typeof lucide !== 'undefined') {
-                lucide.createIcons();
-            }
-            
-            // Show loading
-            content.innerHTML = '<div style="text-align: center; color: #fff; padding: 40px; font-size: 18px;">Loading report...</div>';
-            content.style.display = 'block';
-            
-            // Force modal to be visible
-            modal.style.display = 'flex';
-            modal.style.visibility = 'visible';
-            modal.style.opacity = '1';
-            modal.style.zIndex = '99999';
-            modal.classList.add('active');
-            
             try {
                 // Get REPORT filename - similar to log but for reports
                 const reportFilename = getReportFilename(agentName);
@@ -3664,33 +3638,81 @@
                     const reportText = await response.text();
                     console.log('Report text length:', reportText.length);
                     
-                    if (reportText.trim()) {
-                        // Render as markdown for report files
-                        if (typeof markdownit !== 'undefined') {
-                            const md = markdownit();
-                            const renderedMarkdown = md.render(reportText);
-                            content.innerHTML = `<div class="markdown-body">${renderedMarkdown}</div>`;
+                    // Parse markdown to HTML
+                    console.log('About to parse markdown with markdownit...');
+                    console.log('window.markdownit available:', typeof window.markdownit);
+                    
+                    let htmlContent;
+                    try {
+                        if (typeof window.markdownit !== 'undefined') {
+                            const md = window.markdownit({
+                                breaks: true,  // Convert line breaks to <br>
+                                linkify: true  // Convert URLs to links
+                            });
+                            htmlContent = md.render(reportText);
+                            console.log('HTML content generated with markdownit:', htmlContent.length, 'characters');
                         } else {
-                            // Fallback to plain text if markdown-it is not available
-                            const escapedText = reportText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                            content.innerHTML = `<div class="plain-text">${escapedText}</div>`;
+                            console.log('markdownit not available, using plain text');
+                            htmlContent = `<pre>${reportText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`;
                         }
-                        
-                        content.style.display = 'block';
-                        content.style.visibility = 'visible';
-                        content.style.opacity = '1';
+                    } catch (error) {
+                        console.error('Error parsing markdown:', error);
+                        htmlContent = `<pre>${reportText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`;
+                    }
+                    
+                    // Set modal content
+                    const modalTitle = document.getElementById('reportModalTitle');
+                    const modalBody = document.getElementById('reportModalBody');
+                    const modal = document.getElementById('reportModal');
+                    
+                    console.log('Modal elements found:', {
+                        modal: !!modal,
+                        modalTitle: !!modalTitle,
+                        modalBody: !!modalBody
+                    });
+                    
+                    if (modal && modalTitle && modalBody) {
+                        modalTitle.textContent = `${agentName} Report`;
+                        modalBody.innerHTML = htmlContent;
+                        console.log('About to display modal...');
+                        modal.style.display = 'block';
+                        console.log('Modal display set to block, modal should be visible now');
                     } else {
-                        content.innerHTML = '<div style="text-align: center; color: #fbbf24; padding: 40px; font-size: 18px;">Report file is empty.</div>';
+                        console.error('Report modal elements not found');
                     }
                 } else if (response.status === 404) {
-                    content.innerHTML = `<div style="text-align: center; color: #f87171; padding: 40px; font-size: 18px;">Report not found: ${reportFilename}<br>Status: ${response.status}</div>`;
+                    const modalTitle = document.getElementById('reportModalTitle');
+                    const modalBody = document.getElementById('reportModalBody');
+                    const modal = document.getElementById('reportModal');
+                    
+                    if (modal && modalTitle && modalBody) {
+                        modalTitle.textContent = `${agentName} Report`;
+                        modalBody.innerHTML = `<div style="text-align: center; color: #f87171; padding: 40px; font-size: 18px;">Report not found: ${reportFilename}<br>Status: ${response.status}</div>`;
+                        modal.style.display = 'block';
+                    }
                 } else {
                     const errorText = await response.text().catch(() => 'Unknown error');
-                    content.innerHTML = `<div style="text-align: center; color: #f87171; padding: 40px; font-size: 18px;">API Error: ${response.status}<br>${errorText}</div>`;
+                    const modalTitle = document.getElementById('reportModalTitle');
+                    const modalBody = document.getElementById('reportModalBody');
+                    const modal = document.getElementById('reportModal');
+                    
+                    if (modal && modalTitle && modalBody) {
+                        modalTitle.textContent = `${agentName} Report`;
+                        modalBody.innerHTML = `<div style="text-align: center; color: #f87171; padding: 40px; font-size: 18px;">API Error: ${response.status}<br>${errorText}</div>`;
+                        modal.style.display = 'block';
+                    }
                 }
             } catch (error) {
                 console.error('Error loading report:', error);
-                content.innerHTML = `<div style="text-align: center; color: #f87171; padding: 40px; font-size: 18px;">Error loading report file: ${error.message}</div>`;
+                const modalTitle = document.getElementById('reportModalTitle');
+                const modalBody = document.getElementById('reportModalBody');
+                const modal = document.getElementById('reportModal');
+                
+                if (modal && modalTitle && modalBody) {
+                    modalTitle.textContent = `${agentName} Report`;
+                    modalBody.innerHTML = `<div style="text-align: center; color: #f87171; padding: 40px; font-size: 18px;">Error loading report file: ${error.message}</div>`;
+                    modal.style.display = 'block';
+                }
             }
         }
         
@@ -3716,38 +3738,6 @@
         async function showAgentLogModal(agentName, status) {
             console.log('showAgentLogModal called for:', agentName);
             
-            const modal = document.getElementById('logModal');
-            const titleText = document.getElementById('logModalTitleText');
-            const icon = document.getElementById('logModalIcon');
-            const content = document.getElementById('logContent');
-            
-            console.log('Modal element:', modal);
-            console.log('Content element:', content);
-            
-            // Set title and icon based on agent (clean up the name)
-            const cleanName = agentName.replace(/\s*(complete|pending|running|active)\s*(\(\d+\s*bytes\))?\s*/gi, '').trim();
-            titleText.textContent = `${cleanName} Execution Log`;
-            
-            // Set lucide icon properly
-            const iconName = getAgentIcon(agentName);
-            icon.innerHTML = `<i data-lucide="${iconName}"></i>`;
-            
-            // Re-initialize lucide icons for the modal
-            if (typeof lucide !== 'undefined') {
-                lucide.createIcons();
-            }
-            
-            // Show loading
-            content.innerHTML = '<div style="text-align: center; color: #fff; padding: 40px; font-size: 18px;">Loading log...</div>';
-            content.style.display = 'block';
-            
-            // Force modal to be visible
-            modal.style.display = 'flex';
-            modal.style.visibility = 'visible';
-            modal.style.opacity = '1';
-            modal.style.zIndex = '99999';
-            modal.classList.add('active');
-            
             try {
                 // Get LOG filename for workflow icons
                 const logFilename = getLogFilename(agentName);
@@ -3758,35 +3748,47 @@
                 console.log('Modal Debug - Current Mode:', currentMode);
                 console.log('Modal Debug - API URL:', apiUrl);
                 
+                console.log('About to fetch from:', apiUrl);
                 const response = await fetch(apiUrl);
-                console.log('Response status:', response.status);
+                console.log('Response received - status:', response.status);
+                console.log('Response OK:', response.ok);
                 
                 if (response.ok) {
                     const logText = await response.text();
                     console.log('Log text length:', logText.length);
                     
-                    if (logText.trim()) {
-                        // Render as markdown for log files
-                        if (typeof markdownit !== 'undefined') {
-                            const md = markdownit();
-                            const renderedMarkdown = md.render(logText);
-                            content.innerHTML = `<div class="markdown-body">${renderedMarkdown}</div>`;
-                        } else {
-                            // Fallback to plain text if markdown-it is not available
-                            const escapedText = logText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                            content.innerHTML = `<div class="plain-text">${escapedText}</div>`;
-                        }
-                        
-                        content.style.display = 'block';
-                        content.style.visibility = 'visible';
-                        content.style.opacity = '1';
+                    // Parse markdown to HTML with line breaks enabled
+                    const md = window.markdownit({
+                        breaks: true,  // Convert line breaks to <br>
+                        linkify: true  // Convert URLs to links
+                    });
+                    const htmlContent = md.render(logText);
+                    
+                    // Set modal content
+                    const modalTitle = document.getElementById('logModalTitle');
+                    const modalBody = document.getElementById('logModalBody');
+                    const modal = document.getElementById('logModal');
+                    
+                    if (modal && modalTitle && modalBody) {
+                        modalTitle.textContent = `${agentName} Execution Log`;
+                        modalBody.innerHTML = htmlContent;
+                        modal.style.display = 'block';
                     } else {
-                        content.innerHTML = '<div style="text-align: center; color: #fbbf24; padding: 40px; font-size: 18px;">Log file is empty.</div>';
+                        console.error('Log modal elements not found');
                     }
                 } else if (response.status === 400 || response.status === 404) {
                     // File might not exist yet or be in process of creation
                     console.log(`Log file ${logFilename} not yet available (${response.status}), will retry...`);
-                    content.innerHTML = `<div style="text-align: center; color: #fbbf24; padding: 40px; font-size: 18px;">Log file not yet available<br>Checking again in a moment...</div>`;
+                    
+                    const modalTitle = document.getElementById('logModalTitle');
+                    const modalBody = document.getElementById('logModalBody');
+                    const modal = document.getElementById('logModal');
+                    
+                    if (modal && modalTitle && modalBody) {
+                        modalTitle.textContent = `${agentName} Execution Log`;
+                        modalBody.innerHTML = `<div style="text-align: center; color: #fbbf24; padding: 40px; font-size: 18px;">Log file not yet available<br>Checking again in a moment...</div>`;
+                        modal.style.display = 'block';
+                    }
                     
                     // Retry after a short delay
                     setTimeout(async () => {
@@ -3794,178 +3796,57 @@
                             const retryResponse = await fetch(apiUrl);
                             if (retryResponse.ok) {
                                 const logText = await retryResponse.text();
-                                if (logText.trim()) {
-                                    // Render as markdown for log files
-                                    if (typeof markdownit !== 'undefined') {
-                                        const md = markdownit();
-                                        const renderedMarkdown = md.render(logText);
-                                        content.innerHTML = `<div class="markdown-body">${renderedMarkdown}</div>`;
-                                    } else {
-                                        const escapedText = logText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                                        content.innerHTML = `<div class="plain-text">${escapedText}</div>`;
-                                    }
-                                } else {
-                                    content.innerHTML = '<div style="text-align: center; color: #fbbf24; padding: 40px; font-size: 18px;">Log file is empty.</div>';
+                                const md = window.markdownit({
+                                    breaks: true,  // Convert line breaks to <br>
+                                    linkify: true  // Convert URLs to links
+                                });
+                                const htmlContent = md.render(logText);
+                                
+                                if (modal && modalTitle && modalBody) {
+                                    modalBody.innerHTML = htmlContent;
                                 }
                             } else {
-                                content.innerHTML = `<div style="text-align: center; color: #f87171; padding: 40px; font-size: 18px;">Log file not found: ${logFilename}<br>Status: ${retryResponse.status}</div>`;
+                                if (modal && modalTitle && modalBody) {
+                                    modalBody.innerHTML = `<div style="text-align: center; color: #f87171; padding: 40px; font-size: 18px;">Log file not found: ${logFilename}<br>Status: ${retryResponse.status}</div>`;
+                                }
                             }
                         } catch (retryError) {
-                            content.innerHTML = `<div style="text-align: center; color: #f87171; padding: 40px; font-size: 18px;">Error loading log file: ${retryError.message}</div>`;
+                            if (modal && modalTitle && modalBody) {
+                                modalBody.innerHTML = `<div style="text-align: center; color: #f87171; padding: 40px; font-size: 18px;">Error loading log file: ${retryError.message}</div>`;
+                            }
                         }
                     }, 2000);
                 } else {
                     const errorText = await response.text();
                     console.error('API response error:', errorText);
-                    content.innerHTML = `<div style="text-align: center; color: #f87171; padding: 40px; font-size: 18px;">API Error: ${response.status}<br>${errorText}</div>`;
-                }
-            } catch (error) {
-                console.error('Error loading log:', error);
-                content.innerHTML = `<div style="text-align: center; color: #f87171; padding: 40px; font-size: 18px;">Error loading log file: ${error.message}</div>`;
-            }
-        }
-        
-        // Show output modal for agent output files (agent cards)
-        async function showLogModal(agentName, status) {
-            const modal = document.getElementById('logModal');
-            const titleText = document.getElementById('logModalTitleText');
-            const icon = document.getElementById('logModalIcon');
-            const content = document.getElementById('logContent');
-            
-            console.log('showLogModal called for:', agentName);
-            console.log('Modal element:', modal);
-            console.log('Content element:', content);
-            
-            // Set title and icon based on agent (clean up the name and determine report type)
-            const cleanName = agentName.replace(/\s*(complete|pending|running|active)\s*(\(\d+\s*bytes\))?\s*/gi, '').trim();
-            
-            // Create more descriptive titles based on agent type
-            const agentTitles = {
-                'Explorer': 'Exploration Report',
-                'Planner': 'Planning Report', 
-                'Coder': 'Implementation Report',
-                'Scribe': 'Documentation Report',
-                'Verifier': 'Verification Report'
-            };
-            
-            const reportTitle = agentTitles[cleanName] || `${cleanName} Report`;
-            titleText.textContent = reportTitle;
-            
-            // Set lucide icon properly
-            const iconName = getAgentIcon(agentName);
-            icon.innerHTML = `<i data-lucide="${iconName}"></i>`;
-            
-            // Re-initialize lucide icons for the modal
-            if (typeof lucide !== 'undefined') {
-                lucide.createIcons();
-            }
-            
-            // Show loading
-            content.innerHTML = '<div style="text-align: center; color: #fff; padding: 40px; font-size: 18px;">Loading log...</div>';
-            content.style.display = 'block';
-            
-            // Force modal to be visible
-            modal.style.display = 'flex';
-            modal.style.visibility = 'visible';
-            modal.style.opacity = '1';
-            modal.style.zIndex = '99999';
-            modal.classList.add('active');
-            
-            console.log('Modal classes after adding active:', modal.className);
-            console.log('Modal computed styles:', window.getComputedStyle(modal));
-            
-            try {
-                // Check if API is available first
-                if (!useRealAPI || !discoveredAPIPort) {
-                    content.innerHTML = '<div style="text-align: center; color: #f87171; padding: 40px; font-size: 18px;">API server not available. Please ensure the server is running.</div>';
-                    return;
-                }
-                
-                // Determine output filename based on agent name
-                const outputFilename = getAgentOutputFilename(agentName);
-                const apiUrl = `${getAPIBaseURL()}/api/outputs/${outputFilename}?mode=${currentMode}`;
-                
-                console.log('Fetching log from URL:', apiUrl);
-                console.log('Current mode:', currentMode);
-                console.log('Agent name:', agentName);
-                console.log('Output filename:', outputFilename);
-                console.log('API Base URL:', getAPIBaseURL());
-                console.log('useRealAPI:', useRealAPI);
-                console.log('discoveredAPIPort:', discoveredAPIPort);
-                
-                const response = await fetch(apiUrl);
-                console.log('Response status:', response.status);
-                console.log('Response headers:', response.headers);
-                console.log('Response OK:', response.ok);
-                
-                if (response.ok) {
-                    const logText = await response.text();
-                    console.log('Log text length:', logText.length);
-                    console.log('Log text preview:', logText.substring(0, 200));
                     
-                    if (logText.trim()) {
-                        // Render all files as markdown now (both output and log files)
-                        if (typeof markdownit !== 'undefined') {
-                            // Use markdown-it for markdown rendering
-                            const md = markdownit();
-                            const renderedMarkdown = md.render(logText);
-                            content.innerHTML = `<div class="markdown-body">${renderedMarkdown}</div>`;
-                        } else {
-                            // Fallback to plain text if markdown-it is not available
-                            const escapedText = logText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                            content.innerHTML = `<div class="plain-text">${escapedText}</div>`;
-                        }
-                        
-                        // Ensure visibility
-                        content.style.display = 'block';
-                        content.style.visibility = 'visible';
-                        content.style.opacity = '1';
-                        
-                        // Debug: Check what we actually set
-                        console.log('Content innerHTML after setting:', content.innerHTML.substring(0, 200));
-                        console.log('Content element:', content);
-                        console.log('Content styles:', window.getComputedStyle(content));
-                        
-                        // Double-check after a brief delay
-                        setTimeout(() => {
-                            console.log('Content innerHTML after 100ms:', content.innerHTML.substring(0, 200));
-                        }, 100);
-                    } else {
-                        content.innerHTML = '<div style="text-align: center; color: #fbbf24; padding: 40px; font-size: 18px;">Log file is empty.</div>';
+                    const modalTitle = document.getElementById('logModalTitle');
+                    const modalBody = document.getElementById('logModalBody');
+                    const modal = document.getElementById('logModal');
+                    
+                    if (modal && modalTitle && modalBody) {
+                        modalTitle.textContent = `${agentName} Execution Log`;
+                        modalBody.innerHTML = `<div style="text-align: center; color: #f87171; padding: 40px; font-size: 18px;">API Error: ${response.status}<br>${errorText}</div>`;
+                        modal.style.display = 'block';
                     }
-                } else {
-                    const errorText = await response.text();
-                    console.error('API response error:', errorText);
-                    console.error('Failed URL:', apiUrl);
-                    console.error('Expected file location:', `.agent-outputs${currentMode === 'meta' ? '-meta' : ''}/${outputFilename}`);
-                    content.innerHTML = `<div style="text-align: center; color: #f87171; padding: 40px; font-size: 18px;">
-                        <h3>File not accessible: ${outputFilename}</h3>
-                        <p>Status: ${response.status}</p>
-                        <p>URL: ${apiUrl}</p>
-                        <p>Expected location: .agent-outputs${currentMode === 'meta' ? '-meta' : ''}/${outputFilename}</p>
-                        <details>
-                            <summary>Error details</summary>
-                            <pre>${errorText}</pre>
-                        </details>
-                    </div>`;
                 }
             } catch (error) {
                 console.error('Error loading log:', error);
-                content.innerHTML = `<div style="text-align: center; color: #f87171; padding: 40px; font-size: 18px;">Error loading log file: ${error.message}</div>`;
+                
+                const modalTitle = document.getElementById('logModalTitle');
+                const modalBody = document.getElementById('logModalBody');
+                const modal = document.getElementById('logModal');
+                
+                if (modal && modalTitle && modalBody) {
+                    modalTitle.textContent = `${agentName} Execution Log`;
+                    modalBody.innerHTML = `<div style="text-align: center; color: #f87171; padding: 40px; font-size: 18px;">Error loading log file: ${error.message}</div>`;
+                    modal.style.display = 'block';
+                }
             }
         }
         
-        // Close log modal
-        function closeLogModal() {
-            const modal = document.getElementById('logModal');
-            modal.classList.remove('active');
-            
-            // Remove forced inline styles that prevent closing
-            modal.style.display = '';
-            modal.style.visibility = '';
-            modal.style.opacity = '';
-            modal.style.zIndex = '';
-        }
+        
+        // Close log modal (this function is now handled by the modal JavaScript at the bottom)
         
         // Get log filename for agent
         function getLogFilename(agentName) {
@@ -4033,12 +3914,7 @@
             }
         });
 
-        // Close log modal when clicking outside
-        document.getElementById('logModal').addEventListener('click', function(e) {
-            if (e.target === this) {
-                closeLogModal();
-            }
-        });
+        // Log modal click-outside-to-close is now handled by the modal JavaScript at the bottom of the page
 
 
         // ============ SERVER LOGS FUNCTIONALITY ============
@@ -4183,5 +4059,244 @@
             }
         });
     </script>
+
+    <!-- Agent Report and Log Modals -->
+<style>
+    /* Modal Styles */
+    .modal {
+        display: none;
+        position: fixed;
+        z-index: 10000;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        overflow: auto;
+        background-color: rgba(0, 0, 0, 0.8);
+        animation: fadeIn 0.3s;
+    }
+
+    .modal-content {
+        background-color: #1a1a1a;
+        margin: 2% auto;
+        padding: 0;
+        width: 98%;
+        max-width: 1800px;
+        min-width: 1000px;
+        max-height: 90vh;
+        border-radius: 8px;
+        border: 1px solid #333;
+        display: flex;
+        flex-direction: column;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+    }
+
+    .modal-header {
+        padding: 20px 25px;
+        background: linear-gradient(135deg, #2a2a2a 0%, #1a1a1a 100%);
+        border-bottom: 1px solid #333;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-radius: 8px 8px 0 0;
+    }
+
+    .modal-header h2 {
+        margin: 0;
+        color: #f0f0f0;
+        font-size: 1.5rem;
+        font-weight: 600;
+    }
+
+    .modal-body {
+        padding: 25px;
+        overflow-y: auto;
+        flex-grow: 1;
+        background-color: #0d0d0d;
+        color: #e0e0e0;
+        font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+        font-size: 18px !important;
+        line-height: 1.6;
+    }
+    
+    /* Force larger font size on ALL text content */
+    .modal-body *, .modal-body p, .modal-body div, .modal-body span, 
+    .modal-body li, .modal-body td, .modal-body th {
+        font-size: 18px !important;
+        line-height: 1.6 !important;
+    }
+
+    .modal .close {
+        color: #aaa;
+        font-size: 32px;
+        font-weight: bold;
+        cursor: pointer;
+        transition: color 0.3s;
+        line-height: 20px;
+    }
+
+    .modal .close:hover,
+    .modal .close:focus {
+        color: #fff;
+    }
+
+    /* Markdown Rendering Styles for Modal Content */
+    .modal-body h1 {
+        color: #4fc3f7;
+        border-bottom: 2px solid #333;
+        padding-bottom: 10px;
+        margin-bottom: 20px;
+        font-size: 28px !important;
+    }
+
+    .modal-body h2 {
+        color: #81c784;
+        margin-top: 25px;
+        margin-bottom: 15px;
+        font-size: 24px !important;
+    }
+
+    .modal-body h3 {
+        color: #ffb74d;
+        margin-top: 20px;
+        margin-bottom: 10px;
+        font-size: 21px !important;
+    }
+
+    .modal-body pre {
+        background-color: #1a1a1a;
+        border: 1px solid #333;
+        border-radius: 4px;
+        padding: 15px;
+        overflow-x: auto;
+        margin: 15px 0;
+    }
+
+    .modal-body code {
+        background-color: #2a2a2a;
+        padding: 2px 6px;
+        border-radius: 3px;
+        color: #f06292;
+        font-size: 0.9em;
+    }
+
+    .modal-body pre code {
+        background-color: transparent;
+        padding: 0;
+        color: #e0e0e0;
+    }
+
+    .modal-body ul, .modal-body ol {
+        margin-left: 25px;
+        margin-bottom: 15px;
+    }
+
+    .modal-body li {
+        margin-bottom: 8px;
+    }
+
+    .modal-body blockquote {
+        border-left: 4px solid #4fc3f7;
+        padding-left: 15px;
+        margin: 15px 0;
+        color: #b0b0b0;
+        font-style: italic;
+    }
+
+    .modal-body table {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 15px 0;
+    }
+
+    .modal-body th, .modal-body td {
+        border: 1px solid #333;
+        padding: 10px;
+        text-align: left;
+    }
+
+    .modal-body th {
+        background-color: #2a2a2a;
+        color: #4fc3f7;
+    }
+
+    .modal-body a {
+        color: #4fc3f7;
+        text-decoration: none;
+    }
+
+    .modal-body a:hover {
+        text-decoration: underline;
+    }
+
+    @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
+</style>
+
+<!-- Report Modal -->
+<div id="reportModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2 id="reportModalTitle">Agent Report</h2>
+            <span class="close" onclick="closeReportModal()">&times;</span>
+        </div>
+        <div class="modal-body" id="reportModalBody">
+            <!-- Report content will be inserted here -->
+        </div>
+    </div>
+</div>
+
+<!-- Log Modal -->
+<div id="logModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2 id="logModalTitle">Agent Execution Log</h2>
+            <span class="close" onclick="closeLogModal()">&times;</span>
+        </div>
+        <div class="modal-body" id="logModalBody">
+            <!-- Log content will be inserted here -->
+        </div>
+    </div>
+</div>
+
+<script>
+    // Modal control functions
+    function closeReportModal() {
+        const modal = document.getElementById('reportModal');
+        if (modal) {
+            modal.style.display = 'none';
+        }
+    }
+
+    function closeLogModal() {
+        const modal = document.getElementById('logModal');
+        if (modal) {
+            modal.style.display = 'none';
+        }
+    }
+
+    // Close modals when clicking outside
+    window.addEventListener('click', function(event) {
+        const reportModal = document.getElementById('reportModal');
+        const logModal = document.getElementById('logModal');
+        
+        if (event.target === reportModal) {
+            reportModal.style.display = 'none';
+        }
+        if (event.target === logModal) {
+            logModal.style.display = 'none';
+        }
+    });
+
+    // Close modals with Escape key
+    document.addEventListener('keydown', function(event) {
+        if (event.key === 'Escape') {
+            closeReportModal();
+            closeLogModal();
+        }
+    });
+</script>
 </body>
 </html>

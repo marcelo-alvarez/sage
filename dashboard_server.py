@@ -112,6 +112,10 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                     self.end_headers()
                     self.wfile.write(f'Log file not found: {log_filename}'.encode())
                     return
+            elif self.path == '/emergency-restart':
+                # Emergency restart endpoint - bypasses API server
+                self._handle_emergency_restart()
+                return
             elif self.path == '/dashboard/index.html' or self.path == '/dashboard/':
                 # Serve dashboard.html when dashboard path is requested
                 self.path = '/dashboard.html'
@@ -130,6 +134,102 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         except Exception as e:
             # Log other errors but don't crash
             print(f"[Dashboard] Error handling request {self.path}: {e}")
+    
+    def do_POST(self):
+        """Handle POST requests"""
+        try:
+            if self.path == '/emergency-restart':
+                self._handle_emergency_restart()
+                return
+            else:
+                # Method not allowed for other POST paths
+                self.send_response(405)
+                self.send_header('Content-type', 'text/plain')
+                self.end_headers()
+                self.wfile.write(b'Method not allowed')
+        except Exception as e:
+            print(f"[Dashboard] Error handling POST request {self.path}: {e}")
+    
+    def _handle_emergency_restart(self):
+        """Emergency restart endpoint - direct shell execution"""
+        try:
+            import subprocess
+            import json
+            import sys
+            from pathlib import Path
+            
+            # Read request body for mode parameter
+            content_length = int(self.headers.get('Content-Length', 0))
+            mode = 'regular'  # Default mode
+            
+            if content_length > 0:
+                request_body = self.rfile.read(content_length).decode('utf-8')
+                try:
+                    restart_data = json.loads(request_body)
+                    mode = restart_data.get('mode', 'regular')
+                except json.JSONDecodeError:
+                    pass  # Use default mode
+            
+            print(f"[Dashboard] Emergency restart initiated in {mode} mode")
+            
+            # Step 1: Kill all orchestrator processes (most aggressive cleanup)
+            try:
+                subprocess.run(['pkill', '-9', '-f', 'orchestrate.py'], 
+                             capture_output=True, timeout=5)
+                print("[Dashboard] Killed orchestrator processes")
+            except Exception as e:
+                print(f"[Dashboard] Warning: Could not kill processes: {e}")
+            
+            # Step 2: Execute clear-ui command
+            try:
+                clear_result = subprocess.run([sys.executable, 'orchestrate.py', 'clear-ui'], 
+                                            capture_output=True, text=True, timeout=20)
+                if clear_result.returncode == 0:
+                    print("[Dashboard] Clear-UI completed successfully")
+                else:
+                    print(f"[Dashboard] Clear-UI warning: {clear_result.stderr}")
+            except Exception as e:
+                print(f"[Dashboard] Clear-UI failed: {e}")
+            
+            # Step 3: Start new serve process (detached)
+            try:
+                serve_process = subprocess.Popen([sys.executable, 'orchestrate.py', 'serve'],
+                                               stdout=subprocess.DEVNULL,
+                                               stderr=subprocess.DEVNULL,
+                                               start_new_session=True)
+                print(f"[Dashboard] New serve process started (PID: {serve_process.pid})")
+            except Exception as e:
+                print(f"[Dashboard] Failed to start serve: {e}")
+                raise e
+            
+            # Send success response
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            
+            response_data = {
+                'success': True,
+                'message': 'Emergency restart completed',
+                'mode': mode,
+                'serve_pid': serve_process.pid if 'serve_process' in locals() else None
+            }
+            
+            self.wfile.write(json.dumps(response_data).encode())
+            
+        except Exception as e:
+            print(f"[Dashboard] Emergency restart failed: {e}")
+            
+            # Send error response
+            self.send_response(500)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            
+            error_data = {
+                'success': False,
+                'error': str(e)
+            }
+            
+            self.wfile.write(json.dumps(error_data).encode())
     
     
     def log_message(self, format, *args):
