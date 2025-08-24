@@ -1586,7 +1586,7 @@ CRITICAL REQUIREMENTS:
             gate_content = gate_file.read_text()
             return self._handle_interactive_gate("criteria", gate_content)
         elif 'completion' in pending_gates:
-            gate_file = self.outputs_dir / "pending-completion-gate.md"
+            gate_file = self.outputs_dir / "current-completion-gate.md"
             gate_content = gate_file.read_text()
             return self._handle_interactive_gate("completion", gate_content)
         
@@ -1728,7 +1728,7 @@ CRITICAL REQUIREMENTS:
                 gate_content = gate_file.read_text()
                 return self._handle_interactive_gate("criteria", gate_content)
             elif 'completion' in pending_gates:
-                gate_file = self.outputs_dir / "pending-completion-gate.md"
+                gate_file = self.outputs_dir / "current-completion-gate.md"
                 gate_content = gate_file.read_text()
                 return self._handle_interactive_gate("completion", gate_content)
             
@@ -2588,7 +2588,7 @@ Continuing to next task in workflow
             "completion-approved.md",
             "criteria-modification-request.md",
             "pending-criteria-gate.md",
-            "pending-completion-gate.md",
+            "current-completion-gate.md",
             "pending-user_validation-gate.md",
             "current-status.md",
             "current-criteria-gate.md",
