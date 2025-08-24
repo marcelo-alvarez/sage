@@ -24,6 +24,58 @@ import logging
 from datetime import datetime
 # ClaudeCodeOrchestrator now run in separate process via subprocess
 
+
+class OrchestratorLogger:
+    """Unified logging system for all orchestrator components"""
+    
+    def __init__(self, component_name: str, log_dir: Path = None):
+        self.component_name = component_name
+        self.log_dir = log_dir or Path.cwd()
+        self.log_file = self.log_dir / f"{component_name}.log"
+        
+        # Ensure log directory exists
+        self.log_dir.mkdir(exist_ok=True)
+        
+        # Initialize log file with startup message
+        self._write_log(f"=== {component_name.upper()} STARTED ===")
+    
+    def _write_log(self, message: str, level: str = "INFO"):
+        """Write message to log file with timestamp"""
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        log_entry = f"[{timestamp}] [{level}] {message}\n"
+        
+        try:
+            with open(self.log_file, 'a', encoding='utf-8') as f:
+                f.write(log_entry)
+        except Exception as e:
+            # Fallback to stderr if log file writing fails
+            print(f"Log write failed: {e}", file=sys.stderr)
+    
+    def info(self, message: str):
+        """Log info message"""
+        self._write_log(message, "INFO")
+        print(f"[{self.component_name}] {message}")
+    
+    def error(self, message: str):
+        """Log error message"""
+        self._write_log(message, "ERROR")
+        print(f"[{self.component_name}] ERROR: {message}", file=sys.stderr)
+    
+    def warning(self, message: str):
+        """Log warning message"""
+        self._write_log(message, "WARNING")
+        print(f"[{self.component_name}] WARNING: {message}")
+    
+    def debug(self, message: str):
+        """Log debug message"""
+        self._write_log(message, "DEBUG")
+        print(f"[{self.component_name}] DEBUG: {message}")
+    
+    def shutdown(self):
+        """Log shutdown message"""
+        self._write_log(f"=== {self.component_name.upper()} SHUTDOWN ===")
+
+
 # Global state for concurrent operation tracking
 OPERATION_STATE = {
     'current_operation': None,  # 'idle', 'starting', 'continuing', 'cleaning'
@@ -68,12 +120,18 @@ class StatusHandler(BaseHTTPRequestHandler):
             project_root = Path(os.getcwd())
             self.project_root = project_root  # Store for later use
             self.status_reader = StatusReader(project_root=project_root)
-            print(f"[API] StatusHandler initialized successfully with project_root: {project_root.absolute()}")
+            
+            # Initialize orchestrator logger
+            self.api_logger = OrchestratorLogger("api-server")
+            self.api_logger.info(f"StatusHandler initialized successfully with project_root: {project_root.absolute()}")
         except Exception as e:
+            # Fallback to print if logger isn't initialized yet
             print(f"[API] Error initializing StatusReader: {e}")
             # Store project_root even if StatusReader fails
             self.project_root = Path(os.getcwd())
             self.status_reader = None
+            self.api_logger = OrchestratorLogger("api-server")
+            
         # Thread pool for non-blocking subprocess and file operations
         self._subprocess_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix='SubprocessPool')
         # Thread-safe logging and request tracking
@@ -185,6 +243,8 @@ class StatusHandler(BaseHTTPRequestHandler):
                 self._handle_gate_decision_request(parsed_url, request_id)
             elif parsed_url.path == '/api/execute':
                 self._handle_execute_request(parsed_url, request_id)
+            elif parsed_url.path == '/api/restart':
+                self._handle_restart_request(parsed_url, request_id)
             else:
                 self._send_error(404, 'Not Found')
                 self._log_request(request_id, f"POST {self.path} - 404 Not Found")
@@ -766,6 +826,138 @@ class StatusHandler(BaseHTTPRequestHandler):
             if command != 'status':
                 OPERATION_STATE['current_operation'] = 'idle'
     
+    def _handle_restart_request(self, parsed_url, request_id):
+        """Handle /api/restart endpoint - performs clear-ui + serve sequence"""
+        try:
+            self._log_request(request_id, f"Restart request: {parsed_url.path}")
+            
+            # Read request body for mode parameter
+            content_length = int(self.headers.get('Content-Length', 0))
+            mode = 'regular'  # Default mode
+            
+            if content_length > 0:
+                request_body = self.rfile.read(content_length).decode('utf-8')
+                try:
+                    restart_data = json.loads(request_body)
+                    mode = restart_data.get('mode', 'regular')
+                except json.JSONDecodeError:
+                    pass  # Use default mode if JSON parsing fails
+            
+            # Validate mode parameter
+            if mode not in ['regular', 'meta']:
+                self._send_error(400, 'Invalid mode parameter. Use "regular" or "meta".')
+                return
+            
+            print(f"[API Restart] Initiating system restart in {mode} mode")
+            
+            # Execute the restart sequence
+            result = self._execute_restart_sequence(mode)
+            
+            if result['success']:
+                self._send_json_response(result)
+            else:
+                self._send_error(500, result['error'])
+                
+        except Exception as e:
+            print(f"Error handling restart request: {e}")
+            self._send_error(500, 'Internal Server Error')
+    
+    def _execute_restart_sequence(self, mode):
+        """Execute clear-ui + serve restart sequence"""
+        try:
+            import subprocess
+            import time
+            
+            result_data = {
+                'success': True,
+                'mode': mode,
+                'timestamp': time.time(),
+                'message': 'System restart initiated'
+            }
+            
+            # Step 1: Kill any zombie orchestrator processes
+            print("[API Restart] Step 1: Killing zombie orchestrator processes...")
+            try:
+                kill_process = subprocess.run(['pkill', '-9', '-f', 'orchestrate.py'], 
+                                            capture_output=True, 
+                                            text=True, 
+                                            timeout=10)
+                print(f"[API Restart] Killed orchestrator processes (exit code: {kill_process.returncode})")
+            except Exception as e:
+                print(f"[API Restart] Warning: Could not kill orchestrator processes: {e}")
+                # Don't fail the restart for this - continue anyway
+            
+            # Step 2: Execute clear-ui command
+            print("[API Restart] Step 2: Executing clear-ui...")
+            clear_ui_cmd = [sys.executable, 'orchestrate.py', 'clear-ui']
+            
+            try:
+                process = subprocess.run(clear_ui_cmd, 
+                                       capture_output=True, 
+                                       text=True, 
+                                       timeout=30,
+                                       cwd=os.getcwd())
+                
+                if process.returncode != 0:
+                    return {
+                        'success': False,
+                        'error': f'Clear-UI failed: {process.stderr}',
+                        'step': 'clear-ui'
+                    }
+                    
+                print("[API Restart] Clear-UI completed successfully")
+                
+            except subprocess.TimeoutExpired:
+                return {
+                    'success': False,
+                    'error': 'Clear-UI command timed out',
+                    'step': 'clear-ui'
+                }
+            except Exception as e:
+                return {
+                    'success': False,
+                    'error': f'Clear-UI execution failed: {str(e)}',
+                    'step': 'clear-ui'
+                }
+            
+            # Step 3: Wait a moment for cleanup to complete
+            time.sleep(2)
+            
+            # Step 4: Start serve command in background
+            print("[API Restart] Step 3: Starting serve command...")
+            serve_cmd = [sys.executable, 'orchestrate.py', 'serve']
+            
+            try:
+                # Start serve as a detached background process
+                serve_process = subprocess.Popen(serve_cmd,
+                                               stdout=subprocess.DEVNULL,
+                                               stderr=subprocess.DEVNULL,
+                                               cwd=os.getcwd(),
+                                               start_new_session=True)  # Detach from current process
+                
+                print(f"[API Restart] Serve command started (PID: {serve_process.pid})")
+                
+                result_data.update({
+                    'message': 'System restart completed - new servers starting',
+                    'serve_pid': serve_process.pid,
+                    'steps_completed': ['kill-zombie-processes', 'clear-ui', 'serve-started']
+                })
+                
+            except Exception as e:
+                return {
+                    'success': False,
+                    'error': f'Serve command failed to start: {str(e)}',
+                    'step': 'serve'
+                }
+            
+            return result_data
+            
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f'Restart sequence failed: {str(e)}'
+            }
+    
     def log_message(self, format, *args):
         """Override to customize logging"""
         print(f"[{self.log_date_time_string()}] {format % args}")
@@ -781,6 +973,8 @@ class OrchestratorAPIServer:
         self.server = None
         self.server_thread = None
         self._running = False
+        # Initialize logger
+        self.api_logger = OrchestratorLogger("api-server")
     
     def start(self):
         """Start the API server"""
@@ -789,10 +983,10 @@ class OrchestratorAPIServer:
             try:
                 self.port = find_available_port(self.port)
             except OSError as e:
-                print(f"Error finding available port: {e}")
+                self.api_logger.error(f"Error finding available port: {e}")
                 return False
                 
-            print(f"[API Server] Initializing ThreadingHTTPServer on {self.host}:{self.port}")
+            self.api_logger.info(f"Initializing ThreadingHTTPServer on {self.host}:{self.port}")
             self.server = ThreadingHTTPServer((self.host, self.port), StatusHandler)
             
             # Configure server timeout and connection parameters
@@ -803,22 +997,23 @@ class OrchestratorAPIServer:
             if hasattr(self.server, 'daemon_threads'):
                 self.server.daemon_threads = True
             
-            print(f"[API Server] Configured timeout: {self.server.timeout}s")
+            self.api_logger.info(f"Configured timeout: {self.server.timeout}s")
             
             # Validate server was created successfully
             if not self.server:
-                print(f"[API Server] Failed to create ThreadingHTTPServer instance")
+                self.api_logger.error("Failed to create ThreadingHTTPServer instance")
                 return False
             
-            print(f"[API Server] HTTPServer created successfully")
+            self.api_logger.info("HTTPServer created successfully")
             self._running = True
             
-            print(f"Starting Claude Code Orchestrator API server on {self.host}:{self.port}")
-            print(f"Status endpoint: http://{self.host}:{self.port}/api/status")
-            print(f"Gate decision endpoint: http://{self.host}:{self.port}/api/gate-decision")
-            print(f"Command execution endpoint: http://{self.host}:{self.port}/api/execute")
-            print(f"With meta mode: http://{self.host}:{self.port}/api/status?mode=meta")
-            print("Press Ctrl+C to stop the server")
+            self.api_logger.info(f"Starting Claude Code Orchestrator API server on {self.host}:{self.port}")
+            self.api_logger.info(f"Status endpoint: http://{self.host}:{self.port}/api/status")
+            self.api_logger.info(f"Gate decision endpoint: http://{self.host}:{self.port}/api/gate-decision")
+            self.api_logger.info(f"Command execution endpoint: http://{self.host}:{self.port}/api/execute")
+            self.api_logger.info(f"System restart endpoint: http://{self.host}:{self.port}/api/restart")
+            self.api_logger.info(f"With meta mode: http://{self.host}:{self.port}/api/status?mode=meta")
+            self.api_logger.info("Press Ctrl+C to stop the server")
             
             # Set up signal handlers for graceful shutdown (only in main thread)
             if self.setup_signals:
@@ -830,20 +1025,20 @@ class OrchestratorAPIServer:
                 try:
                     webbrowser.open('http://localhost:5678/dashboard/index.html')
                 except Exception as e:
-                    print(f"Failed to open dashboard in browser: {e}")
+                    self.api_logger.error(f"Failed to open dashboard in browser: {e}")
             
             # Start server
-            print(f"[API Server] Starting serve_forever() on {self.host}:{self.port}")
+            self.api_logger.info(f"Starting serve_forever() on {self.host}:{self.port}")
             self.server.serve_forever()
             
         except OSError as e:
-            print(f"[API Server] OSError starting server: {e}")
+            self.api_logger.error(f"OSError starting server: {e}")
             if "Address already in use" in str(e):
-                print(f"Port {self.port} is already in use. Try a different port.")
+                self.api_logger.error(f"Port {self.port} is already in use. Try a different port.")
             self._running = False
             return False
         except Exception as e:
-            print(f"[API Server] Unexpected error starting server: {e}")
+            self.api_logger.error(f"Unexpected error starting server: {e}")
             self._running = False
             return False
         except KeyboardInterrupt:
@@ -886,6 +1081,7 @@ class OrchestratorAPIServer:
                 print(f"Status endpoint: http://{self.host}:{self.port}/api/status")
                 print(f"Gate decision endpoint: http://{self.host}:{self.port}/api/gate-decision")
                 print(f"Command execution endpoint: http://{self.host}:{self.port}/api/execute")
+                print(f"System restart endpoint: http://{self.host}:{self.port}/api/restart")
                 print(f"With meta mode: http://{self.host}:{self.port}/api/status?mode=meta")
                 
                 # Start server without signal handlers (background mode)
@@ -912,7 +1108,7 @@ class OrchestratorAPIServer:
     def stop(self):
         """Stop the API server"""
         if self.server:
-            print("\nShutting down server...")
+            self.api_logger.info("Shutting down server...")
             self._running = False
             self.server.shutdown()
             self.server.server_close()
@@ -920,6 +1116,7 @@ class OrchestratorAPIServer:
             if self.server_thread and self.server_thread.is_alive():
                 self.server_thread.join(timeout=2)
             
+            self.api_logger.shutdown()
             print("Server stopped")
     
     def _signal_handler(self, signum, frame):

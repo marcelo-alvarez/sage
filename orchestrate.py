@@ -27,6 +27,57 @@ from workflow_status import StatusReader, get_workflow_status
 from process_manager import ProcessManager
 
 
+class OrchestratorLogger:
+    """Unified logging system for all orchestrator components"""
+    
+    def __init__(self, component_name: str, log_dir: Path = None):
+        self.component_name = component_name
+        self.log_dir = log_dir or Path.cwd()
+        self.log_file = self.log_dir / f"{component_name}.log"
+        
+        # Ensure log directory exists
+        self.log_dir.mkdir(exist_ok=True)
+        
+        # Initialize log file with startup message
+        self._write_log(f"=== {component_name.upper()} STARTED ===")
+    
+    def _write_log(self, message: str, level: str = "INFO"):
+        """Write message to log file with timestamp"""
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        log_entry = f"[{timestamp}] [{level}] {message}\n"
+        
+        try:
+            with open(self.log_file, 'a', encoding='utf-8') as f:
+                f.write(log_entry)
+        except Exception as e:
+            # Fallback to stderr if log file writing fails
+            print(f"Log write failed: {e}", file=sys.stderr)
+    
+    def info(self, message: str):
+        """Log info message"""
+        self._write_log(message, "INFO")
+        print(f"[{self.component_name}] {message}")
+    
+    def error(self, message: str):
+        """Log error message"""
+        self._write_log(message, "ERROR")
+        print(f"[{self.component_name}] ERROR: {message}", file=sys.stderr)
+    
+    def warning(self, message: str):
+        """Log warning message"""
+        self._write_log(message, "WARNING")
+        print(f"[{self.component_name}] WARNING: {message}")
+    
+    def debug(self, message: str):
+        """Log debug message"""
+        self._write_log(message, "DEBUG")
+        print(f"[{self.component_name}] DEBUG: {message}")
+    
+    def shutdown(self):
+        """Log shutdown message"""
+        self._write_log(f"=== {self.component_name.upper()} SHUTDOWN ===")
+
+
 def find_available_port(start_port: int, max_attempts: int = 20) -> int:
     """Find an available port starting from start_port"""
     # Try the requested range first
@@ -2229,7 +2280,7 @@ CRITICAL REQUIREMENTS:
                 
         current_task = self._get_current_task()
         if current_task:
-            status_info += "\nCurrent task: " + current_task[:60] + "\n"
+            status_info += "\nCurrent task: " + current_task + "\n"
             
         # Write and display status
         self._write_and_display(status_info, "current-status.md", "status")
@@ -2287,7 +2338,7 @@ CRITICAL REQUIREMENTS:
                 
         current_task = self._get_current_task()
         if current_task:
-            status_info += "\nCurrent task: " + current_task[:60] + "\n"
+            status_info += "\nCurrent task: " + current_task + "\n"
             
         # Write status to file without displaying
         status_filepath = self.outputs_dir / "current-status.md"
@@ -2329,7 +2380,7 @@ CRITICAL REQUIREMENTS:
         
         current_task = self._get_current_task_raw()
         if current_task:
-            status_info += "\nCurrent task: " + current_task[:60] + "\n"
+            status_info += "\nCurrent task: " + current_task + "\n"
             
         # Write status to file
         status_filepath = self.outputs_dir / "current-status.md"
@@ -2860,6 +2911,10 @@ def clear_ui_command(args):
 def serve_command(args):
     """Start dashboard and API servers with health monitoring"""
     
+    # Initialize logger for serve command
+    serve_logger = OrchestratorLogger("orchestrator-serve")
+    serve_logger.info("Starting orchestrator serve command")
+    
     # Health check function
     def check_server_health(host, port, endpoint="/", timeout=5):
         try:
@@ -2874,15 +2929,15 @@ def serve_command(args):
     # Find available ports
     dashboard_port = find_available_port(5678, 20)
     if dashboard_port == 5678:
-        print(f"Dashboard server will use port {dashboard_port}")
+        serve_logger.info(f"Dashboard server will use port {dashboard_port}")
     else:
-        print(f"Port 5678 busy, using fallback port {dashboard_port}")
+        serve_logger.warning(f"Port 5678 busy, using fallback port {dashboard_port}")
     
     api_port = find_available_port(8000, 20)
     if api_port == 8000:
-        print(f"API server will use port {api_port}")
+        serve_logger.info(f"API server will use port {api_port}")
     else:
-        print(f"Port 8000 busy, using fallback port {api_port}")
+        serve_logger.warning(f"Port 8000 busy, using fallback port {api_port}")
     
     # Initialize process manager (check for meta mode via environment)
     meta_mode = os.getenv('CLAUDE_ORCHESTRATOR_META_MODE') == '1'
@@ -2902,23 +2957,23 @@ def serve_command(args):
                     
                 # Check dashboard health
                 if not check_server_health('localhost', dashboard_port):
-                    print(f"Warning: Dashboard server on port {dashboard_port} is unresponsive")
+                    serve_logger.warning(f"Dashboard server on port {dashboard_port} is unresponsive")
                 
                 # Check API server health if it's running
                 running_processes = process_manager.get_running_processes()
                 if 'api_server' in running_processes:
                     if not check_server_health('localhost', api_port, '/api/status'):
-                        print(f"Warning: API server on port {api_port} is unresponsive")
+                        serve_logger.warning(f"API server on port {api_port} is unresponsive")
                         
             except Exception as e:
                 if health_monitoring_active:
-                    print(f"Health check error: {e}")
+                    serve_logger.error(f"Health check error: {e}")
     
     def cleanup_and_exit(signal_num=None, frame=None):
         """Cleanup function for graceful shutdown"""
         nonlocal health_monitoring_active, health_check_thread
         
-        print("\nShutting down servers...")
+        serve_logger.info("Shutting down servers...")
         health_monitoring_active = False
         
         # Wait for health check thread to finish
@@ -2928,10 +2983,12 @@ def serve_command(args):
         # Cleanup all processes with shorter timeout for web servers
         success = process_manager.cleanup_all_processes(graceful_timeout=3, force_timeout=2)
         if success:
-            print("All servers stopped successfully")
+            serve_logger.info("All servers stopped successfully")
         else:
-            print("Warning: Some processes may not have terminated properly")
+            serve_logger.warning("Some processes may not have terminated properly")
         
+        # Log shutdown before exiting
+        serve_logger.shutdown()
         sys.exit(0 if success else 1)
     
     # Register signal handlers
@@ -2940,7 +2997,7 @@ def serve_command(args):
     
     try:
         # Start API server as subprocess using the real api_server.py
-        print(f"Starting API server on port {api_port}...")
+        serve_logger.info(f"Starting API server on port {api_port}...")
         orchestrator_dir = os.path.expanduser("~/.claude-orchestrator")
         api_script = os.path.join(orchestrator_dir, "api_server.py")
         api_cmd = [sys.executable, api_script, "--port", str(api_port), "--no-browser"]
@@ -2949,25 +3006,25 @@ def serve_command(args):
         current_dir = os.getcwd()
         api_process = subprocess.Popen(api_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=current_dir)
         process_manager.register_process('api_server', api_process)
-        print(f"API server registered (PID: {api_process.pid})")
+        serve_logger.info(f"API server registered (PID: {api_process.pid})")
         
         # Give API server time to start
         time.sleep(2)
         
         # Verify API server started
         if check_server_health('localhost', api_port, '/api/status'):
-            print(f"API server healthy on http://localhost:{api_port}")
+            serve_logger.info(f"API server healthy on http://localhost:{api_port}")
         else:
-            print(f"Warning: API server may not have started properly on port {api_port}")
+            serve_logger.warning(f"API server may not have started properly on port {api_port}")
         
         # Start health monitoring in background
         health_check_thread = threading.Thread(target=health_monitor, daemon=True)
         health_check_thread.start()
         
         # Start dashboard server in background first
-        print(f"Starting dashboard server on port {dashboard_port}...")
-        print("Press Ctrl+C to stop all servers")
-        print("-" * 50)
+        serve_logger.info(f"Starting dashboard server on port {dashboard_port}...")
+        serve_logger.info("Press Ctrl+C to stop all servers")
+        serve_logger.info("-" * 50)
         
         # Start dashboard server using local version to serve current directory files
         current_dir = os.getcwd()
@@ -2983,10 +3040,10 @@ def serve_command(args):
             sys.executable, dashboard_script, str(dashboard_port)
         ], cwd=current_dir)
         process_manager.register_process('dashboard_server', dashboard_process)
-        print(f"Dashboard server registered (PID: {dashboard_process.pid})")
+        serve_logger.info(f"Dashboard server registered (PID: {dashboard_process.pid})")
         
         # Wait for dashboard server to be ready to serve actual pages
-        print("Waiting for dashboard server to start...")
+        serve_logger.info("Waiting for dashboard server to start...")
         dashboard_ready = False
         
         # Give the subprocess time to actually start
@@ -3016,7 +3073,7 @@ def serve_command(args):
                         
                         if success_count == 3:
                             dashboard_ready = True
-                            print("Dashboard server is ready!")
+                            serve_logger.info("Dashboard server is ready!")
                             break
                 except (urllib.error.URLError, urllib.error.HTTPError, OSError):
                     pass
@@ -3026,23 +3083,21 @@ def serve_command(args):
             time.sleep(0.5)
         
         if not dashboard_ready:
-            print(f"Warning: Dashboard server may not have started properly on port {dashboard_port}")
+            serve_logger.warning(f"Dashboard server may not have started properly on port {dashboard_port}")
         
         # Open browser immediately once dashboard is confirmed ready
         dashboard_url = f"http://localhost:{dashboard_port}"
         if not args.no_browser and dashboard_ready:
-            print(f"Opening browser to {dashboard_url}")
+            serve_logger.info(f"Opening browser to {dashboard_url}")
             try:
                 webbrowser.open(dashboard_url)
-                print("Browser opened successfully")
+                serve_logger.info("Browser opened successfully")
             except Exception as e:
-                print(f"Could not open browser: {e}")
+                serve_logger.error(f"Could not open browser: {e}")
         
-        print(f"Dashboard available at: {dashboard_url}")
-        
-        print(f"Dashboard available at: {dashboard_url}")
-        print(f"Dashboard UI at: {dashboard_url}/dashboard.html") 
-        print(f"Health check at: {dashboard_url}/health")
+        serve_logger.info(f"Dashboard available at: {dashboard_url}")
+        serve_logger.info(f"Dashboard UI at: {dashboard_url}/dashboard.html") 
+        serve_logger.info(f"Health check at: {dashboard_url}/health")
         
         # Keep the main process alive and wait for signals
         try:
@@ -3057,7 +3112,7 @@ def serve_command(args):
     except KeyboardInterrupt:
         cleanup_and_exit()
     except Exception as e:
-        print(f"Error starting servers: {e}")
+        serve_logger.error(f"Error starting servers: {e}")
         cleanup_and_exit()
 
 

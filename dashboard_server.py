@@ -14,6 +14,58 @@ import json
 import socket
 import time
 from pathlib import Path
+from datetime import datetime
+
+
+class OrchestratorLogger:
+    """Unified logging system for all orchestrator components"""
+    
+    def __init__(self, component_name: str, log_dir: Path = None):
+        self.component_name = component_name
+        self.log_dir = log_dir or Path.cwd()
+        self.log_file = self.log_dir / f"{component_name}.log"
+        
+        # Ensure log directory exists
+        self.log_dir.mkdir(exist_ok=True)
+        
+        # Initialize log file with startup message
+        self._write_log(f"=== {component_name.upper()} STARTED ===")
+    
+    def _write_log(self, message: str, level: str = "INFO"):
+        """Write message to log file with timestamp"""
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        log_entry = f"[{timestamp}] [{level}] {message}\n"
+        
+        try:
+            with open(self.log_file, 'a', encoding='utf-8') as f:
+                f.write(log_entry)
+        except Exception as e:
+            # Fallback to stderr if log file writing fails
+            print(f"Log write failed: {e}", file=sys.stderr)
+    
+    def info(self, message: str):
+        """Log info message"""
+        self._write_log(message, "INFO")
+        print(f"[{self.component_name}] {message}")
+    
+    def error(self, message: str):
+        """Log error message"""
+        self._write_log(message, "ERROR")
+        print(f"[{self.component_name}] ERROR: {message}", file=sys.stderr)
+    
+    def warning(self, message: str):
+        """Log warning message"""
+        self._write_log(message, "WARNING")
+        print(f"[{self.component_name}] WARNING: {message}")
+    
+    def debug(self, message: str):
+        """Log debug message"""
+        self._write_log(message, "DEBUG")
+        print(f"[{self.component_name}] DEBUG: {message}")
+    
+    def shutdown(self):
+        """Log shutdown message"""
+        self._write_log(f"=== {self.component_name.upper()} SHUTDOWN ===")
 
 
 class DashboardHandler(http.server.SimpleHTTPRequestHandler):
@@ -38,6 +90,28 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 }
                 self.wfile.write(json.dumps(health_data).encode())
                 return
+            elif self.path.endswith('.log'):
+                # Serve log files from project root
+                log_filename = self.path[1:]  # Remove leading slash
+                log_file_path = Path.cwd() / log_filename
+                
+                if log_file_path.exists() and log_file_path.is_file():
+                    self.send_response(200)
+                    self.send_header('Content-type', 'text/plain; charset=utf-8')
+                    self.send_header('Cache-Control', 'no-cache')
+                    self.end_headers()
+                    
+                    with open(log_file_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        self.wfile.write(content.encode('utf-8'))
+                    return
+                else:
+                    # Log file not found
+                    self.send_response(404)
+                    self.send_header('Content-type', 'text/plain')
+                    self.end_headers()
+                    self.wfile.write(f'Log file not found: {log_filename}'.encode())
+                    return
             elif self.path == '/dashboard/index.html' or self.path == '/dashboard/':
                 # Serve dashboard.html when dashboard path is requested
                 self.path = '/dashboard.html'
@@ -91,11 +165,14 @@ def find_available_port(start_port, max_attempts=20):
 def start_dashboard_server(port=5678, host='localhost'):
     """Start the dashboard server on specified port"""
     
+    # Initialize logger
+    dashboard_logger = OrchestratorLogger("dashboard-server")
+    
     # Check if dashboard.html exists
     dashboard_file = Path(__file__).parent / 'dashboard.html'
     if not dashboard_file.exists():
-        print(f"Warning: dashboard.html not found at {dashboard_file}")
-        print("Dashboard will serve other files from the project root")
+        dashboard_logger.warning(f"dashboard.html not found at {dashboard_file}")
+        dashboard_logger.info("Dashboard will serve other files from the project root")
     
     try:
         # Allow socket reuse to prevent "Address already in use" errors
@@ -103,25 +180,26 @@ def start_dashboard_server(port=5678, host='localhost'):
             allow_reuse_address = True
         
         with ReusableTCPServer((host, port), DashboardHandler) as httpd:
-            print(f"Dashboard server started on {host}:{port}")
-            print(f"Dashboard server registered (PID: {os.getpid()})")
-            print(f"Dashboard available at: http://{host}:{port}")
+            dashboard_logger.info(f"Dashboard server started on {host}:{port}")
+            dashboard_logger.info(f"Dashboard server registered (PID: {os.getpid()})")
+            dashboard_logger.info(f"Dashboard available at: http://{host}:{port}")
             if dashboard_file.exists():
-                print(f"Dashboard UI at: http://{host}:{port}/dashboard.html")
-            print(f"Health check at: http://{host}:{port}/health")
+                dashboard_logger.info(f"Dashboard UI at: http://{host}:{port}/dashboard.html")
+            dashboard_logger.info(f"Health check at: http://{host}:{port}/health")
             
             # Start serving
             httpd.serve_forever()
             
     except OSError as e:
         if "Address already in use" in str(e):
-            print(f"Error: Port {port} is already in use")
+            dashboard_logger.error(f"Port {port} is already in use")
             return False
         else:
-            print(f"Error starting server: {e}")
+            dashboard_logger.error(f"Error starting server: {e}")
             return False
     except KeyboardInterrupt:
-        print("\nDashboard server stopped")
+        dashboard_logger.info("Dashboard server stopped")
+        dashboard_logger.shutdown()
         return True
 
 
