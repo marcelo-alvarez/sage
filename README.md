@@ -99,9 +99,41 @@ For step-by-step control within Claude Code conversations:
 /orchestrate status         # Check progress
 ```
 
-### Web UI (Coming Soon)
+#### 3. Web UI Interface
 
-A web-based user interface for the orchestrator is in development to provide a more intuitive way to manage workflows and tasks.
+Access the orchestrator through a web dashboard for real-time workflow monitoring and control:
+
+```bash
+# Start the web interface (dashboard port 5678, API port 8000)
+cc-orchestrate serve
+
+# Start in meta mode for orchestrator development
+cc-morchestrate serve
+
+# Server options
+cc-orchestrate serve --no-browser    # Don't open browser automatically
+```
+
+**Web UI Features:**
+- **Real-time Status Monitoring**: Live workflow progress with 30-second auto-refresh
+- **Gate Controls**: Interactive approve/modify buttons for criteria and completion gates
+- **File Viewer**: Browse and view all agent outputs (markdown with syntax highlighting)
+- **Meta Mode Support**: Visual indicators and mode-specific functionality
+- **Connection Monitoring**: Automatic retry logic with error handling and status indicators
+- **Command Execution**: Clean and continue operations directly from the interface
+
+**Server Management:**
+- **Automatic Port Resolution**: Falls back to alternative ports if default ports are busy
+- **Health Monitoring**: Continuous health checks every 30 seconds with status logging
+- **Graceful Shutdown**: Clean process termination with Ctrl+C
+- **Process Isolation**: Separate tracking for regular vs meta mode operations
+
+**Access URLs:**
+- Dashboard: `http://localhost:5678/dashboard.html`
+- API Status: `http://localhost:8000/api/status`
+- Health Check: `http://localhost:8000/api/health`
+
+The web interface provides a modern, responsive dashboard for managing orchestrator workflows without requiring command-line interaction.
 
 ## Execution Modes
 
