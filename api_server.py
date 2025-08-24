@@ -84,88 +84,150 @@ OPERATION_STATE = {
 }
 
 def find_available_port(start_port: int, max_attempts: int = 20) -> int:
-    """Find an available port starting from start_port"""
+    """Find an available port starting from start_port with better validation"""
+    tested_ports = []
+    
     # Try the requested range first
     for port in range(start_port, start_port + max_attempts):
+        tested_ports.append(port)
         try:
+            # Test both binding and connecting to be thorough
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock.settimeout(1)  # Short timeout to prevent hanging
                 sock.bind(('localhost', port))
+                
+                # Double-check port is truly available by attempting to connect
+                try:
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as test_sock:
+                        test_sock.settimeout(1)
+                        result = test_sock.connect_ex(('localhost', port))
+                        if result == 0:  # Connection successful means port is in use
+                            continue
+                except:
+                    pass  # Connection failed is what we want
+                
                 return port
-        except OSError:
+        except (OSError, socket.timeout):
             continue
     
     # If no ports in requested range, try higher range for API server
     if start_port == 8000:
         for port in range(9000, 9020):
+            tested_ports.append(port)
             try:
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    sock.settimeout(1)
                     sock.bind(('localhost', port))
+                    
+                    # Double-check port is truly available
+                    try:
+                        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as test_sock:
+                            test_sock.settimeout(1)
+                            result = test_sock.connect_ex(('localhost', port))
+                            if result == 0:
+                                continue
+                    except:
+                        pass
+                    
                     return port
-            except OSError:
+            except (OSError, socket.timeout):
                 continue
     
-    raise OSError(f"No available port found in range {start_port}-{start_port + max_attempts - 1}")
+    raise OSError(f"No available port found. Tested ports: {tested_ports}")
 
 
+
+class SharedResourceManager:
+    """Singleton manager for shared resources across all request handlers"""
+    _instance = None
+    _lock = threading.Lock()
+    
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
+        return cls._instance
+    
+    def initialize(self, project_root=None):
+        """Initialize shared resources once"""
+        if self._initialized:
+            return
+            
+        with self._lock:
+            if self._initialized:
+                return
+                
+            self.project_root = project_root or Path(os.getcwd())
+            
+            # Single shared status reader
+            try:
+                self.status_reader = StatusReader(project_root=self.project_root)
+            except Exception as e:
+                print(f"[API] Error initializing shared StatusReader: {e}")
+                self.status_reader = None
+            
+            # Single shared thread pool for ALL requests
+            self.subprocess_executor = ThreadPoolExecutor(
+                max_workers=4,
+                thread_name_prefix='SharedSubprocessPool'
+            )
+            
+            # Single shared logger for the API server
+            self.api_logger = OrchestratorLogger("api-server")
+            
+            self._initialized = True
+            print(f"[API] Shared resources initialized for project: {self.project_root}")
+    
+    def cleanup(self):
+        """Clean up shared resources on shutdown"""
+        if hasattr(self, 'subprocess_executor'):
+            self.subprocess_executor.shutdown(wait=True)
+        if hasattr(self, 'api_logger'):
+            self.api_logger.shutdown()
+        print("[API] Shared resources cleaned up")
 
 
 class StatusHandler(BaseHTTPRequestHandler):
     """HTTP request handler for status endpoint"""
     
     def __init__(self, *args, **kwargs):
-        try:
-            # Get project root from current working directory (set by subprocess cwd parameter)
-            project_root = Path(os.getcwd())
-            self.project_root = project_root  # Store for later use
-            self.status_reader = StatusReader(project_root=project_root)
-            
-            # Initialize orchestrator logger
-            self.api_logger = OrchestratorLogger("api-server")
-            self.api_logger.info(f"StatusHandler initialized successfully with project_root: {project_root.absolute()}")
-        except Exception as e:
-            # Fallback to print if logger isn't initialized yet
-            print(f"[API] Error initializing StatusReader: {e}")
-            # Store project_root even if StatusReader fails
-            self.project_root = Path(os.getcwd())
-            self.status_reader = None
-            self.api_logger = OrchestratorLogger("api-server")
-            
-        # Thread pool for non-blocking subprocess and file operations
-        self._subprocess_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix='SubprocessPool')
-        # Thread-safe logging and request tracking
-        self._setup_thread_safe_logging()
+        # Get shared resource manager instance
+        self.shared = SharedResourceManager()
+        
+        # Use shared resources
+        self.project_root = self.shared.project_root
+        self.status_reader = self.shared.status_reader
+        self._subprocess_executor = self.shared.subprocess_executor
+        self.api_logger = self.shared.api_logger
+        
+        # Request-specific lock (lightweight)
         self._request_lock = threading.RLock()
+        
+        # Call parent constructor
         super().__init__(*args, **kwargs)
+    
+    def finish(self):
+        """Clean up request-specific resources"""
+        try:
+            # Clean up any request-specific resources
+            # (Don't touch shared resources here!)
+            super().finish()
+        except Exception as e:
+            print(f"[API] Error during request cleanup: {e}")
 
-    def _setup_thread_safe_logging(self):
-        """Configure thread-safe logging for concurrent operations"""
-        # Configure logger with thread-safe handler
-        self.logger = logging.getLogger(f'APIServer_{id(self)}')
-        self.logger.setLevel(logging.INFO)
-        
-        # Clear existing handlers to avoid duplicates
-        self.logger.handlers.clear()
-        
-        # Create thread-safe console handler
-        handler = logging.StreamHandler()
-        handler.setLevel(logging.INFO)
-        
-        # Format with thread information for debugging
-        formatter = logging.Formatter(
-            '[%(asctime)s] [%(thread)d-%(threadName)s] [%(name)s] %(message)s'
-        )
-        handler.setFormatter(formatter)
-        
-        self.logger.addHandler(handler)
-        self.logger.propagate = False  # Prevent duplicate logs
 
     def _log_request(self, request_id, message, level='info'):
         """Thread-safe logging with request ID tracking"""
         with self._request_lock:
             log_message = f"[{request_id}] {message}"
-            getattr(self.logger, level)(log_message)
+            if self.api_logger:
+                getattr(self.api_logger, level)(log_message)
+            else:
+                print(log_message)
 
     def _run_subprocess_safely(self, cmd, timeout=15):
         """Run subprocess in thread pool to prevent blocking other requests"""
@@ -863,10 +925,33 @@ class StatusHandler(BaseHTTPRequestHandler):
             self._send_error(500, 'Internal Server Error')
     
     def _execute_restart_sequence(self, mode):
-        """Execute clear-ui + serve restart sequence"""
+        """Execute clear-ui + serve restart sequence with safeguards"""
         try:
             import subprocess
             import time
+            
+            # Check if we're already in a restart loop to prevent infinite cycles
+            restart_lock_file = Path('/tmp/orchestrator_restart_lock')
+            if restart_lock_file.exists():
+                try:
+                    # Check if lock is stale (older than 5 minutes)
+                    lock_time = restart_lock_file.stat().st_mtime
+                    if time.time() - lock_time < 300:  # 5 minutes
+                        return {
+                            'success': False,
+                            'error': 'Restart already in progress or recent restart detected. Please wait.'
+                        }
+                    else:
+                        # Remove stale lock
+                        restart_lock_file.unlink()
+                except Exception as e:
+                    print(f"Lock file check failed: {e}")
+            
+            # Create restart lock
+            try:
+                restart_lock_file.touch()
+            except Exception as e:
+                print(f"Could not create restart lock: {e}")
             
             result_data = {
                 'success': True,
@@ -944,11 +1029,22 @@ class StatusHandler(BaseHTTPRequestHandler):
                 })
                 
             except Exception as e:
+                # Clean up restart lock on failure
+                try:
+                    restart_lock_file.unlink()
+                except:
+                    pass
                 return {
                     'success': False,
                     'error': f'Serve command failed to start: {str(e)}',
                     'step': 'serve'
                 }
+            
+            # Clean up restart lock after successful restart
+            try:
+                restart_lock_file.unlink()
+            except Exception as e:
+                print(f"Could not remove restart lock: {e}")
             
             return result_data
             
@@ -979,21 +1075,46 @@ class OrchestratorAPIServer:
     def start(self):
         """Start the API server"""
         try:
+            # Check for existing API server process on this port to prevent duplicates
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as test_sock:
+                    test_sock.settimeout(2)
+                    result = test_sock.connect_ex(('localhost', self.port))
+                    if result == 0:
+                        # Port is already in use, try to determine if it's our API server
+                        try:
+                            import urllib.request
+                            response = urllib.request.urlopen(f'http://localhost:{self.port}/api/health', timeout=3)
+                            if response.getcode() == 200:
+                                self.api_logger.warning(f"API server already running on port {self.port} - exiting to prevent duplicate")
+                                return False
+                        except Exception:
+                            # Port in use but not responding to health check - may be stale process
+                            self.api_logger.warning(f"Port {self.port} in use by unresponsive process, attempting to find alternative port")
+            except Exception as e:
+                self.api_logger.debug(f"Port check failed: {e}")
+                
             # Find available port
             try:
                 self.port = find_available_port(self.port)
             except OSError as e:
                 self.api_logger.error(f"Error finding available port: {e}")
                 return False
+            
+            # Initialize shared resources ONCE before creating server
+            shared_manager = SharedResourceManager()
+            shared_manager.initialize(project_root=Path(os.getcwd()))
                 
             self.api_logger.info(f"Initializing ThreadingHTTPServer on {self.host}:{self.port}")
+            
+            # Create server with connection limits
             self.server = ThreadingHTTPServer((self.host, self.port), StatusHandler)
             
-            # Configure server timeout and connection parameters
-            self.server.timeout = 30.0  # 30 second request timeout
+            # Configure server for better resource management
+            self.server.timeout = 30.0
             self.server.allow_reuse_address = True
+            self.server.request_queue_size = 10  # Limit pending connections
             
-            # Configure threading parameters for connection pooling
             if hasattr(self.server, 'daemon_threads'):
                 self.server.daemon_threads = True
             
@@ -1110,11 +1231,29 @@ class OrchestratorAPIServer:
         if self.server:
             self.api_logger.info("Shutting down server...")
             self._running = False
-            self.server.shutdown()
-            self.server.server_close()
+            
+            # Set longer timeout for graceful shutdown
+            try:
+                self.server.shutdown()
+                self.server.server_close()
+            except Exception as e:
+                self.api_logger.error(f"Error during server shutdown: {e}")
             
             if self.server_thread and self.server_thread.is_alive():
-                self.server_thread.join(timeout=2)
+                self.server_thread.join(timeout=5)  # Increased timeout
+                if self.server_thread.is_alive():
+                    self.api_logger.warning("Server thread did not terminate gracefully")
+            
+            # Clean up shared resources
+            shared_manager = SharedResourceManager()
+            shared_manager.cleanup()
+            
+            # Clean up any remaining resources
+            try:
+                if hasattr(self.server, 'socket') and self.server.socket:
+                    self.server.socket.close()
+            except Exception as e:
+                self.api_logger.debug(f"Socket cleanup error: {e}")
             
             self.api_logger.shutdown()
             print("Server stopped")
@@ -1140,6 +1279,25 @@ def main():
     parser.add_argument('--no-browser', action='store_true', help='Do not automatically open browser')
     
     args = parser.parse_args()
+    
+    # Early deduplication check before any initialization
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as test_sock:
+            test_sock.settimeout(2)
+            result = test_sock.connect_ex((args.host, args.port))
+            if result == 0:
+                # Port is already in use, check if it's our API server
+                try:
+                    import urllib.request
+                    response = urllib.request.urlopen(f'http://{args.host}:{args.port}/api/health', timeout=3)
+                    if response.getcode() == 200:
+                        print(f"API server already running on {args.host}:{args.port} - exiting to prevent duplicate")
+                        sys.exit(0)
+                except Exception:
+                    # Port in use but not responding to health check
+                    print(f"Port {args.port} in use by unresponsive process")
+    except Exception as e:
+        pass  # Continue with normal startup
     
     server = OrchestratorAPIServer(port=args.port, host=args.host)
     
