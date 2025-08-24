@@ -8,6 +8,7 @@ set -e
 # Default values
 PROJECT_DIR=""
 LOCAL_COMMAND_ONLY=false
+LOCAL_INSTALL=false
 TEMP_DIR=""
 BRANCH="main"
 
@@ -37,7 +38,7 @@ print_warning() {
 
 # Cleanup function
 cleanup() {
-    if [ -n "$TEMP_DIR" ] && [ -d "$TEMP_DIR" ]; then
+    if [ -n "$TEMP_DIR" ] && [ -d "$TEMP_DIR" ] && [ "$LOCAL_INSTALL" != true ]; then
         print_info "Cleaning up temporary files..."
         rm -rf "$TEMP_DIR"
     fi
@@ -53,6 +54,7 @@ show_usage() {
     echo "Options:"
     echo "  --project-dir DIR    Initialize project files in specific directory (default: current directory)"
     echo "  --branch BRANCH      Install from specific branch (default: main)"
+    echo "  --local              Install from current directory instead of downloading from GitHub"
     echo "  --local-command      Install slash command locally in project instead of globally"
     echo "  --help              Show this help message"
     echo ""
@@ -73,6 +75,9 @@ show_usage() {
     echo ""
     echo "  # Install from specific branch"
     echo "  ./install.sh --branch feature/web-dashboard"
+    echo ""
+    echo "  # Install from current directory (for development)"
+    echo "  ./install.sh --local"
 }
 
 # Parse command line arguments
@@ -85,6 +90,10 @@ while [[ $# -gt 0 ]]; do
         --branch)
             BRANCH="$2"
             shift 2
+            ;;
+        --local)
+            LOCAL_INSTALL=true
+            shift
             ;;
         --local-command)
             LOCAL_COMMAND_ONLY=true
@@ -146,17 +155,38 @@ validate_target_directory() {
     print_success "Target directory validated"
 }
 
-# Clone repository to temporary directory
+# Clone repository to temporary directory or use current directory
 clone_repository() {
-    print_info "Downloading Claude Orchestrator from branch: $BRANCH"
-    
-    TEMP_DIR=$(mktemp -d)
-    git clone --quiet --branch "$BRANCH" https://github.com/marcelo-alvarez/claude-orchestrator.git "$TEMP_DIR" || {
-        print_error "Failed to clone repository from branch: $BRANCH"
-        exit 1
-    }
-    
-    print_success "Repository downloaded to temporary directory"
+    if [ "$LOCAL_INSTALL" = true ]; then
+        print_info "Using current directory for local installation"
+        
+        # Check if we're in a valid orchestrator directory
+        if [ ! -f "orchestrate.py" ] || [ ! -d "templates" ]; then
+            print_error "Current directory doesn't appear to be a Claude Orchestrator repository"
+            print_error "Missing required files: orchestrate.py or templates/ directory"
+            print_error "Make sure you're running this script from the root of the claude-orchestrator repository"
+            exit 1
+        fi
+        
+        # Check for missing files that might be needed
+        if [ ! -f "process_manager.py" ]; then
+            print_warning "process_manager.py not found - some features may not work correctly"
+        fi
+        
+        # Use current directory as source
+        TEMP_DIR="$(pwd)"
+        print_success "Using local directory as source"
+    else
+        print_info "Downloading Claude Orchestrator from branch: $BRANCH"
+        
+        TEMP_DIR=$(mktemp -d)
+        git clone --quiet --branch "$BRANCH" https://github.com/marcelo-alvarez/claude-orchestrator.git "$TEMP_DIR" || {
+            print_error "Failed to clone repository from branch: $BRANCH"
+            exit 1
+        }
+        
+        print_success "Repository downloaded to temporary directory"
+    fi
 }
 
 # Install orchestrator runtime globally
@@ -169,6 +199,36 @@ install_orchestrator_runtime() {
     
     # Copy main orchestrator script
     cp "$TEMP_DIR/orchestrate.py" "$runtime_dir/orchestrate.py"
+    
+    # Copy process manager if it exists
+    if [ -f "$TEMP_DIR/process_manager.py" ]; then
+        cp "$TEMP_DIR/process_manager.py" "$runtime_dir/process_manager.py"
+    fi
+    
+    # Copy dashboard server files if they exist
+    if [ -f "$TEMP_DIR/dashboard_server.py" ]; then
+        cp "$TEMP_DIR/dashboard_server.py" "$runtime_dir/dashboard_server.py"
+    fi
+    
+    if [ -f "$TEMP_DIR/api_server.py" ]; then
+        cp "$TEMP_DIR/api_server.py" "$runtime_dir/api_server.py"
+    fi
+    
+    if [ -f "$TEMP_DIR/dashboard.html" ]; then
+        cp "$TEMP_DIR/dashboard.html" "$runtime_dir/dashboard.html"
+    fi
+    
+    # Copy cc-orchestrate executable if it exists
+    if [ -f "$TEMP_DIR/cc-orchestrate" ]; then
+        cp "$TEMP_DIR/cc-orchestrate" "$runtime_dir/cc-orchestrate"
+        chmod +x "$runtime_dir/cc-orchestrate"
+    fi
+    
+    # Copy cc-morchestrate executable if it exists
+    if [ -f "$TEMP_DIR/cc-morchestrate" ]; then
+        cp "$TEMP_DIR/cc-morchestrate" "$runtime_dir/cc-morchestrate"
+        chmod +x "$runtime_dir/cc-morchestrate"
+    fi
     
     # The orchestrate.py file is already configured for global installation
     # No path modifications needed
@@ -307,23 +367,43 @@ create_wrapper_executable() {
     # Create the wrapper directory
     mkdir -p "$wrapper_dir"
     
-    # Create the wrapper script
-    cat > "$wrapper_dir/cc-orchestrate" << 'EOF'
+    # Create the wrapper scripts - use our Python scripts if available, otherwise fallback to bash wrappers
+    if [ -f "$HOME/.claude-orchestrator/cc-orchestrate" ]; then
+        # Use the Python cc-orchestrate script
+        cp "$HOME/.claude-orchestrator/cc-orchestrate" "$wrapper_dir/cc-orchestrate"
+        chmod +x "$wrapper_dir/cc-orchestrate"
+    else
+        # Fallback to bash wrapper for backward compatibility
+        cat > "$wrapper_dir/cc-orchestrate" << 'EOF'
 #!/bin/bash
 # Claude Code Orchestrator wrapper
 exec python3 "$HOME/.claude-orchestrator/orchestrate.py" "$@"
 EOF
+        chmod +x "$wrapper_dir/cc-orchestrate"
+    fi
     
-    # Make wrapper executable
-    chmod +x "$wrapper_dir/cc-orchestrate"
-    
-    print_success "cc-orchestrate command created in $wrapper_dir"
-    
-    # Check if it's immediately available
-    if command -v cc-orchestrate &> /dev/null; then
-        print_success "cc-orchestrate command is available in PATH"
+    # Create cc-morchestrate wrapper
+    if [ -f "$HOME/.claude-orchestrator/cc-morchestrate" ]; then
+        # Use the Python cc-morchestrate script
+        cp "$HOME/.claude-orchestrator/cc-morchestrate" "$wrapper_dir/cc-morchestrate"
+        chmod +x "$wrapper_dir/cc-morchestrate"
     else
-        print_info "cc-orchestrate will be available after restarting your terminal"
+        # Fallback to bash wrapper for backward compatibility
+        cat > "$wrapper_dir/cc-morchestrate" << 'EOF'
+#!/bin/bash
+# Claude Code Orchestrator Meta Mode wrapper
+exec python3 "$HOME/.claude-orchestrator/orchestrate.py" "$@" meta
+EOF
+        chmod +x "$wrapper_dir/cc-morchestrate"
+    fi
+    
+    print_success "cc-orchestrate and cc-morchestrate commands created in $wrapper_dir"
+    
+    # Check if they're immediately available
+    if command -v cc-orchestrate &> /dev/null && command -v cc-morchestrate &> /dev/null; then
+        print_success "cc-orchestrate and cc-morchestrate commands are available in PATH"
+    else
+        print_info "Commands will be available after restarting your terminal"
         print_info "Or run: export PATH=\"$wrapper_dir:\$PATH\""
     fi
 }
@@ -367,6 +447,8 @@ print_summary() {
     echo "   Terminal: cc-orchestrate bootstrap     # Generate initial tasks"
     echo "   Terminal: cc-orchestrate continue      # Run workflow (headless)"
     echo "   Terminal: cc-orchestrate interactive   # Interactive mode with gates"
+    echo "   Terminal: cc-orchestrate serve         # Start dashboard server"
+    echo "   Terminal: cc-orchestrate stop          # Stop all orchestrator processes"
     echo ""
     if [ -n "$PROJECT_DIR" ]; then
         echo "   Or add tasks manually to: $PROJECT_DIR/.claude/tasks-checklist.md"
@@ -377,6 +459,7 @@ print_summary() {
     echo ""
     echo "📖 Available commands:"
     echo "   Workflow: start, continue, status, clean, complete, fail, bootstrap"
+    echo "   Server: serve, stop"
     echo "   Gates: approve-criteria, modify-criteria, retry-explorer"
     echo "            approve-completion, retry-from-planner, retry-from-coder, retry-from-verifier"
     echo "   Mode: unsupervised, supervised"

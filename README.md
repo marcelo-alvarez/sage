@@ -99,7 +99,43 @@ For step-by-step control within Claude Code conversations:
 /orchestrate status         # Check progress
 ```
 
-### Execution Modes
+#### 3. Web UI Interface
+
+Access the orchestrator through a web dashboard for real-time workflow monitoring and control:
+
+```bash
+# Start the web interface (dashboard port 5678, API port 8000)
+cc-orchestrate serve
+
+# Start in meta mode for orchestrator development
+cc-morchestrate serve
+
+# Server options
+cc-orchestrate serve --no-browser    # Don't open browser automatically
+```
+
+**Web UI Features:**
+- **Real-time Status Monitoring**: Live workflow progress with 30-second auto-refresh
+- **Gate Controls**: Interactive approve/modify buttons for criteria and completion gates
+- **File Viewer**: Browse and view all agent outputs (markdown with syntax highlighting)
+- **Meta Mode Support**: Visual indicators and mode-specific functionality
+- **Connection Monitoring**: Automatic retry logic with error handling and status indicators
+- **Command Execution**: Clean and continue operations directly from the interface
+
+**Server Management:**
+- **Automatic Port Resolution**: Falls back to alternative ports if default ports are busy
+- **Health Monitoring**: Continuous health checks every 30 seconds with status logging
+- **Graceful Shutdown**: Clean process termination with Ctrl+C
+- **Process Isolation**: Separate tracking for regular vs meta mode operations
+
+**Access URLs:**
+- Dashboard: `http://localhost:5678/dashboard.html`
+- API Status: `http://localhost:8000/api/status`
+- Health Check: `http://localhost:8000/api/health`
+
+The web interface provides a modern, responsive dashboard for managing orchestrator workflows without requiring command-line interaction.
+
+## Execution Modes
 
 #### Headless Mode (Default for Command Line)
 - **How it works**: Executes agents automatically using `claude -p` until reaching gates
@@ -169,8 +205,25 @@ your-project/              # Must be current working directory when running cc-o
 ```
 
 ### Global Commands
-- `cc-orchestrate` - Command line executable (in PATH)
-- `/orchestrate` - Claude Code slash command (in ~/.claude/commands/)
+
+#### Regular Mode
+- `cc-orchestrate` - Command line executable for regular orchestration
+- `/orchestrate` - Claude Code slash command for regular mode
+
+#### Meta Mode  
+- `cc-morchestrate` - Command line executable for meta mode orchestration
+- `/morchestrate` - Claude Code slash command for meta mode
+
+**Key Differences:**
+- **Regular mode** operates on `.agent-outputs/` and `.claude/` directories
+- **Meta mode** operates on `.agent-outputs-meta/` and `.claude-meta/` directories  
+- **Process isolation**: `cc-orchestrate stop` kills regular processes, `cc-morchestrate stop` kills meta processes
+- **Development safety**: Meta mode verifiers can safely test `cc-orchestrate stop` without self-termination
+
+**When to use meta mode:**
+- Developing/testing the orchestrator itself
+- Running orchestration workflows that need isolation from main development
+- Testing process management features safely
 
 ## Workflow Phases
 
@@ -206,6 +259,31 @@ cc-orchestrate unsupervised   # Enable auto-approval
 cc-orchestrate supervised      # Disable auto-approval (default)
 ```
 
+### Server Commands
+
+Start dashboard and API servers with health monitoring:
+
+```bash
+# Start dashboard (port 5678) and API (port 8000) servers
+cc-orchestrate serve
+
+# Start in meta mode (uses different process tracking)
+cc-morchestrate serve
+
+# Stop all orchestrator processes
+cc-orchestrate stop      # Stops regular mode processes
+cc-morchestrate stop     # Stops meta mode processes
+
+# Server options
+cc-orchestrate serve --no-browser    # Don't open browser automatically
+```
+
+**Server Features:**
+- Automatic port conflict resolution (tries alternative ports)
+- Health monitoring every 30 seconds
+- Graceful shutdown with Ctrl+C
+- ProcessManager integration for clean process tracking
+
 ### Meta-Orchestration
 
 For developing the orchestrator itself, use meta mode to isolate test runs:
@@ -214,6 +292,7 @@ For developing the orchestrator itself, use meta mode to isolate test runs:
 # Run in isolated meta mode
 /morchestrate start       # Uses .agent-outputs-meta/
 /morchestrate continue    # Continues meta workflow
+cc-morchestrate continue  # Command line meta mode
 ```
 
 ### Persistent Interactive Mode

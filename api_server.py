@@ -6,7 +6,7 @@ Provides HTTP endpoint for workflow status retrieval
 
 import json
 import re
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import HTTPServer, BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 import sys
@@ -17,220 +17,304 @@ import subprocess
 import os
 import webbrowser
 import socket
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+from workflow_status import StatusReader, get_workflow_status
+import uuid
+import logging
+from datetime import datetime
+# ClaudeCodeOrchestrator now run in separate process via subprocess
 
+
+class OrchestratorLogger:
+    """Unified logging system for all orchestrator components"""
+    
+    def __init__(self, component_name: str, log_dir: Path = None):
+        self.component_name = component_name
+        self.log_dir = log_dir or Path.cwd()
+        self.log_file = self.log_dir / f"{component_name}.log"
+        
+        # Ensure log directory exists
+        self.log_dir.mkdir(exist_ok=True)
+        
+        # Initialize log file with startup message
+        self._write_log(f"=== {component_name.upper()} STARTED ===")
+    
+    def _write_log(self, message: str, level: str = "INFO"):
+        """Write message to log file with timestamp"""
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        log_entry = f"[{timestamp}] [{level}] {message}\n"
+        
+        try:
+            with open(self.log_file, 'a', encoding='utf-8') as f:
+                f.write(log_entry)
+        except Exception as e:
+            # Fallback to stderr if log file writing fails
+            print(f"Log write failed: {e}", file=sys.stderr)
+    
+    def info(self, message: str):
+        """Log info message"""
+        self._write_log(message, "INFO")
+        print(f"[{self.component_name}] {message}")
+    
+    def error(self, message: str):
+        """Log error message"""
+        self._write_log(message, "ERROR")
+        print(f"[{self.component_name}] ERROR: {message}", file=sys.stderr)
+    
+    def warning(self, message: str):
+        """Log warning message"""
+        self._write_log(message, "WARNING")
+        print(f"[{self.component_name}] WARNING: {message}")
+    
+    def debug(self, message: str):
+        """Log debug message"""
+        self._write_log(message, "DEBUG")
+        print(f"[{self.component_name}] DEBUG: {message}")
+    
+    def shutdown(self):
+        """Log shutdown message"""
+        self._write_log(f"=== {self.component_name.upper()} SHUTDOWN ===")
+
+
+# Global state for concurrent operation tracking
+OPERATION_STATE = {
+    'current_operation': None,  # 'idle', 'starting', 'continuing', 'cleaning'
+    'start_time': None,
+    'pid': None
+}
 
 def find_available_port(start_port: int, max_attempts: int = 20) -> int:
-    """Find an available port starting from start_port"""
+    """Find an available port starting from start_port with better validation"""
+    tested_ports = []
+    
     # Try the requested range first
     for port in range(start_port, start_port + max_attempts):
+        tested_ports.append(port)
         try:
+            # Test both binding and connecting to be thorough
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock.settimeout(1)  # Short timeout to prevent hanging
                 sock.bind(('localhost', port))
+                
+                # Double-check port is truly available by attempting to connect
+                try:
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as test_sock:
+                        test_sock.settimeout(1)
+                        result = test_sock.connect_ex(('localhost', port))
+                        if result == 0:  # Connection successful means port is in use
+                            continue
+                except:
+                    pass  # Connection failed is what we want
+                
                 return port
-        except OSError:
+        except (OSError, socket.timeout):
             continue
     
     # If no ports in requested range, try higher range for API server
     if start_port == 8000:
         for port in range(9000, 9020):
+            tested_ports.append(port)
             try:
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    sock.settimeout(1)
                     sock.bind(('localhost', port))
+                    
+                    # Double-check port is truly available
+                    try:
+                        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as test_sock:
+                            test_sock.settimeout(1)
+                            result = test_sock.connect_ex(('localhost', port))
+                            if result == 0:
+                                continue
+                    except:
+                        pass
+                    
                     return port
-            except OSError:
+            except (OSError, socket.timeout):
                 continue
     
-    raise OSError(f"No available port found in range {start_port}-{start_port + max_attempts - 1}")
+    raise OSError(f"No available port found. Tested ports: {tested_ports}")
 
 
-class StatusReader:
-    """Reads and parses workflow status from orchestrator files"""
+
+class SharedResourceManager:
+    """Singleton manager for shared resources across all request handlers"""
+    _instance = None
+    _lock = threading.Lock()
     
-    def __init__(self):
-        self.status_emoji_map = {
-            '⏳': 'pending',
-            '✅': 'completed',
-            '✓': 'completed',
-            '🔄': 'in-progress'
-        }
-        
-    def read_status(self, mode='regular'):
-        """Read workflow status from appropriate directory"""
-        outputs_dir = '.agent-outputs-meta' if mode == 'meta' else '.agent-outputs'
-        status_file = Path(outputs_dir) / 'current-status.md'
-        
-        print(f"[StatusReader] Reading status for mode '{mode}' from {status_file}")
-        
-        try:
-            if not status_file.exists():
-                print(f"[StatusReader] Status file does not exist: {status_file}")
-                return self._get_default_status()
-                
-            with open(status_file, 'r', encoding='utf-8') as f:
-                content = f.read()
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
+        return cls._instance
+    
+    def initialize(self, project_root=None):
+        """Initialize shared resources once"""
+        if self._initialized:
+            return
             
-            print(f"[StatusReader] Read {len(content)} characters from status file")
-            
-            if not content.strip():
-                print(f"[StatusReader] Status file is empty, using default status")
-                return self._get_default_status()
+        with self._lock:
+            if self._initialized:
+                return
                 
-            parsed_status = self._parse_status_content(content)
-            print(f"[StatusReader] Successfully parsed status with {len(parsed_status.get('workflow', []))} workflow items")
-            return parsed_status
+            self.project_root = project_root or Path(os.getcwd())
             
-        except Exception as e:
-            print(f"[StatusReader] Error reading status file {status_file}: {e}")
-            return self._get_default_status()
+            # Single shared status reader
+            try:
+                self.status_reader = StatusReader(project_root=self.project_root)
+            except Exception as e:
+                print(f"[API] Error initializing shared StatusReader: {e}")
+                self.status_reader = None
+            
+            # Single shared thread pool for ALL requests
+            self.subprocess_executor = ThreadPoolExecutor(
+                max_workers=4,
+                thread_name_prefix='SharedSubprocessPool'
+            )
+            
+            # Single shared logger for the API server
+            self.api_logger = OrchestratorLogger("api-server")
+            
+            self._initialized = True
+            print(f"[API] Shared resources initialized for project: {self.project_root}")
     
-    def _parse_status_content(self, content):
-        """Parse markdown status content into structured data"""
-        lines = content.strip().split('\n')
-        
-        # Extract current task (last non-empty line usually)
-        current_task = "No task specified"
-        for line in reversed(lines):
-            line = line.strip()
-            if line and not line.startswith('#') and not line.startswith('⏳') and not line.startswith('✅') and not line.startswith('🔄'):
-                if line.startswith('Current task:'):
-                    current_task = line.replace('Current task:', '').strip()
-                    break
-                elif not any(emoji in line for emoji in self.status_emoji_map.keys()):
-                    current_task = line
-                    break
-        
-        # Parse workflow steps
-        workflow = []
-        agents = []
-        
-        for line in lines:
-            line = line.strip()
-            if not line or line.startswith('#'):
-                continue
-                
-            # Look for status lines with emojis
-            for emoji, status in self.status_emoji_map.items():
-                if line.startswith(emoji):
-                    agent_name = line.replace(emoji, '').strip()
-                    
-                    # Determine agent type
-                    agent_type = 'gate' if 'gate' in agent_name.lower() else 'agent'
-                    
-                    # Add to workflow
-                    workflow_item = {
-                        'name': agent_name,
-                        'status': status,
-                        'type': agent_type,
-                        'icon': self._get_agent_icon(agent_name)
-                    }
-                    workflow.append(workflow_item)
-                    
-                    # Add to agents if not a gate
-                    if agent_type == 'agent':
-                        agent_item = {
-                            'name': agent_name,
-                            'status': status,
-                            'description': self._get_agent_description(agent_name, status)
-                        }
-                        agents.append(agent_item)
-                    
-                    break
-        
-        return {
-            'currentTask': current_task,
-            'workflow': workflow,
-            'agents': agents
-        }
-    
-    def _get_agent_icon(self, agent_name):
-        """Get appropriate icon for agent"""
-        icon_map = {
-            'explorer': '🔍',
-            'criteria gate': '🚪', 
-            'planner': '📋',
-            'coder': '💻',
-            'scribe': '📝',
-            'verifier': '✅',
-            'completion gate': '🏁'
-        }
-        return icon_map.get(agent_name.lower(), '⚙️')
-    
-    def _get_agent_description(self, agent_name, status):
-        """Get description for agent based on name and status"""
-        base_descriptions = {
-            'explorer': 'Analyzes task requirements and identifies patterns, dependencies, and constraints.',
-            'planner': 'Creates detailed implementation plan with step-by-step approach and success criteria.',
-            'coder': 'Implements the planned changes according to specifications.',
-            'scribe': 'Documents the implementation and creates usage instructions.',
-            'verifier': 'Tests functionality and verifies all success criteria are met.'
-        }
-        
-        base = base_descriptions.get(agent_name.lower(), f'Handles {agent_name.lower()} responsibilities.')
-        
-        if status == 'completed':
-            return base.replace('Creates', 'Created').replace('Analyzes', 'Analyzed').replace('Implements', 'Implemented').replace('Documents', 'Documented').replace('Tests', 'Tested')
-        elif status == 'in-progress':
-            return f'Currently working: {base}'
-        else:
-            return f'Will handle: {base}'
-    
-    def _get_default_status(self):
-        """Return default status when files are missing"""
-        return {
-            'currentTask': 'No active task',
-            'workflow': [
-                {'name': 'Explorer', 'status': 'pending', 'type': 'agent', 'icon': '🔍'},
-                {'name': 'Criteria Gate', 'status': 'pending', 'type': 'gate', 'icon': '🚪'},
-                {'name': 'Planner', 'status': 'pending', 'type': 'agent', 'icon': '📋'},
-                {'name': 'Coder', 'status': 'pending', 'type': 'agent', 'icon': '💻'},
-                {'name': 'Scribe', 'status': 'pending', 'type': 'agent', 'icon': '📝'},
-                {'name': 'Verifier', 'status': 'pending', 'type': 'agent', 'icon': '✅'},
-                {'name': 'Completion Gate', 'status': 'pending', 'type': 'gate', 'icon': '🏁'}
-            ],
-            'agents': [
-                {'name': 'Explorer', 'status': 'pending', 'description': 'Will analyze task requirements and identify patterns, dependencies, and constraints.'},
-                {'name': 'Planner', 'status': 'pending', 'description': 'Will create detailed implementation plan with step-by-step approach and success criteria.'},
-                {'name': 'Coder', 'status': 'pending', 'description': 'Will implement the planned changes according to specifications.'},
-                {'name': 'Scribe', 'status': 'pending', 'description': 'Will document the implementation and create usage instructions.'},
-                {'name': 'Verifier', 'status': 'pending', 'description': 'Will test functionality and verify all success criteria are met.'}
-            ]
-        }
+    def cleanup(self):
+        """Clean up shared resources on shutdown"""
+        if hasattr(self, 'subprocess_executor'):
+            self.subprocess_executor.shutdown(wait=True)
+        if hasattr(self, 'api_logger'):
+            self.api_logger.shutdown()
+        print("[API] Shared resources cleaned up")
 
 
 class StatusHandler(BaseHTTPRequestHandler):
     """HTTP request handler for status endpoint"""
     
     def __init__(self, *args, **kwargs):
-        try:
-            self.status_reader = StatusReader()
-            print(f"[API] StatusHandler initialized successfully")
-        except Exception as e:
-            print(f"[API] Error initializing StatusReader: {e}")
-            # Create a minimal fallback reader
-            self.status_reader = None
+        # Get shared resource manager instance
+        self.shared = SharedResourceManager()
+        
+        # Use shared resources
+        self.project_root = self.shared.project_root
+        self.status_reader = self.shared.status_reader
+        self._subprocess_executor = self.shared.subprocess_executor
+        self.api_logger = self.shared.api_logger
+        
+        # Request-specific lock (lightweight)
+        self._request_lock = threading.RLock()
+        
+        # Call parent constructor
         super().__init__(*args, **kwargs)
     
+    def finish(self):
+        """Clean up request-specific resources"""
+        try:
+            # Clean up any request-specific resources
+            # (Don't touch shared resources here!)
+            super().finish()
+        except Exception as e:
+            print(f"[API] Error during request cleanup: {e}")
+
+
+    def _log_request(self, request_id, message, level='info'):
+        """Thread-safe logging with request ID tracking"""
+        with self._request_lock:
+            log_message = f"[{request_id}] {message}"
+            if self.api_logger:
+                getattr(self.api_logger, level)(log_message)
+            else:
+                print(log_message)
+
+    def _run_subprocess_safely(self, cmd, timeout=15):
+        """Run subprocess in thread pool to prevent blocking other requests"""
+        def _run_cmd():
+            try:
+                return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            except subprocess.TimeoutExpired as e:
+                return None, f"Command timed out after {timeout} seconds"
+            except Exception as e:
+                return None, str(e)
+        
+        future = self._subprocess_executor.submit(_run_cmd)
+        try:
+            result = future.result(timeout=timeout + 5)  # Add 5 seconds buffer
+            if isinstance(result, tuple):  # Error case
+                return None, result[1]
+            return result, None
+        except FutureTimeoutError:
+            return None, f"Subprocess execution timed out after {timeout + 5} seconds"
+        except Exception as e:
+            return None, str(e)
+
+    def _read_file_safely(self, file_path, encoding='utf-8'):
+        """Read file in thread pool to prevent blocking other requests"""
+        def _read_file():
+            try:
+                with open(file_path, 'r', encoding=encoding) as f:
+                    return f.read()
+            except Exception as e:
+                return None, str(e)
+        
+        future = self._subprocess_executor.submit(_read_file)
+        try:
+            result = future.result(timeout=10.0)  # 10 second timeout for file reads
+            if isinstance(result, tuple):  # Error case
+                return None, result[1]
+            return result, None
+        except FutureTimeoutError:
+            return None, "File read timed out after 10 seconds"
+        except Exception as e:
+            return None, str(e)
+    
     def do_GET(self):
-        """Handle GET requests"""
+        """Handle GET requests with thread-safe request ID tracking"""
+        request_id = str(uuid.uuid4())[:8]  # Short UUID for logging
         parsed_url = urlparse(self.path)
         
-        if parsed_url.path == '/api/status':
-            self._handle_status_request(parsed_url)
-        elif parsed_url.path.startswith('/api/outputs/'):
-            self._handle_outputs_request(parsed_url)
-        else:
-            self._send_error(404, 'Not Found')
+        self._log_request(request_id, f"GET {self.path} started")
+        
+        try:
+            if parsed_url.path == '/api/status':
+                self._handle_status_request(parsed_url, request_id)
+            elif parsed_url.path == '/api/health':
+                self._handle_health_request(request_id)
+            elif parsed_url.path.startswith('/api/outputs/'):
+                self._handle_outputs_request(parsed_url, request_id)
+            else:
+                self._send_error(404, 'Not Found')
+                self._log_request(request_id, f"GET {self.path} - 404 Not Found")
+        except Exception as e:
+            self._log_request(request_id, f"GET {self.path} - Error: {e}", 'error')
+            self._send_error(500, 'Internal Server Error')
+        finally:
+            self._log_request(request_id, f"GET {self.path} completed")
     
     def do_POST(self):
-        """Handle POST requests"""
+        """Handle POST requests with thread-safe request ID tracking"""
+        request_id = str(uuid.uuid4())[:8]  # Short UUID for logging
         parsed_url = urlparse(self.path)
         
-        if parsed_url.path == '/api/gate-decision':
-            self._handle_gate_decision_request(parsed_url)
-        else:
-            self._send_error(404, 'Not Found')
+        self._log_request(request_id, f"POST {self.path} started")
+        
+        try:
+            if parsed_url.path == '/api/gate-decision':
+                self._handle_gate_decision_request(parsed_url, request_id)
+            elif parsed_url.path == '/api/execute':
+                self._handle_execute_request(parsed_url, request_id)
+            elif parsed_url.path == '/api/restart':
+                self._handle_restart_request(parsed_url, request_id)
+            else:
+                self._send_error(404, 'Not Found')
+                self._log_request(request_id, f"POST {self.path} - 404 Not Found")
+        except Exception as e:
+            self._log_request(request_id, f"POST {self.path} - Error: {e}", 'error')
+            self._send_error(500, 'Internal Server Error')
+        finally:
+            self._log_request(request_id, f"POST {self.path} completed")
     
     def do_OPTIONS(self):
         """Handle CORS preflight requests"""
@@ -240,15 +324,27 @@ class StatusHandler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
     
-    def _handle_status_request(self, parsed_url):
-        """Handle /api/status endpoint"""
+    def _handle_status_request(self, parsed_url, request_id):
+        """Handle /api/status endpoint with request tracking"""
         try:
-            print(f"[API] Processing status request: {parsed_url.path}?{parsed_url.query}")
+            self._log_request(request_id, f"Processing status request: {parsed_url.path}?{parsed_url.query}")
             
-            # Check if status reader is available
+            # Use fallback method if status reader is unavailable
             if self.status_reader is None:
-                self._send_error(500, 'StatusReader not initialized. Server may have startup issues.')
-                return
+                print(f"[API] StatusReader unavailable, using fallback method")
+                try:
+                    # Parse query parameters
+                    query_params = parse_qs(parsed_url.query)
+                    mode = query_params.get('mode', ['regular'])[0]
+                    
+                    # Use get_workflow_status as fallback
+                    status_data = get_workflow_status(project_root=self.project_root, mode=mode)
+                    self._send_json_response(status_data)
+                    return
+                except Exception as fallback_error:
+                    print(f"[API] Fallback method also failed: {fallback_error}")
+                    self._send_error(500, 'StatusReader not initialized and fallback failed. Server may have startup issues.')
+                    return
             
             # Parse query parameters
             query_params = parse_qs(parsed_url.query)
@@ -262,7 +358,7 @@ class StatusHandler(BaseHTTPRequestHandler):
             
             # Read status data
             print(f"[API] Reading status data for mode: {mode}")
-            status_data = self.status_reader.read_status(mode)
+            status_data = get_workflow_status(project_root=self.project_root, mode=mode)
             
             # Validate response data
             if not status_data or not isinstance(status_data, dict):
@@ -305,9 +401,65 @@ class StatusHandler(BaseHTTPRequestHandler):
         
         self.wfile.write(response_body)
     
-    def _handle_gate_decision_request(self, parsed_url):
-        """Handle /api/gate-decision endpoint"""
+    def _handle_health_request(self, request_id):
+        """Handle /api/health endpoint - lightweight health check with request tracking"""
         try:
+            self._log_request(request_id, "Health check requested")
+            import psutil
+            import time
+            from threading import active_count
+            
+            # Get basic health information without file I/O
+            health_data = {
+                'status': 'ok',
+                'timestamp': time.time(),
+                'server': {
+                    'active_threads': active_count(),
+                    'process_id': os.getpid(),
+                    'memory_usage_mb': round(psutil.Process().memory_info().rss / 1024 / 1024, 1)
+                }
+            }
+            
+            # Send successful response
+            response_body = json.dumps(health_data, indent=2).encode('utf-8')
+            
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(response_body)))
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            
+            self.wfile.write(response_body)
+            
+        except ImportError:
+            # Fallback if psutil is not available
+            health_data = {
+                'status': 'ok',
+                'timestamp': time.time(),
+                'server': {
+                    'active_threads': active_count(),
+                    'process_id': os.getpid()
+                }
+            }
+            
+            response_body = json.dumps(health_data, indent=2).encode('utf-8')
+            
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(response_body)))
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            
+            self.wfile.write(response_body)
+            
+        except Exception as e:
+            print(f"[API] Health check error: {e}")
+            self._send_error(500, f'Health check failed: {str(e)}')
+    
+    def _handle_gate_decision_request(self, parsed_url, request_id):
+        """Handle /api/gate-decision endpoint with request tracking"""
+        try:
+            self._log_request(request_id, f"Gate decision request: {parsed_url.query}")
             # Parse query parameters for mode
             query_params = parse_qs(parsed_url.query)
             mode = query_params.get('mode', ['regular'])[0]
@@ -341,7 +493,8 @@ class StatusHandler(BaseHTTPRequestHandler):
             # Validate decision type
             valid_decisions = [
                 'approve-criteria', 'modify-criteria', 'retry-explorer',
-                'approve-completion', 'retry-from-planner', 'retry-from-coder', 'retry-from-verifier'
+                'approve-completion', 'retry-from-planner', 'retry-from-coder', 'retry-from-verifier',
+                'user-approve', 'new-task', 'retry-last-task', 'exit'
             ]
             if decision_type not in valid_decisions:
                 self._send_error(400, f'Invalid decision_type. Must be one of: {", ".join(valid_decisions)}')
@@ -373,12 +526,16 @@ class StatusHandler(BaseHTTPRequestHandler):
             if decision_type == 'modify-criteria' and 'modifications' in decision_data:
                 cmd.append(decision_data['modifications'])
             
-            # Execute command
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            # Add task description for new-task decision
+            if decision_type == 'new-task' and 'description' in decision_data:
+                cmd.append(decision_data['description'])
             
-            if result.returncode == 0:
+            # Execute command with non-blocking subprocess call
+            result, error = self._run_subprocess_safely(cmd, timeout=15)
+            
+            if result is not None and result.returncode == 0:
                 # Read updated status after decision processing
-                status_data = self.status_reader.read_status(mode)
+                status_data = get_workflow_status(project_root=self.project_root, mode=mode)
                 
                 return {
                     'success': True,
@@ -389,15 +546,19 @@ class StatusHandler(BaseHTTPRequestHandler):
                     'orchestrator_output': result.stdout.strip()
                 }
             else:
+                # Handle subprocess error
+                error_msg = error if error else "Unknown subprocess error"
+                if result is not None:
+                    error_msg = f'Orchestrator command failed: {result.stderr.strip() or result.stdout.strip()}'
                 return {
                     'success': False,
-                    'error': f'Orchestrator command failed: {result.stderr.strip() or result.stdout.strip()}'
+                    'error': error_msg
                 }
         
-        except subprocess.TimeoutExpired:
+        except Exception as e:
             return {
                 'success': False,
-                'error': 'Gate decision processing timed out'
+                'error': 'Gate decision processing timed out after 15 seconds. Try again or check orchestrator logs.'
             }
         except Exception as e:
             return {
@@ -405,9 +566,10 @@ class StatusHandler(BaseHTTPRequestHandler):
                 'error': f'Error processing gate decision: {str(e)}'
             }
     
-    def _handle_outputs_request(self, parsed_url):
-        """Handle /api/outputs/{filename} endpoint"""
+    def _handle_outputs_request(self, parsed_url, request_id):
+        """Handle /api/outputs/{filename} endpoint with request tracking"""
         try:
+            self._log_request(request_id, f"Outputs request: {parsed_url.path}")
             # Extract filename from path
             path_parts = parsed_url.path.split('/')
             if len(path_parts) != 4 or path_parts[3] == '':
@@ -434,22 +596,30 @@ class StatusHandler(BaseHTTPRequestHandler):
             outputs_dir = self._get_outputs_directory(mode)
             file_path = outputs_dir / filename
             
-            # Check if file exists
+            # Check if file exists in outputs directory, if not try claude directory for checklist files
             if not file_path.exists():
-                self._send_error(404, f'File "{filename}" not found')
-                return
+                if filename == 'tasks-checklist.md':
+                    # Try .claude or .claude-meta directory for checklist files
+                    claude_dir = Path('.claude-meta') if mode == 'meta' else Path('.claude')
+                    claude_file_path = claude_dir / filename
+                    if claude_file_path.exists():
+                        file_path = claude_file_path
+                    else:
+                        self._send_error(404, f'File "{filename}" not found in either outputs or claude directories')
+                        return
+                else:
+                    self._send_error(404, f'File "{filename}" not found')
+                    return
             
-            # Read file content
-            try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                
+            # Read file content using non-blocking file read
+            content, error = self._read_file_safely(file_path)
+            
+            if content is not None:
                 # Send markdown response
                 self._send_markdown_response(content)
-                
-            except Exception as e:
-                print(f"Error reading file {file_path}: {e}")
-                self._send_error(500, 'Error reading file')
+            else:
+                print(f"Error reading file {file_path}: {error}")
+                self._send_error(500, f'Error reading file: {error}')
             
         except Exception as e:
             print(f"Error handling outputs request: {e}")
@@ -457,12 +627,16 @@ class StatusHandler(BaseHTTPRequestHandler):
     
     def _validate_output_filename(self, filename):
         """Validate that filename is safe and allowed"""
+        print(f"[DEBUG] Validating filename: '{filename}'")
+        
         # Check for path separators and relative path components
         if '/' in filename or '\\' in filename or '..' in filename:
+            print(f"[DEBUG] Failed path separator check")
             return False
         
         # Check for absolute paths or hidden files
         if filename.startswith('/') or filename.startswith('.'):
+            print(f"[DEBUG] Failed absolute/hidden path check")
             return False
         
         # Define allowlist of permitted agent output files
@@ -473,17 +647,27 @@ class StatusHandler(BaseHTTPRequestHandler):
             'verification.md',
             'current-status.md',
             'documentation.md',
-            'success-criteria.md'
+            'success-criteria.md',
+            'pending-user_validation-gate.md',
+            'tasks-checklist.md'
         }
         
         # Check if file is in allowlist
         if filename in allowed_files:
+            print(f"[DEBUG] Matched allowlist file")
             return True
         
         # Check for instructions files pattern
         if filename.endswith('-instructions.md'):
+            print(f"[DEBUG] Matched instructions pattern")
             return True
         
+        # Check for log files pattern
+        if filename.endswith('-log.md'):
+            print(f"[DEBUG] Matched log pattern")
+            return True
+        
+        print(f"[DEBUG] No pattern matched, rejecting")
         return False
     
     def _get_outputs_directory(self, mode):
@@ -507,6 +691,369 @@ class StatusHandler(BaseHTTPRequestHandler):
         
         self.wfile.write(response_body)
     
+    def _handle_execute_request(self, parsed_url, request_id):
+        """Handle /api/execute endpoint for command execution with request tracking"""
+        try:
+            self._log_request(request_id, f"Execute request: {parsed_url.path}")
+            # Read request body first
+            content_length = int(self.headers.get('Content-Length', 0))
+            if content_length == 0:
+                self._send_error(400, 'Missing request body')
+                return
+            
+            request_body = self.rfile.read(content_length).decode('utf-8')
+            
+            # Parse JSON body
+            try:
+                execute_data = json.loads(request_body)
+            except json.JSONDecodeError:
+                self._send_error(400, 'Invalid JSON in request body')
+                return
+            
+            # Get mode from request body first, then query params as fallback
+            query_params = parse_qs(parsed_url.query)
+            mode = execute_data.get('mode') or query_params.get('mode', ['regular'])[0]
+            
+            # Validate mode parameter
+            if mode not in ['regular', 'meta']:
+                self._send_error(400, 'Invalid mode parameter. Use "regular" or "meta".')
+                return
+            
+            # Validate required fields
+            command = execute_data.get('command')
+            if not command:
+                self._send_error(400, 'Missing required field: command')
+                return
+            
+            # Validate command against whitelist
+            valid_commands = ['start', 'continue', 'status', 'clean']
+            if command not in valid_commands:
+                self._send_error(400, f'Invalid command. Must be one of: {", ".join(valid_commands)}')
+                return
+            
+            # Check for concurrent operations
+            global OPERATION_STATE
+            if OPERATION_STATE['current_operation'] and OPERATION_STATE['current_operation'] != 'idle':
+                if command not in ['status']:  # Status is always allowed
+                    self._send_error(409, f'Operation in progress: {OPERATION_STATE["current_operation"]}')
+                    return
+            
+            # Allow meta-mode commands to run in meta mode
+            print(f"[API Execute] Executing {command} in {mode} mode")
+            
+            # Execute the command
+            result = self._execute_orchestrator_command(command, mode, execute_data)
+            
+            if result['success']:
+                self._send_json_response(result)
+            else:
+                self._send_error(500, result['error'])
+            
+        except Exception as e:
+            print(f"Error handling execute request: {e}")
+            self._send_error(500, 'Internal Server Error')
+    
+    def _execute_orchestrator_command(self, command, mode, execute_data):
+        """Execute orchestrator command in separate process"""
+        try:
+            global OPERATION_STATE
+            
+            # Update operation state for non-status commands
+            if command != 'status':
+                OPERATION_STATE['current_operation'] = command
+                OPERATION_STATE['start_time'] = time.time()
+                OPERATION_STATE['pid'] = os.getpid()
+            
+            result_data = {
+                'success': True,
+                'command': command,
+                'mode': mode,
+                'pid': os.getpid(),
+                'timestamp': time.time()
+            }
+            
+            try:
+                if command == 'start':
+                    # Run orchestrator in separate process to avoid blocking API server
+                    import subprocess
+                    cmd = [sys.executable, 'orchestrate.py', 'start']
+                    if mode == 'meta':
+                        cmd.append('meta')
+                    
+                    # Start the process in background with shorter timeout handling
+                    try:
+                        process = subprocess.Popen(cmd, 
+                                                   stdout=subprocess.PIPE, 
+                                                   stderr=subprocess.PIPE,
+                                                   cwd=os.getcwd(),
+                                                   start_new_session=True)  # Prevent signal propagation
+                    except Exception as start_error:
+                        OPERATION_STATE['current_operation'] = 'idle'
+                        result_data.update({
+                            'success': False,
+                            'error': f'Failed to start process: {str(start_error)}'
+                        })
+                        return result_data
+                    
+                    result_data.update({
+                        'message': f'Workflow started in background process (PID: {process.pid})',
+                        'process_pid': process.pid
+                    })
+                    
+                elif command == 'continue':
+                    # Run orchestrator continue in separate process
+                    import subprocess
+                    cmd = [sys.executable, 'orchestrate.py', 'continue']
+                    if mode == 'meta':
+                        cmd.append('meta')
+                    
+                    try:
+                        process = subprocess.Popen(cmd, 
+                                                   stdout=subprocess.PIPE, 
+                                                   stderr=subprocess.PIPE,
+                                                   cwd=os.getcwd(),
+                                                   start_new_session=True)  # Prevent signal propagation
+                    except Exception as continue_error:
+                        OPERATION_STATE['current_operation'] = 'idle'
+                        result_data.update({
+                            'success': False,
+                            'error': f'Failed to start continue process: {str(continue_error)}'
+                        })
+                        return result_data
+                    
+                    result_data.update({
+                        'message': f'Continue workflow started in background process (PID: {process.pid})',
+                        'process_pid': process.pid
+                    })
+                    
+                elif command == 'status':
+                    # Status can be handled directly as it's read-only
+                    result_data.update({
+                        'message': 'Status retrieved successfully',
+                        'operation_state': OPERATION_STATE.copy()
+                    })
+                    
+                elif command == 'clean':
+                    # Run clean in separate process
+                    import subprocess
+                    cmd = [sys.executable, 'orchestrate.py', 'clean']
+                    if mode == 'meta':
+                        cmd.append('meta')
+                    
+                    # Use non-blocking subprocess call for clean command
+                    process, error = self._run_subprocess_safely(cmd, timeout=30)
+                    
+                    if process is not None and process.returncode == 0:
+                        result_data.update({
+                            'message': 'Outputs cleaned successfully'
+                        })
+                    else:
+                        # Handle clean command error
+                        error_msg = error if error else "Unknown clean command error"
+                        if process is not None:
+                            error_msg = f'Clean failed: {process.stderr}'
+                        result_data.update({
+                            'success': False,
+                            'message': error_msg
+                        })
+                
+                # Read updated status after command execution
+                if self.status_reader:
+                    workflow_state = get_workflow_status(project_root=self.project_root, mode=mode)
+                    result_data['workflow_state'] = workflow_state
+                
+                return result_data
+                
+            except Exception as cmd_error:
+                result_data.update({
+                    'success': False,
+                    'error': f'Command execution failed: {str(cmd_error)}'
+                })
+                return result_data
+                
+            finally:
+                # Reset operation state after completion (except for status)
+                if command != 'status':
+                    OPERATION_STATE['current_operation'] = 'idle'
+                    OPERATION_STATE['start_time'] = None
+        
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f'Error executing command: {str(e)}'
+            }
+        
+        finally:
+            # Ensure operation state is reset on any error
+            if command != 'status':
+                OPERATION_STATE['current_operation'] = 'idle'
+    
+    def _handle_restart_request(self, parsed_url, request_id):
+        """Handle /api/restart endpoint - performs clear-ui + serve sequence"""
+        try:
+            self._log_request(request_id, f"Restart request: {parsed_url.path}")
+            
+            # Read request body for mode parameter
+            content_length = int(self.headers.get('Content-Length', 0))
+            mode = 'regular'  # Default mode
+            
+            if content_length > 0:
+                request_body = self.rfile.read(content_length).decode('utf-8')
+                try:
+                    restart_data = json.loads(request_body)
+                    mode = restart_data.get('mode', 'regular')
+                except json.JSONDecodeError:
+                    pass  # Use default mode if JSON parsing fails
+            
+            # Validate mode parameter
+            if mode not in ['regular', 'meta']:
+                self._send_error(400, 'Invalid mode parameter. Use "regular" or "meta".')
+                return
+            
+            print(f"[API Restart] Initiating system restart in {mode} mode")
+            
+            # Execute the restart sequence
+            result = self._execute_restart_sequence(mode)
+            
+            if result['success']:
+                self._send_json_response(result)
+            else:
+                self._send_error(500, result['error'])
+                
+        except Exception as e:
+            print(f"Error handling restart request: {e}")
+            self._send_error(500, 'Internal Server Error')
+    
+    def _execute_restart_sequence(self, mode):
+        """Execute clear-ui + serve restart sequence with safeguards"""
+        try:
+            import subprocess
+            import time
+            
+            # Check if we're already in a restart loop to prevent infinite cycles
+            restart_lock_file = Path('/tmp/orchestrator_restart_lock')
+            if restart_lock_file.exists():
+                try:
+                    # Check if lock is stale (older than 5 minutes)
+                    lock_time = restart_lock_file.stat().st_mtime
+                    if time.time() - lock_time < 300:  # 5 minutes
+                        return {
+                            'success': False,
+                            'error': 'Restart already in progress or recent restart detected. Please wait.'
+                        }
+                    else:
+                        # Remove stale lock
+                        restart_lock_file.unlink()
+                except Exception as e:
+                    print(f"Lock file check failed: {e}")
+            
+            # Create restart lock
+            try:
+                restart_lock_file.touch()
+            except Exception as e:
+                print(f"Could not create restart lock: {e}")
+            
+            result_data = {
+                'success': True,
+                'mode': mode,
+                'timestamp': time.time(),
+                'message': 'System restart initiated'
+            }
+            
+            # Step 1: Kill any zombie orchestrator processes
+            print("[API Restart] Step 1: Killing zombie orchestrator processes...")
+            try:
+                kill_process = subprocess.run(['pkill', '-9', '-f', 'orchestrate.py'], 
+                                            capture_output=True, 
+                                            text=True, 
+                                            timeout=10)
+                print(f"[API Restart] Killed orchestrator processes (exit code: {kill_process.returncode})")
+            except Exception as e:
+                print(f"[API Restart] Warning: Could not kill orchestrator processes: {e}")
+                # Don't fail the restart for this - continue anyway
+            
+            # Step 2: Execute clear-ui command
+            print("[API Restart] Step 2: Executing clear-ui...")
+            clear_ui_cmd = [sys.executable, 'orchestrate.py', 'clear-ui']
+            
+            try:
+                process = subprocess.run(clear_ui_cmd, 
+                                       capture_output=True, 
+                                       text=True, 
+                                       timeout=30,
+                                       cwd=os.getcwd())
+                
+                if process.returncode != 0:
+                    return {
+                        'success': False,
+                        'error': f'Clear-UI failed: {process.stderr}',
+                        'step': 'clear-ui'
+                    }
+                    
+                print("[API Restart] Clear-UI completed successfully")
+                
+            except subprocess.TimeoutExpired:
+                return {
+                    'success': False,
+                    'error': 'Clear-UI command timed out',
+                    'step': 'clear-ui'
+                }
+            except Exception as e:
+                return {
+                    'success': False,
+                    'error': f'Clear-UI execution failed: {str(e)}',
+                    'step': 'clear-ui'
+                }
+            
+            # Step 3: Wait a moment for cleanup to complete
+            time.sleep(2)
+            
+            # Step 4: Start serve command in background
+            print("[API Restart] Step 3: Starting serve command...")
+            serve_cmd = [sys.executable, 'orchestrate.py', 'serve']
+            
+            try:
+                # Start serve as a detached background process
+                serve_process = subprocess.Popen(serve_cmd,
+                                               stdout=subprocess.DEVNULL,
+                                               stderr=subprocess.DEVNULL,
+                                               cwd=os.getcwd(),
+                                               start_new_session=True)  # Detach from current process
+                
+                print(f"[API Restart] Serve command started (PID: {serve_process.pid})")
+                
+                result_data.update({
+                    'message': 'System restart completed - new servers starting',
+                    'serve_pid': serve_process.pid,
+                    'steps_completed': ['kill-zombie-processes', 'clear-ui', 'serve-started']
+                })
+                
+            except Exception as e:
+                # Clean up restart lock on failure
+                try:
+                    restart_lock_file.unlink()
+                except:
+                    pass
+                return {
+                    'success': False,
+                    'error': f'Serve command failed to start: {str(e)}',
+                    'step': 'serve'
+                }
+            
+            # Clean up restart lock after successful restart
+            try:
+                restart_lock_file.unlink()
+            except Exception as e:
+                print(f"Could not remove restart lock: {e}")
+            
+            return result_data
+            
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f'Restart sequence failed: {str(e)}'
+            }
+    
     def log_message(self, format, *args):
         """Override to customize logging"""
         print(f"[{self.log_date_time_string()}] {format % args}")
@@ -522,57 +1069,97 @@ class OrchestratorAPIServer:
         self.server = None
         self.server_thread = None
         self._running = False
+        # Initialize logger
+        self.api_logger = OrchestratorLogger("api-server")
     
     def start(self):
         """Start the API server"""
         try:
+            # Check for existing API server process on this port to prevent duplicates
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as test_sock:
+                    test_sock.settimeout(2)
+                    result = test_sock.connect_ex(('localhost', self.port))
+                    if result == 0:
+                        # Port is already in use, try to determine if it's our API server
+                        try:
+                            import urllib.request
+                            response = urllib.request.urlopen(f'http://localhost:{self.port}/api/health', timeout=3)
+                            if response.getcode() == 200:
+                                self.api_logger.warning(f"API server already running on port {self.port} - exiting to prevent duplicate")
+                                return False
+                        except Exception:
+                            # Port in use but not responding to health check - may be stale process
+                            self.api_logger.warning(f"Port {self.port} in use by unresponsive process, attempting to find alternative port")
+            except Exception as e:
+                self.api_logger.debug(f"Port check failed: {e}")
+                
             # Find available port
             try:
                 self.port = find_available_port(self.port)
             except OSError as e:
-                print(f"Error finding available port: {e}")
+                self.api_logger.error(f"Error finding available port: {e}")
                 return False
+            
+            # Initialize shared resources ONCE before creating server
+            shared_manager = SharedResourceManager()
+            shared_manager.initialize(project_root=Path(os.getcwd()))
                 
-            print(f"[API Server] Initializing HTTPServer on {self.host}:{self.port}")
-            self.server = HTTPServer((self.host, self.port), StatusHandler)
+            self.api_logger.info(f"Initializing ThreadingHTTPServer on {self.host}:{self.port}")
+            
+            # Create server with connection limits
+            self.server = ThreadingHTTPServer((self.host, self.port), StatusHandler)
+            
+            # Configure server for better resource management
+            self.server.timeout = 30.0
+            self.server.allow_reuse_address = True
+            self.server.request_queue_size = 10  # Limit pending connections
+            
+            if hasattr(self.server, 'daemon_threads'):
+                self.server.daemon_threads = True
+            
+            self.api_logger.info(f"Configured timeout: {self.server.timeout}s")
             
             # Validate server was created successfully
             if not self.server:
-                print(f"[API Server] Failed to create HTTPServer instance")
+                self.api_logger.error("Failed to create ThreadingHTTPServer instance")
                 return False
             
-            print(f"[API Server] HTTPServer created successfully")
+            self.api_logger.info("HTTPServer created successfully")
             self._running = True
             
-            print(f"Starting Claude Code Orchestrator API server on {self.host}:{self.port}")
-            print(f"Status endpoint: http://{self.host}:{self.port}/api/status")
-            print(f"Gate decision endpoint: http://{self.host}:{self.port}/api/gate-decision")
-            print(f"With meta mode: http://{self.host}:{self.port}/api/status?mode=meta")
-            print("Press Ctrl+C to stop the server")
+            self.api_logger.info(f"Starting Claude Code Orchestrator API server on {self.host}:{self.port}")
+            self.api_logger.info(f"Status endpoint: http://{self.host}:{self.port}/api/status")
+            self.api_logger.info(f"Gate decision endpoint: http://{self.host}:{self.port}/api/gate-decision")
+            self.api_logger.info(f"Command execution endpoint: http://{self.host}:{self.port}/api/execute")
+            self.api_logger.info(f"System restart endpoint: http://{self.host}:{self.port}/api/restart")
+            self.api_logger.info(f"With meta mode: http://{self.host}:{self.port}/api/status?mode=meta")
+            self.api_logger.info("Press Ctrl+C to stop the server")
             
             # Set up signal handlers for graceful shutdown (only in main thread)
             if self.setup_signals:
                 signal.signal(signal.SIGINT, self._signal_handler)
                 signal.signal(signal.SIGTERM, self._signal_handler)
             
-            # Open dashboard in browser
-            try:
-                webbrowser.open('http://localhost:5678/dashboard/index.html')
-            except Exception as e:
-                print(f"Failed to open dashboard in browser: {e}")
+            # Open dashboard in browser (unless disabled)
+            if not getattr(self, 'no_browser', False):
+                try:
+                    webbrowser.open('http://localhost:5678/dashboard/index.html')
+                except Exception as e:
+                    self.api_logger.error(f"Failed to open dashboard in browser: {e}")
             
             # Start server
-            print(f"[API Server] Starting serve_forever() on {self.host}:{self.port}")
+            self.api_logger.info(f"Starting serve_forever() on {self.host}:{self.port}")
             self.server.serve_forever()
             
         except OSError as e:
-            print(f"[API Server] OSError starting server: {e}")
+            self.api_logger.error(f"OSError starting server: {e}")
             if "Address already in use" in str(e):
-                print(f"Port {self.port} is already in use. Try a different port.")
+                self.api_logger.error(f"Port {self.port} is already in use. Try a different port.")
             self._running = False
             return False
         except Exception as e:
-            print(f"[API Server] Unexpected error starting server: {e}")
+            self.api_logger.error(f"Unexpected error starting server: {e}")
             self._running = False
             return False
         except KeyboardInterrupt:
@@ -589,8 +1176,18 @@ class OrchestratorAPIServer:
         # Create a separate start method for background that doesn't use signals
         def start_without_signals():
             try:
-                print(f"[API Server Background] Initializing HTTPServer on {self.host}:{self.port}")
-                self.server = HTTPServer((self.host, self.port), StatusHandler)
+                print(f"[API Server Background] Initializing ThreadingHTTPServer on {self.host}:{self.port}")
+                self.server = ThreadingHTTPServer((self.host, self.port), StatusHandler)
+                
+                # Configure server timeout and connection parameters
+                self.server.timeout = 30.0  # 30 second request timeout
+                self.server.allow_reuse_address = True
+                
+                # Configure threading parameters for connection pooling
+                if hasattr(self.server, 'daemon_threads'):
+                    self.server.daemon_threads = True
+                
+                print(f"[API Server Background] Configured timeout: {self.server.timeout}s")
                 
                 # Validate server was created successfully
                 if not self.server:
@@ -604,6 +1201,8 @@ class OrchestratorAPIServer:
                 print(f"Starting Claude Code Orchestrator API server on {self.host}:{self.port}")
                 print(f"Status endpoint: http://{self.host}:{self.port}/api/status")
                 print(f"Gate decision endpoint: http://{self.host}:{self.port}/api/gate-decision")
+                print(f"Command execution endpoint: http://{self.host}:{self.port}/api/execute")
+                print(f"System restart endpoint: http://{self.host}:{self.port}/api/restart")
                 print(f"With meta mode: http://{self.host}:{self.port}/api/status?mode=meta")
                 
                 # Start server without signal handlers (background mode)
@@ -630,14 +1229,33 @@ class OrchestratorAPIServer:
     def stop(self):
         """Stop the API server"""
         if self.server:
-            print("\nShutting down server...")
+            self.api_logger.info("Shutting down server...")
             self._running = False
-            self.server.shutdown()
-            self.server.server_close()
+            
+            # Set longer timeout for graceful shutdown
+            try:
+                self.server.shutdown()
+                self.server.server_close()
+            except Exception as e:
+                self.api_logger.error(f"Error during server shutdown: {e}")
             
             if self.server_thread and self.server_thread.is_alive():
-                self.server_thread.join(timeout=2)
+                self.server_thread.join(timeout=5)  # Increased timeout
+                if self.server_thread.is_alive():
+                    self.api_logger.warning("Server thread did not terminate gracefully")
             
+            # Clean up shared resources
+            shared_manager = SharedResourceManager()
+            shared_manager.cleanup()
+            
+            # Clean up any remaining resources
+            try:
+                if hasattr(self.server, 'socket') and self.server.socket:
+                    self.server.socket.close()
+            except Exception as e:
+                self.api_logger.debug(f"Socket cleanup error: {e}")
+            
+            self.api_logger.shutdown()
             print("Server stopped")
     
     def _signal_handler(self, signum, frame):
@@ -658,10 +1276,33 @@ def main():
     parser.add_argument('--port', type=int, default=8000, help='Port to run server on (default: 8000)')
     parser.add_argument('--host', default='localhost', help='Host to bind to (default: localhost)')
     parser.add_argument('--background', action='store_true', help='Run server in background')
+    parser.add_argument('--no-browser', action='store_true', help='Do not automatically open browser')
     
     args = parser.parse_args()
     
+    # Early deduplication check before any initialization
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as test_sock:
+            test_sock.settimeout(2)
+            result = test_sock.connect_ex((args.host, args.port))
+            if result == 0:
+                # Port is already in use, check if it's our API server
+                try:
+                    import urllib.request
+                    response = urllib.request.urlopen(f'http://{args.host}:{args.port}/api/health', timeout=3)
+                    if response.getcode() == 200:
+                        print(f"API server already running on {args.host}:{args.port} - exiting to prevent duplicate")
+                        sys.exit(0)
+                except Exception:
+                    # Port in use but not responding to health check
+                    print(f"Port {args.port} in use by unresponsive process")
+    except Exception as e:
+        pass  # Continue with normal startup
+    
     server = OrchestratorAPIServer(port=args.port, host=args.host)
+    
+    # Set browser preference
+    server.no_browser = args.no_browser
     
     if args.background:
         if server.start_background():

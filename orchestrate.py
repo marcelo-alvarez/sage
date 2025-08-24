@@ -19,6 +19,63 @@ import webbrowser
 import time
 import socket
 import argparse
+import signal
+import threading
+import urllib.request
+import urllib.error
+from workflow_status import StatusReader, get_workflow_status
+from process_manager import ProcessManager
+
+
+class OrchestratorLogger:
+    """Unified logging system for all orchestrator components"""
+    
+    def __init__(self, component_name: str, log_dir: Path = None):
+        self.component_name = component_name
+        self.log_dir = log_dir or Path.cwd()
+        self.log_file = self.log_dir / f"{component_name}.log"
+        
+        # Ensure log directory exists
+        self.log_dir.mkdir(exist_ok=True)
+        
+        # Initialize log file with startup message
+        self._write_log(f"=== {component_name.upper()} STARTED ===")
+    
+    def _write_log(self, message: str, level: str = "INFO"):
+        """Write message to log file with timestamp"""
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        log_entry = f"[{timestamp}] [{level}] {message}\n"
+        
+        try:
+            with open(self.log_file, 'a', encoding='utf-8') as f:
+                f.write(log_entry)
+        except Exception as e:
+            # Fallback to stderr if log file writing fails
+            print(f"Log write failed: {e}", file=sys.stderr)
+    
+    def info(self, message: str):
+        """Log info message"""
+        self._write_log(message, "INFO")
+        print(f"[{self.component_name}] {message}")
+    
+    def error(self, message: str):
+        """Log error message"""
+        self._write_log(message, "ERROR")
+        print(f"[{self.component_name}] ERROR: {message}", file=sys.stderr)
+    
+    def warning(self, message: str):
+        """Log warning message"""
+        self._write_log(message, "WARNING")
+        print(f"[{self.component_name}] WARNING: {message}")
+    
+    def debug(self, message: str):
+        """Log debug message"""
+        self._write_log(message, "DEBUG")
+        print(f"[{self.component_name}] DEBUG: {message}")
+    
+    def shutdown(self):
+        """Log shutdown message"""
+        self._write_log(f"=== {self.component_name.upper()} SHUTDOWN ===")
 
 
 def find_available_port(start_port: int, max_attempts: int = 20) -> int:
@@ -139,7 +196,7 @@ class AgentRole:
 class AgentConfig:
     """Configuration manager for agent definitions"""
     
-    def __init__(self, config_path: Path = None, enable_dashboard: bool = False, dashboard_port: int = 5678, api_port: int = 8000, no_browser: bool = False):
+    def __init__(self, config_path: Path = None, enable_dashboard: bool = False, dashboard_port: int = 5678, api_port: int = 8000, no_browser: bool = False, process_manager=None):
         self.config_path = config_path or Path('.claude/agent-config.json')
         self.templates_dir = Path('templates/agents')
         self.agents = {}
@@ -151,6 +208,9 @@ class AgentConfig:
         self.api_process = None
         self.dashboard = None
         self.dashboard_available = False
+        self.process_manager = process_manager
+        self.health_check_thread = None
+        self.health_check_running = False
         self._load_config()
         
         if self.enable_dashboard:
@@ -349,15 +409,21 @@ class AgentConfig:
             self.api_process = subprocess.Popen([
                 sys.executable, 'api_server.py', 
                 '--port', str(self.api_port)
-            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=self.project_root)
             
+            # Register API process with ProcessManager if available
+            if self.process_manager:
+                self.process_manager.register_process('api_server', self.api_process)
             print(f"API server started as subprocess (PID: {self.api_process.pid}) on port {self.api_port}")
             
             # Start dashboard server as subprocess
             self.dashboard_process = subprocess.Popen([
-                sys.executable, 'test_dashboard_server.py', str(self.dashboard_port)
-            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                sys.executable, 'dashboard_server.py', str(self.dashboard_port)
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=self.project_root)
             
+            # Register dashboard process with ProcessManager if available
+            if self.process_manager:
+                self.process_manager.register_process('dashboard_server', self.dashboard_process)
             print(f"Dashboard server started as subprocess (PID: {self.dashboard_process.pid}) on port {self.dashboard_port}")
             
             # Give servers time to start
@@ -381,6 +447,9 @@ class AgentConfig:
                     
                 # Register cleanup
                 atexit.register(self.stop_dashboard)
+                
+                # Start health monitoring
+                self.start_health_monitoring()
                 
             else:
                 print("Warning: Dashboard servers failed to start properly")
@@ -409,34 +478,92 @@ class AgentConfig:
     def stop_dashboard(self):
         """Stop dashboard and API server subprocesses"""
         try:
-            if self.dashboard_process:
-                try:
-                    self.dashboard_process.terminate()
-                    self.dashboard_process.wait(timeout=5)
-                    print("Dashboard server stopped")
-                except:
-                    try:
-                        self.dashboard_process.kill()
-                        print("Dashboard server force-killed")
-                    except:
-                        pass
-                self.dashboard_process = None
+            # Stop health monitoring first
+            self.stop_health_monitoring()
+            
+            # Use ProcessManager for clean shutdown if available
+            if self.process_manager:
+                dashboard_stopped = self.process_manager.terminate_process('dashboard_server')
+                api_stopped = self.process_manager.terminate_process('api_server')
                 
-            if self.api_process:
-                try:
+                if dashboard_stopped:
+                    self.dashboard_process = None
+                if api_stopped:
+                    self.api_process = None
+            else:
+                # Fallback to direct process termination
+                if self.dashboard_process:
+                    self.dashboard_process.terminate()
+                    self.dashboard_process = None
+                if self.api_process:
                     self.api_process.terminate()
-                    self.api_process.wait(timeout=5)
-                    print("API server stopped")
-                except:
-                    try:
-                        self.api_process.kill()
-                        print("API server force-killed")
-                    except:
-                        pass
-                self.api_process = None
+                    self.api_process = None
                 
         except Exception as e:
             print(f"Error stopping servers: {e}")
+    
+    def start_health_monitoring(self):
+        """Start health monitoring thread for server processes"""
+        if self.health_check_running:
+            return
+            
+        self.health_check_running = True
+        self.health_check_thread = threading.Thread(target=self._health_monitor_loop, daemon=True)
+        self.health_check_thread.start()
+        print("Health monitoring started - checking every 30 seconds")
+    
+    def stop_health_monitoring(self):
+        """Stop health monitoring thread"""
+        self.health_check_running = False
+        if self.health_check_thread:
+            self.health_check_thread.join(timeout=5)
+    
+    def _health_monitor_loop(self):
+        """Health monitoring loop that runs in background thread"""
+        while self.health_check_running:
+            try:
+                time.sleep(30)  # 30-second intervals
+                if not self.health_check_running:
+                    break
+                    
+                self._check_server_health()
+                
+            except Exception as e:
+                print(f"Health monitoring error: {e}")
+    
+    def _check_server_health(self):
+        """Check health of dashboard and API servers"""
+        if not self.dashboard_available:
+            return
+            
+        # Check process health
+        api_running = self.api_process and self.api_process.poll() is None
+        dashboard_running = self.dashboard_process and self.dashboard_process.poll() is None
+        
+        # Check HTTP endpoint health
+        api_responsive = self._check_http_health(f"http://localhost:{self.api_port}/health")
+        dashboard_responsive = self._check_http_health(f"http://localhost:{self.dashboard_port}/")
+        
+        # Report issues
+        if not api_running:
+            print(f"Health check: API server process not running (PID check failed)")
+        elif not api_responsive:
+            print(f"Health check: API server unresponsive on port {self.api_port}")
+            
+        if not dashboard_running:
+            print(f"Health check: Dashboard server process not running (PID check failed)")
+        elif not dashboard_responsive:
+            print(f"Health check: Dashboard server unresponsive on port {self.dashboard_port}")
+    
+    def _check_http_health(self, url: str, timeout: int = 5) -> bool:
+        """Check if HTTP endpoint is responsive"""
+        try:
+            with urllib.request.urlopen(url, timeout=timeout) as response:
+                return response.status == 200
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError):
+            return False
+        except Exception:
+            return False
 
 
 # Legacy gate options - can be made configurable in future
@@ -454,6 +581,13 @@ GATE_OPTIONS = {
         "retry-from-planner - Restart from Planner",  
         "retry-from-coder - Restart from Coder",
         "retry-from-verifier - Re-verify only",
+        "exit - Exit and resume from this gate later"
+    ],
+    
+    "user_validation": [
+        "user-approve - Tests passed, continue to next task",
+        "new-task [description] - Create new task to fix validation failure",
+        "retry-last-task - Previous implementation task needs fixing",
         "exit - Exit and resume from this gate later"
     ]
 }
@@ -661,13 +795,28 @@ class AgentExecutor:
         subprocess_env = dict(os.environ)
         subprocess_env.pop('CLAUDE_ORCHESTRATOR_MODE', None)
         
+        # Add deterministic start timestamp to agent log file
+        from datetime import datetime
+        start_time = datetime.now()
+        timestamp = start_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+        log_file = self.outputs_dir / f"{agent_type}-log.md"
+        
+        # Add start timestamp
+        start_log = f"\n## {timestamp} - {agent_type.upper()} Agent Session\n\n"
+        if log_file.exists():
+            with open(log_file, 'a') as f:
+                f.write(start_log)
+        else:
+            with open(log_file, 'w') as f:
+                f.write(start_log)
+        
         try:
             result_process = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
                 timeout=timeout_seconds,
-                cwd=str(self.outputs_dir),
+                cwd=str(self.orchestrator.project_root),
                 env=subprocess_env
             )
             
@@ -687,25 +836,52 @@ class AgentExecutor:
                 if stderr_output and exit_code != 0:
                     print(f"[DEBUG] Error output: {stderr_output[:200]}...")
             
+            # Add deterministic stop timestamp to agent log file
+            end_time = datetime.now()
+            end_timestamp = end_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+            duration = (end_time - start_time).total_seconds()
+            
             if exit_code == 0:
+                stop_log = f"\n## {end_timestamp} - {agent_type.upper()} Agent Session Complete (Duration: {duration:.1f}s, Exit Code: {exit_code})\n"
+                with open(log_file, 'a') as f:
+                    f.write(stop_log)
+                
+                # Update status file immediately when agent completes
+                self.orchestrator._update_status_file()
+                
                 return f"✅ {agent_type.upper()} completed successfully"
             else:
-                error_message = f"Process failed with exit code {exit_code}"
-                if stderr_output and stderr_output.strip():
-                    stderr_truncated = stderr_output.strip()[:400]
-                    if len(stderr_output.strip()) > 400:
-                        stderr_truncated += "..."
-                    error_message += f" | Stderr: {stderr_truncated}"
-                else:
-                    error_message += " | No stderr output available"
-                return f"❌ {agent_type.upper()} failed: {self._sanitize_error_message(error_message)}"
+                # Build detailed error report for better debugging
+                detailed_error = self._build_detailed_agent_error(
+                    agent_type, exit_code, stdout_output, stderr_output
+                )
+                stop_log = f"\n## {end_timestamp} - {agent_type.upper()} Agent Session Failed (Duration: {duration:.1f}s, Exit Code: {exit_code})\n"
+                with open(log_file, 'a') as f:
+                    f.write(stop_log)
+                return f"❌ {agent_type.upper()} failed: {detailed_error}"
                 
         except subprocess.TimeoutExpired:
+            # Add stop timestamp for timeout
+            end_time = datetime.now()
+            end_timestamp = end_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+            duration = (end_time - start_time).total_seconds()
+            stop_log = f"\n## {end_timestamp} - {agent_type.upper()} Agent Session Timeout (Duration: {duration:.1f}s)\n"
+            with open(log_file, 'a') as f:
+                f.write(stop_log)
+            
             error_message = f"Claude CLI execution timed out after {timeout_seconds} seconds. This may indicate a complex task requiring more time, network issues, or Claude CLI hanging. Consider increasing timeout or checking network connectivity."
             if debug_mode:
                 print(f"[DEBUG] Timeout error: {error_message}")
             return f"❌ {agent_type.upper()} failed: {error_message}"
         except subprocess.CalledProcessError as e:
+            # Add stop timestamp for process error
+            end_time = datetime.now()
+            end_timestamp = end_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+            duration = (end_time - start_time).total_seconds()
+            stop_log = f"\n## {end_timestamp} - {agent_type.upper()} Agent Session Error (Duration: {duration:.1f}s, CalledProcessError)\n"
+            with open(log_file, 'a') as f:
+                f.write(stop_log)
+            
             error_message = f"Claude CLI process failed with return code {e.returncode}"
             if e.stderr and e.stderr.strip():
                 stderr_truncated = e.stderr.strip()[:400]
@@ -714,15 +890,106 @@ class AgentExecutor:
                 error_message += f" | Stderr: {stderr_truncated}"
             return f"❌ {agent_type.upper()} failed: {self._sanitize_error_message(error_message)}"
         except PermissionError as e:
+            # Add stop timestamp for permission error
+            end_time = datetime.now()
+            end_timestamp = end_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+            duration = (end_time - start_time).total_seconds()
+            stop_log = f"\n## {end_timestamp} - {agent_type.upper()} Agent Session Error (Duration: {duration:.1f}s, PermissionError)\n"
+            with open(log_file, 'a') as f:
+                f.write(stop_log)
+            
             error_message = f"Permission denied accessing {getattr(e, 'filename', 'file')}. Check file permissions or run with appropriate privileges."
             return f"❌ {agent_type.upper()} failed: {error_message}"
         except OSError as e:
+            # Add stop timestamp for OS error
+            end_time = datetime.now()
+            end_timestamp = end_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+            duration = (end_time - start_time).total_seconds()
+            stop_log = f"\n## {end_timestamp} - {agent_type.upper()} Agent Session Error (Duration: {duration:.1f}s, OSError)\n"
+            with open(log_file, 'a') as f:
+                f.write(stop_log)
+            
             error_message = f"System error: {str(e)}. Check system resources and file system access."
             return f"❌ {agent_type.upper()} failed: {self._sanitize_error_message(error_message)}"
 
     def _execute_via_interactive(self, agent_type, instructions):
         """Legacy interactive mode - return instructions unchanged for Claude to execute"""
         return instructions
+
+    def _build_detailed_agent_error(self, agent_type, exit_code, stdout_output, stderr_output):
+        """Build comprehensive error report for agent failures"""
+        error_parts = []
+        
+        # Basic failure info
+        error_parts.append(f"Exit code {exit_code}")
+        
+        # Expected output files for this agent type
+        expected_outputs = {
+            "explorer": "exploration.md",
+            "planner": "plan.md", 
+            "coder": "changes.md",
+            "verifier": "verification.md",
+            "scribe": "orchestrator-log.md"
+        }
+        
+        expected_file = expected_outputs.get(agent_type)
+        if expected_file:
+            expected_path = self.outputs_dir / expected_file
+            if expected_path.exists():
+                size = expected_path.stat().st_size
+                error_parts.append(f"Expected output '{expected_file}' was created ({size} bytes)")
+            else:
+                error_parts.append(f"Expected output '{expected_file}' was NOT created")
+        
+        # Check input files exist (for agents that need them)
+        if agent_type in ["planner", "coder", "verifier"]:
+            input_files = {
+                "planner": ["exploration.md", "success-criteria.md"],
+                "coder": ["exploration.md", "success-criteria.md", "plan.md"],
+                "verifier": ["exploration.md", "success-criteria.md", "plan.md", "changes.md"]
+            }
+            
+            missing_inputs = []
+            for input_file in input_files.get(agent_type, []):
+                input_path = self.outputs_dir / input_file
+                if not input_path.exists():
+                    missing_inputs.append(input_file)
+            
+            if missing_inputs:
+                error_parts.append(f"Missing required input files: {', '.join(missing_inputs)}")
+            else:
+                error_parts.append("All required input files present")
+        
+        # Working directory info
+        error_parts.append(f"Working directory: {self.outputs_dir}")
+        if not self.outputs_dir.exists():
+            error_parts.append("ERROR: Working directory does not exist!")
+        elif not self.outputs_dir.is_dir():
+            error_parts.append("ERROR: Working directory path is not a directory!")
+        
+        # Claude CLI stdout (full output, not truncated)
+        if stdout_output and stdout_output.strip():
+            clean_stdout = stdout_output.strip()
+            error_parts.append(f"Claude CLI stdout ({len(clean_stdout)} chars): {clean_stdout}")
+        else:
+            error_parts.append("No stdout output from Claude CLI")
+        
+        # Claude CLI stderr (full output, not truncated)  
+        if stderr_output and stderr_output.strip():
+            clean_stderr = stderr_output.strip()
+            error_parts.append(f"Claude CLI stderr ({len(clean_stderr)} chars): {clean_stderr}")
+        else:
+            error_parts.append("No stderr output from Claude CLI")
+        
+        # Agent log file status for debugging
+        log_file = self.outputs_dir / f"{agent_type}-log.md"
+        if log_file.exists():
+            size = log_file.stat().st_size
+            error_parts.append(f"Agent log file exists ({size} bytes): {log_file}")
+        else:
+            error_parts.append(f"No agent log file found: {log_file}")
+        
+        return " | ".join(error_parts)
 
     def _sanitize_error_message(self, message):
         """Sanitize error message to prevent None values and ensure reasonable length"""
@@ -907,8 +1174,14 @@ class ClaudeCodeOrchestrator:
         self.api_process = None
         self.dashboard = None
         
+        # Initialize process manager for robust subprocess handling
+        self.process_manager = ProcessManager(meta_mode=self.meta_mode)
+        
+        # Register main orchestrator process for tracking
+        self.process_manager.register_main_process('orchestrator_main')
+        
         # Initialize configuration systems
-        self.agent_config = AgentConfig(enable_dashboard=self.enable_dashboard, dashboard_port=self.dashboard_port, api_port=self.api_port, no_browser=self.no_browser)
+        self.agent_config = AgentConfig(enable_dashboard=self.enable_dashboard, dashboard_port=self.dashboard_port, api_port=self.api_port, no_browser=self.no_browser, process_manager=self.process_manager)
         self.workflow_config = WorkflowConfig()
         
         # Initialize agent factory with configuration
@@ -921,13 +1194,33 @@ class ClaudeCodeOrchestrator:
         self.dashboard = self.agent_config.dashboard
         self.dashboard_available = getattr(self.agent_config, 'dashboard_available', False)
         
+        # Install signal handlers for clean shutdown
+        self._install_signal_handlers()
+        
         # Ensure directories exist
         self.claude_dir.mkdir(exist_ok=True)
         self.agents_dir.mkdir(exist_ok=True)
         self.outputs_dir.mkdir(exist_ok=True)
         
+        # Initialize shared status reader for consistent workflow state
+        self.status_reader = StatusReader(project_root=self.project_root)
+        
         # Generate default configuration files if they don't exist
         self._ensure_config_files()
+
+    def _install_signal_handlers(self):
+        """Install signal handlers for clean shutdown"""
+        def signal_handler(sig, frame):
+            print(f"\nReceived signal {sig}. Cleaning up processes...")
+            self.process_manager.cleanup_all_processes()
+            sys.exit(0)
+        
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+
+    def _get_current_mode(self):
+        """Get current mode (regular or meta) based on outputs_dir"""
+        return 'meta' if self.outputs_dir.name == '.agent-outputs-meta' else 'regular'
 
     def _test_api_endpoint(self):
         """Test if API server HTTP endpoint is responding"""
@@ -1063,8 +1356,45 @@ class ClaudeCodeOrchestrator:
         # Replace .agent-outputs/ paths with actual outputs directory for meta mode compatibility
         adjusted_work_section = work_section.replace('.agent-outputs/', f'{self.outputs_dir.name}/')
         
+        # Add agent logging instructions for transparency
+        log_file = f"{self.outputs_dir.name}/{agent_name}-log.md"
+        
+        # Get current time for example
+        current_time = datetime.now().strftime("%H:%M:%S")
+        
+        logging_instructions = f"""
+AGENT LOGGING (for debugging transparency):
+APPEND (do not overwrite) progress updates to {log_file} using this format:
+
+FIRST: Add task header if this is a new log file or first session:
+---
+TASK: {primary_objective}
+---
+
+THEN: Add your session log entries (Python has already added session start timestamp):
+[{current_time}] Starting {agent_name} agent work
+[14:32:18] Reading required input files...
+[14:32:25] [Describe what you found/understood]
+[14:32:40] Beginning implementation...
+[14:33:05] [Major steps or decisions]  
+[14:33:20] Writing output files...
+[14:33:25] {agent_name.title()} agent work complete
+
+CRITICAL REQUIREMENTS:
+- APPEND to the file (do not overwrite existing content)
+- DO NOT add session start/end timestamps - Python handles those automatically
+- DO NOT use the example times shown above (14:32:18, etc)
+- Each time you write a log entry, check the current system time and use that
+- Format: [HH:MM:SS] where HH:MM:SS is the ACTUAL time right now when you write each entry
+- Examples: If it's 2:45 PM when you start, write [14:45:00]. If it's 2:47 PM when you finish reading, write [14:47:00]
+- DO NOT use sequential numbers like [00:00:01], [00:00:02] - use real clock time
+- Use Write tool with append mode or add content to existing file
+
+"""
+        
         # Build clean instructions without interactive commands
         headless_instructions = "You are now the " + agent_name.upper() + " agent.\n\n" + \
+                               logging_instructions + \
                                adjusted_work_section + "\n\n" + \
                                "When complete, output: " + completion_phrase
         
@@ -1112,6 +1442,12 @@ class ClaudeCodeOrchestrator:
                 print("Review success criteria and choose:")
             elif gate_type == "completion":
                 print("Review verification results and choose:")
+            elif gate_type == "user_validation":
+                print("Complete the validation testing and choose:")
+                # Show the validation instructions from gate content
+                print()
+                print(gate_content)
+                print()
             
             gate_options = GATE_OPTIONS.get(gate_type, [])
             for option in gate_options:
@@ -1126,12 +1462,48 @@ class ClaudeCodeOrchestrator:
                 user_input = input("\nEnter your choice: ").strip().lower()
                 
                 if user_input == "exit":
-                    # Save gate state for resume
+                    # Remove pending gate file and save as exited for potential resume
                     gate_state_file = self.outputs_dir / f"pending-{gate_type}-gate.md"
-                    gate_state_file.write_text(gate_content)
+                    exited_gate_file = self.outputs_dir / f"exited-{gate_type}-gate.md"
+                    
+                    # Move pending to exited state
+                    if gate_state_file.exists():
+                        gate_state_file.rename(exited_gate_file)
+                    
                     print(f"Exiting. Run 'continue' to resume from {gate_type} gate.")
                     return "exit", "User chose to exit at gate"
                 
+                elif user_input.startswith("new-task"):
+                    # Handle new-task command with optional description
+                    if gate_type == "user_validation":
+                        # Parse optional description after "new-task"
+                        if len(user_input) > 8:  # "new-task" is 8 characters
+                            description = user_input[8:].strip()
+                        else:
+                            description = input("Describe the issue found during validation: ").strip()
+                        
+                        # Generate and insert the fix task
+                        current_user_task = self._get_current_user_validation_task()
+                        if current_user_task:
+                            fix_task = self._generate_fix_task(current_user_task, description)
+                            success = self._insert_task_before_user_validation(fix_task)
+                            
+                            if success:
+                                # Remove pending gate state
+                                gate_state_file = self.outputs_dir / f"pending-{gate_type}-gate.md"
+                                if gate_state_file.exists():
+                                    gate_state_file.unlink()
+                                return "new_task_created", f"Created fix task: {fix_task}"
+                            else:
+                                print("Failed to insert new task. Please try again.")
+                                continue
+                        else:
+                            print("Could not find current USER validation task.")
+                            continue
+                    else:
+                        print("new-task command only available for user validation gates.")
+                        continue
+                        
                 elif user_input in valid_commands:
                     # Remove any pending gate state since we're proceeding
                     gate_state_file = self.outputs_dir / f"pending-{gate_type}-gate.md"
@@ -1172,6 +1544,18 @@ class ClaudeCodeOrchestrator:
                         print("Restarting from verifier...")
                         self.retry_from_verifier()
                         return "retry", "Restarting from verifier"
+                    elif user_input == "user-approve":
+                        print("User validation passed, marking task complete...")
+                        self.approve_user_validation()
+                        return "approved", "User validation passed, continuing workflow"
+                    elif user_input == "retry-last-task":
+                        print("Retrying last implementation task...")
+                        success = self._retry_last_implementation_task()
+                        if success:
+                            return "retry", "Restarting previous implementation task"
+                        else:
+                            print("Could not find previous implementation task to retry.")
+                            continue
                     else:
                         print(f"Command '{user_input}' not implemented yet")
                         continue
@@ -1190,27 +1574,56 @@ class ClaudeCodeOrchestrator:
     def get_continue_agent(self):
         """Get the next agent to run and its instructions using configurable workflow"""
         
-        # Check for pending gate state first (for resume functionality)
-        pending_criteria_gate = self.outputs_dir / "pending-criteria-gate.md"
-        pending_completion_gate = self.outputs_dir / "pending-completion-gate.md"
+        # Check for pending gate state first (for resume functionality) - use shared StatusReader
+        pending_gates = self.status_reader.get_pending_gates(self._get_current_mode())
         
-        if pending_criteria_gate.exists():
-            gate_content = pending_criteria_gate.read_text()
+        if 'user_validation' in pending_gates:
+            gate_file = self.outputs_dir / "pending-user_validation-gate.md"
+            gate_content = gate_file.read_text()
+            return self._handle_interactive_gate("user_validation", gate_content)
+        elif 'criteria' in pending_gates:
+            gate_file = self.outputs_dir / "pending-criteria-gate.md"
+            gate_content = gate_file.read_text()
             return self._handle_interactive_gate("criteria", gate_content)
-        elif pending_completion_gate.exists():
-            gate_content = pending_completion_gate.read_text()
+        elif 'completion' in pending_gates:
+            gate_file = self.outputs_dir / "current-completion-gate.md"
+            gate_content = gate_file.read_text()
             return self._handle_interactive_gate("completion", gate_content)
         
-        # Check what outputs exist to determine next phase
-        current_outputs = {
-            "exploration.md": (self.outputs_dir / "exploration.md").exists(),
-            "success-criteria.md": (self.outputs_dir / "success-criteria.md").exists(),
-            "plan.md": (self.outputs_dir / "plan.md").exists(),
-            "changes.md": (self.outputs_dir / "changes.md").exists(),
-            "orchestrator-log.md": (self.outputs_dir / "orchestrator-log.md").exists(),
-            "verification.md": (self.outputs_dir / "verification.md").exists(),
-            "completion-approved.md": (self.outputs_dir / "completion-approved.md").exists()
-        }
+        # Check for USER tasks before determining workflow phase
+        if self.checklist_file.exists():
+            # Check if a user validation was just approved - if so, continue workflow
+            approval_file = self.outputs_dir / "user-validation-approved.md"
+            if approval_file.exists():
+                approval_file.unlink()  # Remove approval file so we don't loop
+                # Remove pending gate file if it exists
+                if self.status_reader.has_pending_gate('user_validation', self._get_current_mode()):
+                    gate_file = self.outputs_dir / "pending-user_validation-gate.md"
+                    gate_file.unlink()
+                # Continue to next task
+                print("User validation approved, continuing to next task...")
+        
+        # Check what outputs exist to determine next phase - use shared StatusReader
+        current_outputs = self.status_reader.get_current_outputs_status(self._get_current_mode())
+        
+        # Check if current task is a USER validation task before determining workflow phase
+        current_task_raw = self._get_current_task_raw()
+        if current_task_raw and current_task_raw.startswith('USER') and not current_outputs.get("success-criteria.md", False):
+            # This is a USER task and we haven't created success criteria yet
+            # Skip criteria_gate and handle as user validation instead
+            result = self._handle_user_validation(current_task_raw)
+            if result is None:
+                # Gate was created, check for pending user validation gate
+                if self.status_reader.has_pending_gate('user_validation', self._get_current_mode()):
+                    gate_file = self.outputs_dir / "pending-user_validation-gate.md"
+                    gate_content = gate_file.read_text()
+                    return self._handle_interactive_gate("user_validation", gate_content)
+                else:
+                    # Gate should exist, something went wrong
+                    return "error", "User validation gate creation failed"
+            else:
+                # Handle the result from user validation
+                return result
         
         # Use workflow configuration to determine next agent
         next_agent = self.workflow_config.get_next_agent(current_outputs, self.outputs_dir)
@@ -1241,7 +1654,7 @@ class ClaudeCodeOrchestrator:
 
     def _show_workflow_header(self):
         """Show clean workflow header with task description"""
-        task = self._get_current_task()
+        task = self._get_current_task_raw()
         if task:
             print(f"\nClaude Code Orchestrator running on task: {task}")
             print()
@@ -1266,6 +1679,10 @@ class ClaudeCodeOrchestrator:
                     print(f"✓ {agent_display[agent_type]} complete")
                 elif status == "failed":
                     print(f"✗ {agent_display[agent_type]} failed")
+        
+        # Update status file to reflect current agent state
+        if status == "running":
+            self._update_status_file_with_running_agent(agent_type)
 
     def _show_verification_status(self):
         """Show verification pass/fail status"""
@@ -1299,16 +1716,24 @@ class ClaudeCodeOrchestrator:
         while iteration < max_iterations:
             iteration += 1
             
-            # Check what outputs exist to determine next phase
-            current_outputs = {
-                "exploration.md": (self.outputs_dir / "exploration.md").exists(),
-                "success-criteria.md": (self.outputs_dir / "success-criteria.md").exists(),
-                "plan.md": (self.outputs_dir / "plan.md").exists(),
-                "changes.md": (self.outputs_dir / "changes.md").exists(),
-                "orchestrator-log.md": (self.outputs_dir / "orchestrator-log.md").exists(),
-                "verification.md": (self.outputs_dir / "verification.md").exists(),
-                "completion-approved.md": (self.outputs_dir / "completion-approved.md").exists()
-            }
+            # First, check for pending gates before determining next phase - use shared StatusReader
+            pending_gates = self.status_reader.get_pending_gates(self._get_current_mode())
+            
+            if 'user_validation' in pending_gates:
+                gate_file = self.outputs_dir / "pending-user_validation-gate.md"
+                gate_content = gate_file.read_text()
+                return self._handle_interactive_gate("user_validation", gate_content)
+            elif 'criteria' in pending_gates:
+                gate_file = self.outputs_dir / "pending-criteria-gate.md"
+                gate_content = gate_file.read_text()
+                return self._handle_interactive_gate("criteria", gate_content)
+            elif 'completion' in pending_gates:
+                gate_file = self.outputs_dir / "current-completion-gate.md"
+                gate_content = gate_file.read_text()
+                return self._handle_interactive_gate("completion", gate_content)
+            
+            # Check what outputs exist to determine next phase - use shared StatusReader
+            current_outputs = self.status_reader.get_current_outputs_status(self._get_current_mode())
             
             # Use workflow configuration to determine next agent
             next_agent = self.workflow_config.get_next_agent(current_outputs, self.outputs_dir)
@@ -1334,7 +1759,7 @@ class ClaudeCodeOrchestrator:
                 
                 if result_type == "exit":
                     return result_type, result_message
-                elif result_type in ["approved", "modified", "retry", "completed"]:
+                elif result_type in ["approved", "modified", "retry", "completed", "new_task_created"]:
                     # Gate was handled, continue workflow
                     print(f"Gate decision: {result_message}")
                     continue
@@ -1353,6 +1778,9 @@ class ClaudeCodeOrchestrator:
                 debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
                 if not debug_mode:
                     print("✓ ALL TASKS COMPLETED SUCCESSFULLY")
+                return agent_type, instructions
+            elif agent_type == "user_checkpoint":
+                # USER validation task encountered - halt headless execution
                 return agent_type, instructions
             
             # Show agent progress
@@ -1381,10 +1809,32 @@ class ClaudeCodeOrchestrator:
         if agent_type == "explorer":
             task = self._get_current_task()
             if not task:
-                return "complete", "All tasks have been completed successfully! No more tasks in checklist."
+                # Check if there are more tasks after this one
+                if self._has_more_tasks():
+                    return "user_checkpoint", "User validation checkpoint reached. Complete manual testing before continuing."
+                else:
+                    return "complete", "All tasks have been completed successfully! No more tasks in checklist."
+            
+            # Check if this is a USER validation task - handle specially
+            if task.startswith('USER'):
+                result = self._handle_user_validation(task)
+                if result is None:
+                    # Gate was created, return checkpoint status
+                    return "user_checkpoint", "User validation checkpoint reached. Complete manual testing before continuing."
+                
             return self.agent_factory.create_agent("explorer", task=task)
             
         elif agent_type == "criteria_gate":
+            # Check if current task is a USER validation task - if so, skip criteria gate
+            current_task_raw = self._get_current_task_raw()
+            if current_task_raw and current_task_raw.startswith('USER'):
+                # This is a USER task, skip criteria gate and handle as user validation
+                result = self._handle_user_validation(current_task_raw)
+                if result is None:
+                    return "user_checkpoint", "User validation checkpoint reached. Complete manual testing before continuing."
+                else:
+                    return result
+                    
             exploration_file = self.outputs_dir / "exploration.md"
             if not exploration_file.exists():
                 return "error", "No exploration.md found for criteria approval"
@@ -1455,16 +1905,32 @@ class ClaudeCodeOrchestrator:
             unsupervised_file = self.claude_dir / "unsupervised"
             if unsupervised_file.exists():
                 verification_content = verification_file.read_text()
-                
-                # Check if verification recommends approval
                 verification_lower = verification_content.lower()
-                if "recommend approval" in verification_lower or "ready for approval" in verification_lower or "approve" in verification_lower:
+                
+                # First check for explicit failure indicators - these BLOCK auto-approval
+                failure_indicators = ["fail", "needs_review", "needs review", "error", "not ready", "incomplete"]
+                if any(indicator in verification_lower for indicator in failure_indicators):
+                    # Force interactive gate for failed verification
+                    debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+                    if debug_mode:
+                        print("Unsupervised mode: Verification failed - forcing human review")
+                    # Continue to interactive gate (don't auto-approve)
+                    
+                # Only auto-approve on explicit success indicators
+                elif "pass" in verification_lower or "success" in verification_lower or "complete" in verification_lower:
                     # Auto-approve completion in unsupervised mode
                     debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
                     if debug_mode:
-                        print("Unsupervised mode: Auto-approved completion")
+                        print("Unsupervised mode: Verification passed - auto-approved completion")
                     self.approve_completion()
                     return "complete", "Task automatically completed in unsupervised mode"
+                    
+                else:
+                    # Ambiguous verification - force human review
+                    debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+                    if debug_mode:
+                        print("Unsupervised mode: Ambiguous verification - forcing human review")
+                    # Continue to interactive gate
             
             verification_content = verification_file.read_text()
             
@@ -1484,8 +1950,8 @@ class ClaudeCodeOrchestrator:
             # Generic agent preparation for work agents
             return self.agent_factory.create_agent(agent_type)
 
-    def _get_current_task(self):
-        """Extract continue uncompleted task from tasks-checklist.md"""
+    def _get_current_task_raw(self):
+        """Extract current task from checklist without handling it"""
         
         if self.checklist_file.exists():
             content = self.checklist_file.read_text()
@@ -1499,6 +1965,265 @@ class ClaudeCodeOrchestrator:
                     if task:
                         return task
         return None
+
+    def _get_current_task(self):
+        """Extract current task from checklist, recognizing validation tasks"""
+        
+        if self.checklist_file.exists():
+            content = self.checklist_file.read_text()
+            lines = content.split('\n')
+            
+            for line in lines:
+                if re.match(r'^\s*-\s*\[\s*\]\s*', line):
+                    task = re.sub(r'^\s*-\s*\[\s*\]\s*', '', line)
+                    task = re.sub(r'\s*\(.*\)\s*$', '', task)
+                    task = task.strip()
+                    
+                    # Check if this is a USER task (validation, test, review, etc.)
+                    if task.startswith('USER'):
+                        # This is a human task - handle specially
+                        return self._handle_user_validation(task)
+                    elif task:
+                        return task
+        return None
+
+    def _handle_user_validation(self, task):
+        """Handle USER tasks by creating a user validation gate"""
+        
+        # Prevent multiple gate creation for the same validation
+        validation_key = f"user_validation_{hash(task)}"
+        if hasattr(self, '_current_validation_displayed') and self._current_validation_displayed == validation_key:
+            return None
+        self._current_validation_displayed = validation_key
+        
+        # Extract validation type and ID if present (e.g., "USER VALIDATION A", "USER TEST 3")
+        import re
+        match = re.match(r'USER\s+(\w+)\s*([A-Z0-9]*)', task)
+        if match:
+            validation_type = match.group(1)
+            validation_id = match.group(2) if match.group(2) else ""
+        else:
+            validation_type = "TASK"
+            validation_id = ""
+        
+        # Extract the task details after the colon if present  
+        if ':' in task:
+            colon_pos = task.find(':')
+            task_details = task[colon_pos + 1:].strip()
+        else:
+            task_details = task
+        
+        # Create gate content for the USER validation
+        from datetime import datetime
+        gate_content = f"""# 🚪 USER VALIDATION GATE
+
+## Validation Required: {validation_type} {validation_id}
+
+### Task Description
+{task}
+
+### Validation Instructions
+{task_details}
+
+### What You Need to Do
+1. Execute the validation steps described above
+2. Test all functionality as specified
+3. Document any issues found
+4. Choose your decision below based on results
+
+### Decision Required
+- If ALL tests PASS: Choose `user-approve`
+- If tests FAIL: Choose appropriate retry option
+- To exit and resume later: Choose `exit`
+
+### Started
+{datetime.now().isoformat()}
+"""
+        
+        # Create pending gate file
+        pending_gate_file = self.outputs_dir / "pending-user_validation-gate.md"
+        pending_gate_file.write_text(gate_content)
+        
+        # Return None to trigger gate handling in workflow
+        return None
+
+    def _generate_fix_task(self, validation_task, user_description):
+        """Generate a fix task based on validation failure and user input"""
+        
+        # Extract validation context
+        validation_type = "VALIDATION"
+        validation_id = ""
+        
+        import re
+        match = re.match(r'USER\s+(\w+)\s*([A-Z0-9]*)', validation_task)
+        if match:
+            validation_type = match.group(1)
+            validation_id = match.group(2) if match.group(2) else ""
+        
+        # Extract what was being validated
+        if ':' in validation_task:
+            colon_pos = validation_task.find(':')
+            validation_instructions = validation_task[colon_pos + 1:].strip()
+        else:
+            validation_instructions = validation_task
+        
+        # Generate contextual task description
+        if user_description and user_description.strip():
+            # User provided specific description - use as-is
+            fix_description = user_description.strip()
+        else:
+            # Generate generic fix task
+            fix_description = f"Fix issues found during {validation_type} {validation_id}".strip()
+        
+        # Create simple, clean task description
+        task_description = f"Fix validation failure: {fix_description}"
+        
+        return task_description
+
+    def _insert_task_before_user_validation(self, new_task_description):
+        """Insert a new task before the current USER validation task in the checklist"""
+        
+        if not self.checklist_file.exists():
+            return False
+        
+        content = self.checklist_file.read_text()
+        lines = content.split('\n')
+        
+        # Find the first incomplete USER validation task
+        user_task_line_index = None
+        user_task = None
+        
+        for i, line in enumerate(lines):
+            if re.match(r'^\s*-\s*\[\s*\]\s*', line):
+                task = re.sub(r'^\s*-\s*\[\s*\]\s*', '', line)
+                task = re.sub(r'\s*\(.*\)\s*$', '', task)
+                task = task.strip()
+                
+                if task.startswith('USER'):
+                    user_task_line_index = i
+                    user_task = task
+                    break
+        
+        if user_task_line_index is None:
+            print("No incomplete USER validation task found")
+            return False
+        
+        # Create new task line with same indentation as USER task
+        user_line = lines[user_task_line_index]
+        indent_match = re.match(r'^(\s*-\s*\[\s*\]\s*)', user_line)
+        indent = indent_match.group(1) if indent_match else '- [ ] '
+        
+        new_task_line = f"{indent}{new_task_description}"
+        
+        # Insert new task before the USER validation task
+        lines.insert(user_task_line_index, new_task_line)
+        
+        # Add blank line after the new task for proper spacing
+        lines.insert(user_task_line_index + 1, "")
+        
+        # Write back to checklist
+        self.checklist_file.write_text('\n'.join(lines))
+        
+        # Also add to tasks.md if it exists
+        if self.tasks_file.exists():
+            tasks_content = self.tasks_file.read_text()
+            new_task_entry = f"\n## {new_task_description}\n[Added to fix validation failure]\n"
+            
+            # Find a good place to insert in tasks.md - before USER validation section
+            if f"USER {user_task.split()[1]}" in tasks_content:
+                # Insert before the USER validation section
+                insertion_point = tasks_content.find(f"## USER {user_task.split()[1]}")
+                if insertion_point != -1:
+                    tasks_content = tasks_content[:insertion_point] + new_task_entry + tasks_content[insertion_point:]
+                    self.tasks_file.write_text(tasks_content)
+                else:
+                    # Append at end if can't find specific section
+                    self.tasks_file.write_text(tasks_content + new_task_entry)
+            else:
+                # Append at end
+                self.tasks_file.write_text(tasks_content + new_task_entry)
+        
+        print(f"✅ Inserted new task: {new_task_description}")
+        print(f"📍 Positioned before: {user_task}")
+        return True
+
+    def _get_current_user_validation_task(self):
+        """Get the current USER validation task that triggered the gate"""
+        
+        if not self.checklist_file.exists():
+            return None
+        
+        content = self.checklist_file.read_text()
+        lines = content.split('\n')
+        
+        # Find the first incomplete USER validation task
+        for line in lines:
+            if re.match(r'^\s*-\s*\[\s*\]\s*', line):
+                task = re.sub(r'^\s*-\s*\[\s*\]\s*', '', line)
+                task = re.sub(r'\s*\(.*\)\s*$', '', task)
+                task = task.strip()
+                
+                if task.startswith('USER'):
+                    return task
+        
+        return None
+
+    def _retry_last_implementation_task(self):
+        """Mark the previous implementation task (non-USER) as incomplete to retry it"""
+        
+        if not self.checklist_file.exists():
+            return False
+        
+        content = self.checklist_file.read_text()
+        lines = content.split('\n')
+        
+        # Find the last completed non-USER task before current USER validation
+        user_task_found = False
+        last_impl_task_line = None
+        
+        for i, line in enumerate(lines):
+            # Check if this is the current USER validation task
+            if re.match(r'^\s*-\s*\[\s*\]\s*', line):
+                task = re.sub(r'^\s*-\s*\[\s*\]\s*', '', line)
+                task = re.sub(r'\s*\(.*\)\s*$', '', task).strip()
+                if task.startswith('USER'):
+                    user_task_found = True
+                    break
+            
+            # Look for completed implementation tasks
+            if re.match(r'^\s*-\s*\[x\]\s*', line):
+                task = re.sub(r'^\s*-\s*\[x\]\s*', '', line)
+                task = re.sub(r'\s*\(.*\)\s*$', '', task).strip()
+                if not task.startswith('USER'):
+                    last_impl_task_line = i
+        
+        if not user_task_found or last_impl_task_line is None:
+            return False
+        
+        # Mark the last implementation task as incomplete
+        old_line = lines[last_impl_task_line]
+        new_line = old_line.replace('[x]', '[ ]')
+        lines[last_impl_task_line] = new_line
+        
+        # Write back to checklist
+        self.checklist_file.write_text('\n'.join(lines))
+        
+        # Extract task description for logging
+        task_desc = re.sub(r'^\s*-\s*\[\s*\]\s*', '', new_line)
+        task_desc = re.sub(r'\s*\(.*\)\s*$', '', task_desc).strip()
+        
+        print(f"🔄 Marked for retry: {task_desc}")
+        return True
+
+    def _has_more_tasks(self):
+        """Check if there are any uncompleted tasks in the checklist"""
+        if self.checklist_file.exists():
+            content = self.checklist_file.read_text()
+            lines = content.split('\n')
+            for line in lines:
+                if re.match(r'^\s*-\s*\[\s*\]\s*', line):
+                    return True
+        return False
         
     def _update_task_status(self, task, status):
         """Update task status in tasks.md"""
@@ -1555,7 +2280,7 @@ class ClaudeCodeOrchestrator:
                 
         current_task = self._get_current_task()
         if current_task:
-            status_info += "\nCurrent task: " + current_task[:60] + "\n"
+            status_info += "\nCurrent task: " + current_task + "\n"
             
         # Write and display status
         self._write_and_display(status_info, "current-status.md", "status")
@@ -1575,7 +2300,37 @@ class ClaudeCodeOrchestrator:
         
         for filename, agent in files:
             filepath = self.outputs_dir / filename
-            if filepath.exists():
+            
+            # Check if this is a gate that's currently active
+            is_active_gate = False
+            if "Gate" in agent:
+                # Check for active gate files
+                gate_type = agent.lower().replace(" gate", "").replace(" ", "-")
+                active_gate_file = self.outputs_dir / f"current-{gate_type}-gate.md"
+                pending_gate_file = self.outputs_dir / f"pending-{gate_type}-gate.md"
+                pending_validation_file = self.outputs_dir / "pending-user_validation-gate.md"
+                
+                if active_gate_file.exists() or pending_gate_file.exists() or (gate_type == "criteria" and pending_validation_file.exists()):
+                    is_active_gate = True
+                
+                # Special case for Completion Gate: active when all previous steps are done but completion file doesn't exist
+                elif agent == "Completion Gate" and not filepath.exists():
+                    # Check if all previous steps are complete
+                    all_previous_complete = True
+                    for prev_filename, prev_agent in files:
+                        if prev_agent == "Completion Gate":
+                            break  # Stop at completion gate
+                        prev_filepath = self.outputs_dir / prev_filename
+                        if not prev_filepath.exists():
+                            all_previous_complete = False
+                            break
+                    
+                    if all_previous_complete:
+                        is_active_gate = True
+            
+            if is_active_gate:
+                status_info += "🔄 " + agent.ljust(15) + " active\n"
+            elif filepath.exists():
                 size = filepath.stat().st_size
                 status_info += "✓ " + agent.ljust(15) + " complete (" + str(size) + " bytes)\n"
             else:
@@ -1583,9 +2338,51 @@ class ClaudeCodeOrchestrator:
                 
         current_task = self._get_current_task()
         if current_task:
-            status_info += "\nCurrent task: " + current_task[:60] + "\n"
+            status_info += "\nCurrent task: " + current_task + "\n"
             
         # Write status to file without displaying
+        status_filepath = self.outputs_dir / "current-status.md"
+        status_filepath.write_text(status_info)
+
+    def _update_status_file_with_running_agent(self, running_agent_type):
+        """Update status file to show a specific agent as running"""
+        status_info = "# Orchestration Status\n\n"
+        
+        agent_mapping = {
+            "explorer": ("exploration.md", "Explorer"),
+            "planner": ("plan.md", "Planner"), 
+            "coder": ("changes.md", "Coder"),
+            "verifier": ("verification.md", "Verifier"),
+            "scribe": ("orchestrator-log.md", "Scribe")
+        }
+        
+        files = [
+            ("exploration.md", "Explorer"),
+            ("success-criteria.md", "Criteria Gate"),
+            ("plan.md", "Planner"),
+            ("changes.md", "Coder"),
+            ("verification.md", "Verifier"),
+            ("completion-approved.md", "Completion Gate")
+        ]
+        
+        for filename, agent in files:
+            filepath = self.outputs_dir / filename
+            agent_type_key = agent.lower().replace(" gate", "").replace(" ", "_")
+            
+            if agent_type_key == running_agent_type or (agent_type_key == "criteria" and running_agent_type == "criteria_gate"):
+                # This agent is currently running
+                status_info += "🔄 " + agent.ljust(15) + " running\n"
+            elif filepath.exists():
+                size = filepath.stat().st_size
+                status_info += "✓ " + agent.ljust(15) + " complete (" + str(size) + " bytes)\n"
+            else:
+                status_info += "⏳ " + agent.ljust(15) + " pending\n"
+        
+        current_task = self._get_current_task_raw()
+        if current_task:
+            status_info += "\nCurrent task: " + current_task + "\n"
+            
+        # Write status to file
         status_filepath = self.outputs_dir / "current-status.md"
         status_filepath.write_text(status_info)
 
@@ -1694,6 +2491,10 @@ class ClaudeCodeOrchestrator:
             if unsupervised_file.exists():
                 print("Unsupervised mode detected - auto-continuing workflow")
                 self.clean_outputs()
+                
+                # Show workflow header with next task
+                self._show_workflow_header()
+                
                 agent, instructions = self.get_continue_agent()
                 print("\n" + "="*60)
                 print("AUTO-STARTING - AGENT: " + agent.upper())
@@ -1703,6 +2504,64 @@ class ClaudeCodeOrchestrator:
             else:
                 print("Execute the slash-command `/orchestrate clean` to prepare for continue task")
                 print("="*60)
+        
+    def approve_user_validation(self):
+        """Approve USER validation and mark task complete"""
+        task = self._get_current_task_raw()
+        if task and task.startswith('USER'):
+            # Find the actual task line in the checklist for better matching
+            original_task = self._find_user_task_in_checklist()
+            if original_task:
+                # Mark the USER task as complete in the checklist
+                self._update_checklist(original_task, completed=True)
+            else:
+                # Fallback to the processed task
+                self._update_checklist(task, completed=True)
+            
+            # Log the approval
+            from datetime import datetime
+            approval_file = self.outputs_dir / "user-validation-approved.md"
+            approval_content = f"""# User Validation Approved
+
+## Task
+{task}
+
+## Status
+APPROVED - Tests passed
+
+## Approved At
+{datetime.now().isoformat()}
+
+## Next Steps
+Continuing to next task in workflow
+"""
+            approval_file.write_text(approval_content)
+            
+            # Clean up pending gate file immediately
+            pending_gate_file = self.outputs_dir / "pending-user_validation-gate.md"
+            if pending_gate_file.exists():
+                pending_gate_file.unlink()
+                print(f"Removed pending user validation gate file")
+            
+            print(f"✅ USER VALIDATION APPROVED")
+            print(f"Task marked complete: {task}")
+            print(f"Continuing to next task...")
+        else:
+            print("No current USER task found to approve")
+    
+    def _find_user_task_in_checklist(self):
+        """Find the current USER task line in the checklist"""
+        if self.checklist_file.exists():
+            content = self.checklist_file.read_text()
+            lines = content.split('\n')
+            
+            for line in lines:
+                if re.match(r'^\s*-\s*\[\s*\]\s*', line) and 'USER' in line:
+                    # Extract the task text without the checkbox
+                    task = re.sub(r'^\s*-\s*\[\s*\]\s*', '', line)
+                    task = re.sub(r'\s*\(.*\)\s*$', '', task).strip()
+                    return task
+        return None
         
     def retry_from_planner(self):
         """Restart from Planner phase (keep criteria)"""
@@ -1729,8 +2588,14 @@ class ClaudeCodeOrchestrator:
             "completion-approved.md",
             "criteria-modification-request.md",
             "pending-criteria-gate.md",
-            "pending-completion-gate.md"
-            # Note: orchestrator-log.md is preserved across cycles for historical record
+            "current-completion-gate.md",
+            "pending-user_validation-gate.md",
+            "current-status.md",
+            "current-criteria-gate.md",
+            "current-user-validation.md",
+            "next-command.txt",
+            "status.txt"
+            # Note: orchestrator-log.md AND agent-log.md files are preserved for historical record
         ]
         
         cleaned_count = 0
@@ -1761,67 +2626,75 @@ class ClaudeCodeOrchestrator:
         """Interactive bootstrap to help users generate initial tasks"""
         
         bootstrap_instructions = """
-BOOTSTRAP MODE: Help the user create initial tasks for their project
+BOOTSTRAP MODE: Generate human-in-the-loop task structure for the project
 
-TASK: Analyze the current project and guide the user through creating meaningful tasks
+CRITICAL REQUIREMENTS:
+1. Generate THREE files: tasks-checklist.md, tasks.md, and concept.md
+2. Each task must be ONE PARAGRAPH on a SINGLE LINE (no line breaks within tasks)
+3. Create 10-15 tasks MAXIMUM per taskset
+4. Balance tasks for roughly equal complexity and likelihood of success
+5. Embed USER validation checkpoints directly in the task sequence
+6. USER tasks must start with "USER" (e.g., USER VALIDATION, USER TEST, USER REVIEW)
 
-YOUR RESPONSIBILITIES:
-1. Analyze the current codebase and project structure
-2. Ask the user about their goals and priorities  
-3. Suggest specific, actionable tasks based on the analysis
-4. Create both tasks.md and tasks-checklist.md files
-5. Explain the next steps for using the orchestrator
+FILE STRUCTURE TO CREATE:
+
+## .claude/concept.md
+High-level design document that:
+- Describes the overall goal and architecture
+- Defines success criteria for the entire taskset
+- Explains key design decisions and trade-offs
+- Provides context for all tasks
+- Self-contained reference (doesn't reference other files)
+
+## .claude/tasks.md
+Detailed task descriptions where:
+- Each task is a comprehensive single paragraph
+- Tasks frequently reference concept.md for design rationale
+- USER tasks are clearly marked and detailed
+- USER tasks specify exact commands/tests to run
+- Each task ~500-1000 characters for adequate detail
+
+## .claude/tasks-checklist.md
+Actionable checklist where:
+- Each line is one task (matching tasks.md)
+- Tasks reference both tasks.md and concept.md
+- Format: - [ ] Brief description referencing details in tasks.md and concept in concept.md
+- USER tasks clearly start with "USER" keyword
+
+TASK STRUCTURE PATTERN:
+1. Implementation task (agents do work)
+2. USER VALIDATION task (human tests and verifies)
+3. Implementation task (agents continue)
+4. USER TEST task (human tests again)
+[Repeat pattern throughout]
+
+USER TASK FORMAT:
+"USER [TYPE] [ID]: [Description of what to test] by executing these specific commands: (1) [command], (2) [command], (3) [verification step], checking that [expected outcome], and documenting results in [location] before proceeding - DO NOT CONTINUE if [failure condition]"
+
+Types can be: VALIDATION, TEST, REVIEW, CHECK, VERIFY, etc.
 
 ANALYSIS TO PERFORM:
-- Examine package.json, requirements.txt, or similar dependency files
-- Look at README.md and documentation
-- Identify main source code directories and files
-- Check for existing tests, build scripts, CI/CD
-- Note any obvious issues (missing tests, outdated deps, TODO comments)
+1. Examine project structure and existing code
+2. Identify the primary objective/problem to solve
+3. Break down into logical implementation chunks
+4. Insert USER checkpoints after each major feature
+5. Ensure each task is independently testable
 
 QUESTIONS TO ASK USER:
-1. "What are the main goals for this project?"
-2. "What problems are you currently facing?"
-3. "What would you like to work on first - bugs, features, or improvements?"
-4. "Are there any specific areas of the code that need attention?"
+1. "What is the primary goal for this taskset?"
+2. "What constitutes success for this work?"
+3. "Are there specific areas that need extra validation?"
+4. "What's your risk tolerance for this implementation?"
+5. "Should this be production-ready or prototype?"
 
-TASK GENERATION APPROACH:
-- Create 3-5 specific, actionable tasks
-- Mix of different types: bug fixes, features, tests, docs, refactoring
-- Start with smaller tasks that can build momentum
-- Include acceptance criteria for each task
+TASK BALANCING:
+- Each task should take roughly 1-3 agent cycles
+- USER tasks should take 5-15 minutes of human time
+- Complex features split across multiple tasks with validation between
+- No task should be a single line of code change
+- No task should be a complete rewrite
 
-OUTPUT FORMAT:
-Create both .claude/tasks.md and .claude/tasks-checklist.md with:
-
-tasks.md:
-```markdown
-# Project Tasks
-
-## Current Sprint
-- [ ] [Generated task 1 with clear acceptance criteria]
-- [ ] [Generated task 2 with clear acceptance criteria]
-
-## Backlog  
-- [ ] [Future task 1]
-- [ ] [Future task 2]
-
-## Completed
-[Empty initially]
-```
-
-tasks-checklist.md:
-```markdown
-# Tasks Checklist
-
-- [ ] [Same tasks as above but in simple checklist format]
-```
-
-FINAL STEP: 
-After creating the files, tell the user:
-"Bootstrap complete! Your tasks are ready. Execute the slash-command `/orchestrate start` to begin your first workflow."
-
-Begin by analyzing the current directory and asking the user about their goals.
+Begin by analyzing the current directory and asking about the goal.
 """
         
         print("\n" + "="*60)
@@ -1829,6 +2702,39 @@ Begin by analyzing the current directory and asking the user about their goals.
         print("="*60)
         print(bootstrap_instructions)
         print("="*60)
+
+    def bootstrap_with_validation(self):
+        """Enhanced bootstrap that generates human-in-the-loop task structure"""
+        
+        # Check if bootstrap files already exist
+        concept_file = self.claude_dir / "concept.md"
+        if concept_file.exists():
+            print("Warning: concept.md already exists. Rename or remove existing files first.")
+            return
+        
+        # Set bootstrap mode flag for agents
+        bootstrap_flag = self.claude_dir / ".bootstrap-mode"
+        bootstrap_flag.write_text("active")
+        
+        # Provide enhanced instructions with validation pattern
+        print("\n" + "="*60)
+        print("HUMAN-IN-THE-LOOP BOOTSTRAP MODE")
+        print("="*60)
+        print("This will generate three files with embedded validation:")
+        print("1. concept.md - Overall design and architecture")
+        print("2. tasks.md - Detailed task descriptions") 
+        print("3. tasks-checklist.md - Actionable checklist")
+        print()
+        print("USER tasks (starting with 'USER') will halt the orchestrator")
+        print("for manual validation/testing before continuing.")
+        print("="*60)
+        
+        # Call the main bootstrap method
+        self.bootstrap_tasks()
+        
+        # Clean up bootstrap flag after completion
+        if bootstrap_flag.exists():
+            bootstrap_flag.unlink()
         
     def _retry_from_phase(self, phase_name, display_name=None):
         """Generic retry method for any phase"""
@@ -1889,11 +2795,17 @@ Begin by analyzing the current directory and asking the user about their goals.
         task_found = False
         
         for i, line in enumerate(lines):
-            if task[:50] in line and '- [ ]' in line:
+            # More robust task matching - check if the line contains the task start and is unchecked
+            if '- [ ]' in line and (task[:50] in line or task.split(':')[0] in line):
                 if completed:
-                    lines[i] = "- [x] " + task + " (Completed: " + timestamp + ")"
+                    # Extract existing task text and add completion timestamp
+                    existing_task = re.sub(r'^\s*-\s*\[\s*\]\s*', '', line)
+                    existing_task = re.sub(r'\s*\(.*\)\s*$', '', existing_task).strip()
+                    lines[i] = f"- [x] {existing_task} (Completed: {timestamp})"
                 else:
-                    lines[i] = "- [ ] " + task + " (Attempted: " + timestamp + ")"
+                    existing_task = re.sub(r'^\s*-\s*\[\s*\]\s*', '', line)
+                    existing_task = re.sub(r'\s*\(.*\)\s*$', '', existing_task).strip()
+                    lines[i] = f"- [ ] {existing_task} (Attempted: {timestamp})"
                 task_found = True
                 break
                 
@@ -1920,13 +2832,300 @@ Begin by analyzing the current directory and asking the user about their goals.
             print("Already in supervised mode - no unsupervised file found")
 
 
+def clear_ui_command(args):
+    """Kill all dashboard and API server processes"""
+    import subprocess
+    import sys
+    
+    print("Stopping all dashboard and API server processes...")
+    
+    try:
+        # Kill API server processes (multiple patterns to catch all variants)
+        patterns_killed = []
+        result = subprocess.run(['pkill', '-f', 'api_server'], capture_output=True)
+        if result.returncode == 0:
+            patterns_killed.append("api_server processes")
+            
+        # Also kill by exact python script name patterns
+        subprocess.run(['pkill', '-f', 'api_server.py'], capture_output=True)
+        subprocess.run(['pkill', '-f', 'Python.*api_server'], capture_output=True)
+        
+        print("✓ Stopped API server processes")
+        
+        # Kill dashboard server processes  
+        subprocess.run(['pkill', '-f', 'dashboard_server'], capture_output=True)
+        subprocess.run(['pkill', '-f', 'dashboard_server.py'], capture_output=True)
+        subprocess.run(['pkill', '-f', 'Python.*dashboard_server'], capture_output=True)
+        print("✓ Stopped dashboard server processes")
+        
+        # Kill any orchestrate serve processes
+        subprocess.run(['pkill', '-f', 'cc-orchestrate serve'], capture_output=True)
+        subprocess.run(['pkill', '-f', 'orchestrate serve'], capture_output=True)
+        print("✓ Stopped orchestrate serve processes")
+        
+        # Give processes time to terminate and verify cleanup
+        import time
+        
+        # Wait progressively for all processes to fully terminate
+        for attempt in range(5):  # Check up to 5 times over 10 seconds
+            time.sleep(2)
+            
+            # Check if any are still actually running (not just terminating)
+            remaining = subprocess.run(['ps', 'aux'], capture_output=True, text=True)
+            running_processes = []
+            
+            for line in remaining.stdout.split('\n'):
+                if ('api_server' in line or 'dashboard_server' in line) and 'grep' not in line:
+                    # Double-check the process is actually responsive
+                    try:
+                        pid = line.split()[1]
+                        # Try to get process status
+                        status_check = subprocess.run(['ps', '-o', 'stat', '-p', pid], 
+                                                    capture_output=True, text=True)
+                        if status_check.returncode == 0 and 'Z' not in status_check.stdout:
+                            running_processes.append(line.strip())
+                    except:
+                        pass
+            
+            if not running_processes:
+                print("✓ All UI server processes have been stopped.")
+                return
+            elif attempt == 4:  # Last attempt
+                print(f"⚠ Warning: {len(running_processes)} process(es) still running after cleanup:")
+                for proc in running_processes:
+                    print(f"  {proc}")
+                print("These processes may be unresponsive. You can force-kill them with:")
+                for proc in running_processes:
+                    pid = proc.split()[1]
+                    print(f"  kill -9 {pid}")
+            else:
+                print(f"Waiting for {len(running_processes)} process(es) to finish terminating... (attempt {attempt + 1}/5)")
+        
+        print("Process cleanup completed.")
+        
+    except Exception as e:
+        print(f"Error stopping processes: {e}")
+        sys.exit(1)
+
+
+def serve_command(args):
+    """Start dashboard and API servers with health monitoring"""
+    
+    # Initialize logger for serve command
+    serve_logger = OrchestratorLogger("orchestrator-serve")
+    serve_logger.info("Starting orchestrator serve command")
+    
+    # Health check function
+    def check_server_health(host, port, endpoint="/", timeout=5):
+        try:
+            import urllib.request
+            import urllib.error
+            url = f"http://{host}:{port}{endpoint}"
+            response = urllib.request.urlopen(url, timeout=timeout)
+            return response.getcode() == 200
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError):
+            return False
+    
+    # Find available ports
+    dashboard_port = find_available_port(5678, 20)
+    if dashboard_port == 5678:
+        serve_logger.info(f"Dashboard server will use port {dashboard_port}")
+    else:
+        serve_logger.warning(f"Port 5678 busy, using fallback port {dashboard_port}")
+    
+    api_port = find_available_port(8000, 20)
+    if api_port == 8000:
+        serve_logger.info(f"API server will use port {api_port}")
+    else:
+        serve_logger.warning(f"Port 8000 busy, using fallback port {api_port}")
+    
+    # Initialize process manager (check for meta mode via environment)
+    meta_mode = os.getenv('CLAUDE_ORCHESTRATOR_META_MODE') == '1'
+    process_manager = ProcessManager(meta_mode=meta_mode)
+    
+    # Health monitoring state
+    health_monitoring_active = True
+    health_check_thread = None
+    
+    def health_monitor():
+        """Periodic health check for both servers"""
+        while health_monitoring_active:
+            try:
+                time.sleep(30)  # Check every 30 seconds
+                if not health_monitoring_active:
+                    break
+                    
+                # Check dashboard health
+                if not check_server_health('localhost', dashboard_port):
+                    serve_logger.warning(f"Dashboard server on port {dashboard_port} is unresponsive")
+                
+                # Check API server health if it's running
+                running_processes = process_manager.get_running_processes()
+                if 'api_server' in running_processes:
+                    if not check_server_health('localhost', api_port, '/api/status'):
+                        serve_logger.warning(f"API server on port {api_port} is unresponsive")
+                        
+            except Exception as e:
+                if health_monitoring_active:
+                    serve_logger.error(f"Health check error: {e}")
+    
+    def cleanup_and_exit(signal_num=None, frame=None):
+        """Cleanup function for graceful shutdown"""
+        nonlocal health_monitoring_active, health_check_thread
+        
+        serve_logger.info("Shutting down servers...")
+        health_monitoring_active = False
+        
+        # Wait for health check thread to finish
+        if health_check_thread and health_check_thread.is_alive():
+            health_check_thread.join(timeout=2)
+        
+        # Cleanup all processes with shorter timeout for web servers
+        success = process_manager.cleanup_all_processes(graceful_timeout=3, force_timeout=2)
+        if success:
+            serve_logger.info("All servers stopped successfully")
+        else:
+            serve_logger.warning("Some processes may not have terminated properly")
+        
+        # Log shutdown before exiting
+        serve_logger.shutdown()
+        sys.exit(0 if success else 1)
+    
+    # Register signal handlers
+    signal.signal(signal.SIGINT, cleanup_and_exit)
+    signal.signal(signal.SIGTERM, cleanup_and_exit)
+    
+    try:
+        # Start API server as subprocess using the real api_server.py
+        serve_logger.info(f"Starting API server on port {api_port}...")
+        orchestrator_dir = os.path.expanduser("~/.claude-orchestrator")
+        api_script = os.path.join(orchestrator_dir, "api_server.py")
+        api_cmd = [sys.executable, api_script, "--port", str(api_port), "--no-browser"]
+        
+        # Start API server from current project directory to read .agent-outputs files
+        current_dir = os.getcwd()
+        api_process = subprocess.Popen(api_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=current_dir)
+        process_manager.register_process('api_server', api_process)
+        serve_logger.info(f"API server registered (PID: {api_process.pid})")
+        
+        # Give API server time to start
+        time.sleep(2)
+        
+        # Verify API server started
+        if check_server_health('localhost', api_port, '/api/status'):
+            serve_logger.info(f"API server healthy on http://localhost:{api_port}")
+        else:
+            serve_logger.warning(f"API server may not have started properly on port {api_port}")
+        
+        # Start health monitoring in background
+        health_check_thread = threading.Thread(target=health_monitor, daemon=True)
+        health_check_thread.start()
+        
+        # Start dashboard server in background first
+        serve_logger.info(f"Starting dashboard server on port {dashboard_port}...")
+        serve_logger.info("Press Ctrl+C to stop all servers")
+        serve_logger.info("-" * 50)
+        
+        # Start dashboard server using local version to serve current directory files
+        current_dir = os.getcwd()
+        local_dashboard_script = os.path.join(current_dir, "dashboard_server.py")
+        
+        # Check if local dashboard_server.py exists, fall back to global if not
+        if os.path.exists(local_dashboard_script):
+            dashboard_script = local_dashboard_script
+        else:
+            dashboard_script = os.path.join(os.path.expanduser("~/.claude-orchestrator"), "dashboard_server.py")
+        
+        dashboard_process = subprocess.Popen([
+            sys.executable, dashboard_script, str(dashboard_port)
+        ], cwd=current_dir)
+        process_manager.register_process('dashboard_server', dashboard_process)
+        serve_logger.info(f"Dashboard server registered (PID: {dashboard_process.pid})")
+        
+        # Wait for dashboard server to be ready to serve actual pages
+        serve_logger.info("Waiting for dashboard server to start...")
+        dashboard_ready = False
+        
+        # Give the subprocess time to actually start
+        time.sleep(2)
+        
+        # Import urllib modules at the top level
+        import urllib.request
+        import urllib.error
+        
+        for i in range(40):  # Wait up to 20 more seconds
+            try:
+                # Test the actual dashboard page, not just health
+                test_url = f"http://localhost:{dashboard_port}/dashboard.html"
+                try:
+                    response = urllib.request.urlopen(test_url, timeout=3)
+                    if response.getcode() == 200:
+                        # Try multiple times to be absolutely sure
+                        success_count = 0
+                        for verify in range(3):
+                            try:
+                                verify_response = urllib.request.urlopen(test_url, timeout=1)
+                                if verify_response.getcode() == 200:
+                                    success_count += 1
+                            except:
+                                break
+                            time.sleep(0.1)
+                        
+                        if success_count == 3:
+                            dashboard_ready = True
+                            serve_logger.info("Dashboard server is ready!")
+                            break
+                except (urllib.error.URLError, urllib.error.HTTPError, OSError):
+                    pass
+                    
+            except Exception:
+                pass
+            time.sleep(0.5)
+        
+        if not dashboard_ready:
+            serve_logger.warning(f"Dashboard server may not have started properly on port {dashboard_port}")
+        
+        # Open browser immediately once dashboard is confirmed ready
+        dashboard_url = f"http://localhost:{dashboard_port}"
+        if not args.no_browser and dashboard_ready:
+            serve_logger.info(f"Opening browser to {dashboard_url}")
+            try:
+                webbrowser.open(dashboard_url)
+                serve_logger.info("Browser opened successfully")
+            except Exception as e:
+                serve_logger.error(f"Could not open browser: {e}")
+        
+        serve_logger.info(f"Dashboard available at: {dashboard_url}")
+        serve_logger.info(f"Dashboard UI at: {dashboard_url}/dashboard.html") 
+        serve_logger.info(f"Health check at: {dashboard_url}/health")
+        
+        # Keep the main process alive and wait for signals
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            pass
+        
+        # If dashboard server exits, cleanup
+        cleanup_and_exit()
+        
+    except KeyboardInterrupt:
+        cleanup_and_exit()
+    except Exception as e:
+        serve_logger.error(f"Error starting servers: {e}")
+        cleanup_and_exit()
+
+
 def show_help():
     """Display help information about available commands"""
     print("\nAvailable commands:")
     print("  Workflow: start, continue, interactive, status, clean, complete, fail, bootstrap")
     print("  Gates: approve-criteria, modify-criteria, retry-explorer")
     print("         approve-completion, retry-from-planner, retry-from-coder, retry-from-verifier")
+    print("         user-approve, new-task [description] - Create new task during user validation")
     print("  Mode: unsupervised, supervised")
+    print("  UI: serve - Start dashboard and API servers")
+    print("      clear-ui - Stop all dashboard and API server processes")
     print("  Interactive mode: Runs persistent workflow with interactive gates")
 
 def main():
@@ -1964,6 +3163,19 @@ def main():
         
     elif command == "continue":
         agent, instructions = orchestrator.get_continue_agent()
+        
+        # Handle new task creation by automatically continuing
+        if agent == "new_task_created":
+            print("\n" + "="*60)
+            print("AGENT: " + agent.upper())
+            print("="*60)
+            print(instructions)
+            print("="*60)
+            print()
+            
+            # Automatically continue to the newly created task
+            agent, instructions = orchestrator.get_continue_agent()
+        
         print("\n" + "="*60)
         print("AGENT: " + agent.upper())
         print("="*60)
@@ -2052,14 +3264,76 @@ def main():
     elif command == "retry-from-verifier":
         orchestrator.retry_from_verifier()
         
+    elif command == "user-approve":
+        orchestrator.approve_user_validation()
+        
+    elif command == "new-task":
+        # Handle new-task command with description
+        description = " ".join(sys.argv[2:]) if len(sys.argv) > 2 else None
+        if not description:
+            print("Error: new-task command requires a description")
+            print("Usage: new-task [description]")
+            sys.exit(1)
+        
+        # Execute the new-task logic directly from the interactive gate handling
+        current_user_task = orchestrator._get_current_user_validation_task()
+        if current_user_task:
+            fix_task = orchestrator._generate_fix_task(current_user_task, description)
+            success = orchestrator._insert_task_before_user_validation(fix_task)
+            
+            if success:
+                # Remove pending gate state
+                gate_state_file = orchestrator.outputs_dir / "pending-user_validation-gate.md"
+                if gate_state_file.exists():
+                    gate_state_file.unlink()
+                
+                # Clean the workflow state for the new task (like CLI does)
+                orchestrator.clean_outputs()
+                
+                # Update orchestrator status to reflect the clean state
+                orchestrator._update_status_file()
+                
+                print(f"✅ Created fix task: {fix_task}")
+                print("🔄 Workflow reset - Explorer will handle the new task")
+            else:
+                print("❌ Failed to insert new task. Please try again.")
+                sys.exit(1)
+        else:
+            print("❌ Could not find current USER validation task.")
+            sys.exit(1)
+        
     elif command == "bootstrap":
-        orchestrator.bootstrap_tasks()
+        # Check for bootstrap mode flag
+        if "--with-validation" in sys.argv or "--hil" in sys.argv:
+            orchestrator.bootstrap_with_validation()
+        else:
+            # Legacy bootstrap
+            orchestrator.bootstrap_tasks()
         
     elif command == "unsupervised":
         orchestrator.enable_unsupervised_mode()
         
     elif command == "supervised":
         orchestrator.disable_unsupervised_mode()
+        
+    elif command == "stop":
+        # Stop all orchestrator processes system-wide
+        # Check if running in meta mode
+        meta_mode = 'meta' in sys.argv
+        process_manager = ProcessManager(meta_mode=meta_mode)
+        success = process_manager.cleanup_system_wide()
+        if success:
+            print("All orchestrator processes have been stopped.")
+            sys.exit(0)
+        else:
+            print("Warning: Some processes may not have been terminated properly.")
+            sys.exit(1)
+        
+    elif command == "serve":
+        serve_command(args)
+        
+    elif command == "clear-ui":
+        clear_ui_command(args)
         
     elif command == "help":
         show_help()
