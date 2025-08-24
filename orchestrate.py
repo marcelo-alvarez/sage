@@ -2894,10 +2894,30 @@ def clear_ui_command(args):
                 print(f"⚠ Warning: {len(running_processes)} process(es) still running after cleanup:")
                 for proc in running_processes:
                     print(f"  {proc}")
-                print("These processes may be unresponsive. You can force-kill them with:")
+                print("Force-killing unresponsive processes...")
                 for proc in running_processes:
-                    pid = proc.split()[1]
-                    print(f"  kill -9 {pid}")
+                    try:
+                        pid = int(proc.split()[1])
+                        os.kill(pid, signal.SIGKILL)
+                        print(f"✓ Force-killed process {pid}")
+                    except (OSError, ProcessLookupError, ValueError) as e:
+                        print(f"✗ Could not force-kill process {pid}: {e}")
+                    except Exception as e:
+                        print(f"✗ Unexpected error force-killing process: {e}")
+                
+                # Wait a moment and verify cleanup
+                time.sleep(1)
+                final_check = subprocess.run(['pgrep', '-f', 'api_server|dashboard_server'], 
+                                           capture_output=True, text=True)
+                if final_check.returncode == 0:
+                    remaining_count = len([line for line in final_check.stdout.split('\n') 
+                                         if line.strip() and 'grep' not in line])
+                    if remaining_count > 0:
+                        print(f"⚠ {remaining_count} process(es) still remain after force-kill")
+                    else:
+                        print("✓ All processes successfully terminated")
+                else:
+                    print("✓ All processes successfully terminated")
             else:
                 print(f"Waiting for {len(running_processes)} process(es) to finish terminating... (attempt {attempt + 1}/5)")
         
@@ -3126,6 +3146,8 @@ def show_help():
     print("  Mode: unsupervised, supervised")
     print("  UI: serve - Start dashboard and API servers")
     print("      clear-ui - Stop all dashboard and API server processes")
+    print("      killall - Force terminate all orchestrator processes (clear-ui + pkill)")
+    print("      stop - Stop orchestrator processes system-wide")
     print("  Interactive mode: Runs persistent workflow with interactive gates")
 
 def main():
@@ -3327,6 +3349,45 @@ def main():
             sys.exit(0)
         else:
             print("Warning: Some processes may not have been terminated properly.")
+            sys.exit(1)
+        
+    elif command == "killall":
+        # Force kill all orchestrator processes and clean up everything
+        print("🚫 KILLALL: Terminating all orchestrator processes...")
+        
+        # Check if running in meta mode
+        meta_mode = 'meta' in sys.argv
+        process_manager = ProcessManager(meta_mode=meta_mode)
+        
+        # First, try to stop UI servers cleanly
+        try:
+            clear_ui_command(args)
+        except:
+            pass  # Ignore errors, we'll force kill everything anyway
+        
+        # Force kill all orchestrator-related Python processes
+        import subprocess
+        try:
+            # Find all Python processes running orchestrator files
+            result = subprocess.run(['pgrep', '-f', 'orchestrate.py|api_server.py|dashboard_server.py'], 
+                                  capture_output=True, text=True)
+            if result.returncode == 0:
+                pids = result.stdout.strip().split('\n')
+                for pid in pids:
+                    if pid.strip():
+                        try:
+                            os.kill(int(pid), signal.SIGKILL)
+                            print(f"✓ Force-killed process {pid}")
+                        except (OSError, ProcessLookupError, ValueError):
+                            pass  # Process already dead
+            
+            # Clean up PID files
+            process_manager.cleanup_system_wide()
+            print("✓ All orchestrator processes terminated and cleaned up.")
+            
+        except Exception as e:
+            print(f"Error during killall: {e}")
+            print("Some processes may still be running.")
             sys.exit(1)
         
     elif command == "serve":

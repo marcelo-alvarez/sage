@@ -66,23 +66,23 @@
 
         .control-icons {
             position: absolute;
-            left: 20px;
+            left: 65px;
             top: 50%;
             transform: translateY(-50%);
             display: flex;
-            gap: 12px;
+            gap: 15px;
         }
 
         .control-btn {
-            width: 36px;
-            height: 36px;
+            width: 42px;
+            height: 42px;
             border: none;
             border-radius: 8px;
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 16px;
+            font-size: 18px;
             transition: all 0.2s ease;
             background: rgba(255, 255, 255, 0.1);
             color: #ffffff;
@@ -163,21 +163,50 @@
             font-weight: 400;
         }
 
+        /* Taskset Button */
+        .taskset-btn {
+            background: rgba(52, 152, 219, 0.2);
+            border: 1px solid rgba(52, 152, 219, 0.3);
+            border-radius: 8px;
+            color: #3498db;
+            padding: 10px 16px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s ease;
+            text-decoration: none;
+            margin-left: auto;
+        }
+
+        .taskset-btn:hover {
+            background: rgba(52, 152, 219, 0.3);
+            border-color: rgba(52, 152, 219, 0.4);
+            transform: translateY(-1px);
+        }
+
+        .taskset-btn i {
+            font-size: 18px;
+        }
+
         /* Mode Switcher */
         .mode-switcher {
             position: absolute;
-            right: 30px;
-            top: 30px;
+            right: 65px;
+            top: 50%;
+            transform: translateY(-50%);
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 12px;
         }
 
         .mode-toggle {
             position: relative;
             display: inline-block;
-            width: 60px;
-            height: 30px;
+            width: 70px;
+            height: 36px;
         }
 
         .mode-toggle input {
@@ -201,8 +230,8 @@
         .slider:before {
             position: absolute;
             content: "";
-            height: 22px;
-            width: 22px;
+            height: 28px;
+            width: 28px;
             left: 4px;
             bottom: 4px;
             background-color: #2a2a2b;
@@ -215,7 +244,7 @@
         }
 
         input:checked + .slider:before {
-            transform: translateX(30px);
+            transform: translateX(34px);
         }
 
         .mode-label {
@@ -342,6 +371,7 @@
             align-items: center;
             justify-content: center;
             gap: 10px;
+            position: relative;
         }
 
         .workflow-content {
@@ -676,7 +706,7 @@
             line-height: 1.4;
             padding: 15px;
             border-radius: 4px;
-            max-height: 400px;
+            max-height: 180px;
             overflow-y: auto;
             white-space: pre-wrap;
             word-break: break-word;
@@ -810,12 +840,17 @@
 
         .server-logs-section .workflow-header {
             display: flex;
-            flex-direction: column;
+            justify-content: space-between;
             align-items: center;
             padding: 0 0 10px 0;
             margin-bottom: 20px;
             border-bottom: 1px solid rgba(75, 85, 99, 0.2);
             gap: 15px;
+        }
+
+        .server-logs-section .workflow-title {
+            justify-content: flex-start;
+            margin: 0;
         }
 
         .log-controls {
@@ -865,7 +900,7 @@
             background: #0d1117;
             border-radius: 8px;
             border: none;
-            max-height: 400px;
+            max-height: 180px;
             overflow-y: auto;
             margin: 0;
         }
@@ -949,12 +984,15 @@
         .modal-dialog {
             background: #1a1a1b;
             border-radius: 16px;
-            max-width: 600px;
-            width: 100%;
-            max-height: 80vh;
+            max-width: 900px;
+            width: 90%;
+            max-height: 95vh;
+            height: 90vh;
             overflow-y: auto;
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
             animation: modalSlideIn 0.3s ease-out;
+            display: flex;
+            flex-direction: column;
         }
 
         @keyframes modalSlideIn {
@@ -994,23 +1032,67 @@
             font-family: 'Space Mono', monospace;
             text-rendering: optimizeLegibility;
             font-weight: 300;
+            flex: 1;
+            overflow-y: auto;
         }
 
         .validation-content {
-            background: #1a1a1b;
+            background: #0d1117;
             border-radius: 8px;
-            padding: 20px;
+            padding: 24px;
             margin-bottom: 25px;
-            font-family: 'Space Mono', monospace;
-            font-size: 1.15em;
-            line-height: 1.6;
-            color: #ffffff;
-            white-space: pre-wrap;
-            word-wrap: break-word;
-            font-weight: 300;
-            max-height: 300px;
+            flex: 1;
             overflow-y: auto;
             text-rendering: optimizeLegibility;
+        }
+        
+        /* Clean GitHub markdown styling for validation content */
+        .validation-content .markdown-body {
+            font-family: 'Inter', sans-serif;
+            font-size: 24px;
+            line-height: 1.6;
+            color: #c9d1d9;
+            background-color: transparent;
+        }
+        
+        .validation-content .markdown-body h1,
+        .validation-content .markdown-body h2,
+        .validation-content .markdown-body h3,
+        .validation-content .markdown-body h4,
+        .validation-content .markdown-body h5,
+        .validation-content .markdown-body h6 {
+            color: #f0f6fc;
+            border-bottom-color: #21262d;
+        }
+        
+        .validation-content .markdown-body code {
+            background-color: rgba(110, 118, 129, 0.4);
+            color: #f0f6fc;
+            border-radius: 6px;
+            font-size: 98%;
+            padding: 0.2em 0.4em;
+        }
+        
+        .validation-content .markdown-body pre {
+            background-color: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+        }
+        
+        .validation-content .markdown-body blockquote {
+            border-left: 0.25em solid #30363d;
+            color: #7d8590;
+        }
+        
+        /* Plain text fallback styling for validation content */
+        .validation-content .plain-text {
+            font-family: 'Space Mono', monospace;
+            font-size: 24px;
+            line-height: 1.5;
+            color: #ffffff;
+            white-space: pre-wrap;
+            text-rendering: optimizeLegibility;
+            font-weight: 300;
         }
 
         .modal-buttons {
@@ -1562,7 +1644,7 @@
                 </label>
                 <span class="mode-label">Meta</span>
             </div>
-            <h1>Claude Code Orchestration</h1>
+            <h1>Sage Orchestration</h1>
         </header>
 
         <main class="main-content">
@@ -1658,6 +1740,30 @@
                 </div>
                 
                 <div class="modal-feedback" id="modalFeedback"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Taskset Modal -->
+    <div class="log-modal" id="tasksetModal">
+        <div class="log-modal-dialog" style="max-width: 95vw; width: 95vw; max-height: 95vh; height: 90vh;">
+            <div class="modal-header">
+                <h2 class="modal-title">
+                    <i data-lucide="list-checks" class="modal-icon"></i>
+                    <span>Full Taskset</span>
+                </h2>
+                <button class="close-button" onclick="hideTasksetModal()">×</button>
+            </div>
+            <div class="modal-body" style="flex: 1; overflow-y: auto;">
+                <div class="log-content" id="tasksetContent" style="flex: 1; overflow-y: auto;">
+                    <div class="loading-container" id="tasksetLoading">
+                        <div class="loading-text">Loading taskset...</div>
+                    </div>
+                    <div class="error-container" id="tasksetError" style="display: none;">
+                        <div class="error-text">Failed to load taskset</div>
+                    </div>
+                    <!-- Taskset content will be loaded here -->
+                </div>
             </div>
         </div>
     </div>
@@ -1775,7 +1881,7 @@
             }
         };
 
-        let currentMode = 'regular';
+        let currentMode = checkMetaModeParameter() ? 'meta' : 'regular';
         let simulationStep = 0;
         let realTimeData = null;
         let useRealAPI = true;
@@ -1788,6 +1894,7 @@
         // User validation gate state
         let userValidationModalActive = false;
         let isProcessingValidationDecision = false;
+        let userValidationExited = false;
         
         // Command execution state
         let currentOperation = null;
@@ -1802,6 +1909,12 @@
         function checkMockParameter() {
             const urlParams = new URLSearchParams(window.location.search);
             return urlParams.get('mock') === 'true';
+        }
+        
+        // Check URL for meta mode parameter
+        function checkMetaModeParameter() {
+            const urlParams = new URLSearchParams(window.location.search);
+            return urlParams.get('mode') === 'meta';
         }
 
         // Get cached port from localStorage
@@ -1938,6 +2051,12 @@
 
         // Initialize dashboard with optimized discovery logic
         async function initDashboard() {
+            // Initialize mode toggle to match currentMode
+            const modeToggle = document.getElementById('modeToggle');
+            if (modeToggle) {
+                modeToggle.checked = (currentMode === 'meta');
+            }
+            
             // Initialize meta mode styling
             updateMetaModeStyle();
             clearOperationState();
@@ -2237,6 +2356,11 @@
         
         // Execute command with debouncing and state management
         async function executeCommand(command) {
+            // Reset exit flag when continue is executed
+            if (command === 'continue') {
+                userValidationExited = false;
+            }
+            
             // Debounce rapid clicks
             const now = Date.now();
             if (buttonDebounce[command] && now - buttonDebounce[command] < 1000) {
@@ -2711,6 +2835,10 @@
                     <div class="workflow-title">
                         <i data-lucide="git-branch"></i>
                         <span>Workflow Progress</span>
+                        <button class="taskset-btn" onclick="showTasksetModal()" title="View Full Taskset">
+                            <i data-lucide="list-checks"></i>
+                            <span>Full Taskset</span>
+                        </button>
                     </div>
                 </div>
                 <div class="workflow-content" id="workflowContent">
@@ -3335,8 +3463,8 @@
         
         // Check for user validation gate file
         async function checkForUserValidationGate() {
-            if (userValidationModalActive || isProcessingValidationDecision) {
-                return; // Don't check if modal is already active or processing
+            if (userValidationModalActive || isProcessingValidationDecision || userValidationExited) {
+                return; // Don't check if modal is already active, processing, or user has exited
             }
             
             try {
@@ -3370,8 +3498,22 @@
             const modalFeedback = document.getElementById('modalFeedback');
             const inputPrompt = document.getElementById('inputPrompt');
             
-            // Set content
-            validationContent.textContent = gateContent;
+            // Set content - render markdown to HTML with proper CSS isolation
+            try {
+                if (window.markdownit) {
+                    const md = window.markdownit({
+                        breaks: true,  // Convert line breaks to <br>
+                        linkify: true  // Convert URLs to links
+                    });
+                    const renderedMarkdown = md.render(gateContent);
+                    validationContent.innerHTML = `<div class="markdown-body">${renderedMarkdown}</div>`;
+                } else {
+                    validationContent.innerHTML = `<div class="plain-text">${gateContent.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>`;
+                }
+            } catch (error) {
+                console.error('Error parsing markdown:', error);
+                validationContent.innerHTML = `<div class="plain-text">${gateContent.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>`;
+            }
             
             // Clear feedback but preserve input state
             modalFeedback.textContent = '';
@@ -3463,6 +3605,11 @@
             if (isProcessingValidationDecision) return;
             
             console.log('makeUserValidationDecision called:', decisionType, description);
+            
+            // Set exit flag if user chooses to exit
+            if (decisionType === 'exit') {
+                userValidationExited = true;
+            }
             
             isProcessingValidationDecision = true;
             const modal = document.getElementById('userValidationModal');
@@ -4046,6 +4193,76 @@
                 console.log('External API not available, using fallback methods');
             };
             document.head.appendChild(script);
+        }
+
+        // ============ TASKSET MODAL FUNCTIONALITY ============
+        
+        // Show taskset modal and load content
+        async function showTasksetModal() {
+            const modal = document.getElementById('tasksetModal');
+            const tasksetContent = document.getElementById('tasksetContent');
+            const tasksetLoading = document.getElementById('tasksetLoading');
+            const tasksetError = document.getElementById('tasksetError');
+            
+            // Show modal immediately
+            modal.classList.add('active');
+            
+            // Show loading state
+            tasksetLoading.style.display = 'block';
+            tasksetError.style.display = 'none';
+            
+            try {
+                // Load the correct tasks-checklist.md based on mode
+                // In meta mode, it should load from .claude-meta/tasks-checklist.md (which is a symlink to webui-refactor)
+                // In regular mode, it should load from .claude/tasks-checklist.md (if it exists)
+                const filename = 'tasks-checklist.md';
+                const apiUrl = `${getAPIBaseURL()}/api/outputs/${filename}?mode=${currentMode}`;
+                
+                console.log(`Loading taskset for mode: ${currentMode}, URL: ${apiUrl}`);
+                
+                const response = await fetch(apiUrl);
+                
+                if (response.ok) {
+                    const content = await response.text();
+                    
+                    // Hide loading
+                    tasksetLoading.style.display = 'none';
+                    
+                    // Render markdown content with the same styling as other modals
+                    let renderedContent;
+                    try {
+                        if (typeof markdownit !== 'undefined') {
+                            const md = markdownit();
+                            renderedContent = `<div class="markdown-body">${md.render(content)}</div>`;
+                        } else {
+                            // Fallback for plain text
+                            renderedContent = `<div class="plain-text">${content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>`;
+                        }
+                    } catch (error) {
+                        console.error('Error parsing taskset markdown:', error);
+                        renderedContent = `<div class="plain-text">${content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>`;
+                    }
+                    
+                    tasksetContent.innerHTML = renderedContent;
+                } else {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+            } catch (error) {
+                console.error('Error loading taskset:', error);
+                tasksetLoading.style.display = 'none';
+                tasksetError.style.display = 'block';
+                tasksetContent.innerHTML = `
+                    <div class="error-container">
+                        <div class="error-text">Failed to load taskset: ${error.message}</div>
+                    </div>
+                `;
+            }
+        }
+        
+        // Hide taskset modal
+        function hideTasksetModal() {
+            const modal = document.getElementById('tasksetModal');
+            modal.classList.remove('active');
         }
 
         // Initialize dashboard on page load
