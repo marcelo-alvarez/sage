@@ -805,7 +805,7 @@ class StatusHandler(BaseHTTPRequestHandler):
                     import subprocess
                     cmd = [sys.executable, 'orchestrate.py', 'continue']
                     if mode == 'meta':
-                        cmd.append('--meta')
+                        cmd.append('meta')
                     
                     try:
                         process = subprocess.Popen(cmd, 
@@ -838,7 +838,7 @@ class StatusHandler(BaseHTTPRequestHandler):
                     import subprocess
                     cmd = [sys.executable, 'orchestrate.py', 'clean']
                     if mode == 'meta':
-                        cmd.append('--meta')
+                        cmd.append('meta')
                     
                     # Use non-blocking subprocess call for clean command
                     process, error = self._run_subprocess_safely(cmd, timeout=30)
