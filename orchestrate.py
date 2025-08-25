@@ -1150,13 +1150,12 @@ class ClaudeCodeOrchestrator:
         
         self.project_root = Path.cwd()
         
-        # Set directories with -meta suffix if in meta mode
-        if self.meta_mode:
-            self.claude_dir = self.project_root / ".claude-meta"
-            self.outputs_dir = self.project_root / ".agent-outputs-meta"
-        else:
-            self.claude_dir = self.project_root / ".claude"
-            self.outputs_dir = self.project_root / ".agent-outputs"
+        # Initialize status reader early for path resolution
+        self.status_reader = StatusReader(project_root=self.project_root)
+        
+        # Set directories using centralized path resolution
+        self.claude_dir = self.status_reader._get_claude_dir()
+        self.outputs_dir = self.status_reader._get_outputs_dir()
         
         self.agents_dir = Path.home() / ".claude-orchestrator" / "agents"
         
@@ -1202,8 +1201,7 @@ class ClaudeCodeOrchestrator:
         self.agents_dir.mkdir(exist_ok=True)
         self.outputs_dir.mkdir(exist_ok=True)
         
-        # Initialize shared status reader for consistent workflow state
-        self.status_reader = StatusReader(project_root=self.project_root)
+        # Status reader already initialized above for path resolution
         
         # Generate default configuration files if they don't exist
         self._ensure_config_files()
@@ -1218,9 +1216,6 @@ class ClaudeCodeOrchestrator:
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
 
-    def _get_current_mode(self):
-        """Get current mode (regular or meta) based on outputs_dir"""
-        return 'meta' if self.outputs_dir.name == '.agent-outputs-meta' else 'regular'
 
     def _test_api_endpoint(self):
         """Test if API server HTTP endpoint is responding"""
@@ -1371,23 +1366,19 @@ FIRST: Add task header if this is a new log file or first session:
 TASK: {primary_objective}
 ---
 
-THEN: Add your session log entries (Python has already added session start timestamp):
-[{current_time}] Starting {agent_name} agent work
-[14:32:18] Reading required input files...
-[14:32:25] [Describe what you found/understood]
-[14:32:40] Beginning implementation...
-[14:33:05] [Major steps or decisions]  
-[14:33:20] Writing output files...
-[14:33:25] {agent_name.title()} agent work complete
+THEN: Add your session log entries (Python automatically adds session start/end timestamps):
+Starting {agent_name} agent work
+Reading required input files...
+[Describe what you found/understood]
+Beginning implementation...
+[Major steps or decisions]  
+Writing output files...
+{agent_name.title()} agent work complete
 
 CRITICAL REQUIREMENTS:
 - APPEND to the file (do not overwrite existing content)
 - DO NOT add session start/end timestamps - Python handles those automatically
-- DO NOT use the example times shown above (14:32:18, etc)
-- Each time you write a log entry, check the current system time and use that
-- Format: [HH:MM:SS] where HH:MM:SS is the ACTUAL time right now when you write each entry
-- Examples: If it's 2:45 PM when you start, write [14:45:00]. If it's 2:47 PM when you finish reading, write [14:47:00]
-- DO NOT use sequential numbers like [00:00:01], [00:00:02] - use real clock time
+- Focus on clear, descriptive progress updates
 - Use Write tool with append mode or add content to existing file
 
 """
@@ -1410,7 +1401,7 @@ CRITICAL REQUIREMENTS:
                       "AVAILABLE OPTIONS:\n" + options_text + "\n\n" + \
                       "WORKFLOW PAUSED - Choose an option above\n"
         
-        gate_filename = "current-" + gate_name.lower() + "-gate.md"
+        gate_filename = "pending-" + gate_name.lower() + "-gate.md"
         gate_filepath = self.outputs_dir / gate_filename
         gate_filepath.write_text(gate_content)
         
@@ -1575,7 +1566,7 @@ CRITICAL REQUIREMENTS:
         """Get the next agent to run and its instructions using configurable workflow"""
         
         # Check for pending gate state first (for resume functionality) - use shared StatusReader
-        pending_gates = self.status_reader.get_pending_gates(self._get_current_mode())
+        pending_gates = self.status_reader.get_pending_gates(self.status_reader._get_current_mode())
         
         if 'user_validation' in pending_gates:
             gate_file = self.outputs_dir / "pending-user_validation-gate.md"
@@ -1586,7 +1577,7 @@ CRITICAL REQUIREMENTS:
             gate_content = gate_file.read_text()
             return self._handle_interactive_gate("criteria", gate_content)
         elif 'completion' in pending_gates:
-            gate_file = self.outputs_dir / "current-completion-gate.md"
+            gate_file = self.outputs_dir / "pending-completion-gate.md"
             gate_content = gate_file.read_text()
             return self._handle_interactive_gate("completion", gate_content)
         
@@ -1597,14 +1588,14 @@ CRITICAL REQUIREMENTS:
             if approval_file.exists():
                 approval_file.unlink()  # Remove approval file so we don't loop
                 # Remove pending gate file if it exists
-                if self.status_reader.has_pending_gate('user_validation', self._get_current_mode()):
+                if self.status_reader.has_pending_gate('user_validation', self.status_reader._get_current_mode()):
                     gate_file = self.outputs_dir / "pending-user_validation-gate.md"
                     gate_file.unlink()
                 # Continue to next task
                 print("User validation approved, continuing to next task...")
         
         # Check what outputs exist to determine next phase - use shared StatusReader
-        current_outputs = self.status_reader.get_current_outputs_status(self._get_current_mode())
+        current_outputs = self.status_reader.get_current_outputs_status(self.status_reader._get_current_mode())
         
         # Check if current task is a USER validation task before determining workflow phase
         current_task_raw = self._get_current_task_raw()
@@ -1614,7 +1605,7 @@ CRITICAL REQUIREMENTS:
             result = self._handle_user_validation(current_task_raw)
             if result is None:
                 # Gate was created, check for pending user validation gate
-                if self.status_reader.has_pending_gate('user_validation', self._get_current_mode()):
+                if self.status_reader.has_pending_gate('user_validation', self.status_reader._get_current_mode()):
                     gate_file = self.outputs_dir / "pending-user_validation-gate.md"
                     gate_content = gate_file.read_text()
                     return self._handle_interactive_gate("user_validation", gate_content)
@@ -1717,7 +1708,7 @@ CRITICAL REQUIREMENTS:
             iteration += 1
             
             # First, check for pending gates before determining next phase - use shared StatusReader
-            pending_gates = self.status_reader.get_pending_gates(self._get_current_mode())
+            pending_gates = self.status_reader.get_pending_gates(self.status_reader._get_current_mode())
             
             if 'user_validation' in pending_gates:
                 gate_file = self.outputs_dir / "pending-user_validation-gate.md"
@@ -1728,12 +1719,12 @@ CRITICAL REQUIREMENTS:
                 gate_content = gate_file.read_text()
                 return self._handle_interactive_gate("criteria", gate_content)
             elif 'completion' in pending_gates:
-                gate_file = self.outputs_dir / "current-completion-gate.md"
+                gate_file = self.outputs_dir / "pending-completion-gate.md"
                 gate_content = gate_file.read_text()
                 return self._handle_interactive_gate("completion", gate_content)
             
             # Check what outputs exist to determine next phase - use shared StatusReader
-            current_outputs = self.status_reader.get_current_outputs_status(self._get_current_mode())
+            current_outputs = self.status_reader.get_current_outputs_status(self.status_reader._get_current_mode())
             
             # Use workflow configuration to determine next agent
             next_agent = self.workflow_config.get_next_agent(current_outputs, self.outputs_dir)
@@ -2306,7 +2297,7 @@ CRITICAL REQUIREMENTS:
             if "Gate" in agent:
                 # Check for active gate files
                 gate_type = agent.lower().replace(" gate", "").replace(" ", "-")
-                active_gate_file = self.outputs_dir / f"current-{gate_type}-gate.md"
+                active_gate_file = self.outputs_dir / f"pending-{gate_type}-gate.md"
                 pending_gate_file = self.outputs_dir / f"pending-{gate_type}-gate.md"
                 pending_validation_file = self.outputs_dir / "pending-user_validation-gate.md"
                 
@@ -2455,16 +2446,34 @@ CRITICAL REQUIREMENTS:
             
             print("Success criteria approved and saved")
             
+            # Remove the pending criteria gate file since we've approved it
+            criteria_gate_file = self.outputs_dir / "pending-criteria-gate.md"
+            if criteria_gate_file.exists():
+                criteria_gate_file.unlink()
+            
             # Update status file after criteria approval
             self._update_status_file()
             
-            # Continue to continue agent
-            agent, instructions = self.get_continue_agent()
-            print("\n" + "="*60)
-            print("CRITERIA APPROVED - CONTINUING TO " + agent.upper())
-            print("="*60)
-            print(instructions)
-            print("="*60)
+            print("CRITERIA APPROVED - Next agent will be started automatically")
+            
+            # Schedule next agent execution without waiting for it to complete
+            if self.headless:
+                # Start continue command in background to avoid API timeout
+                import subprocess
+                import sys
+                subprocess.Popen([
+                    sys.executable, __file__, 'continue'
+                ] + (['meta'] if 'meta' in sys.argv else []), 
+                cwd=self.project_root, 
+                stdout=subprocess.DEVNULL, 
+                stderr=subprocess.DEVNULL)
+                print("Background continue process started")
+            else:
+                # In interactive mode, continue to next agent
+                agent, instructions = self.get_continue_agent()
+                if agent and instructions:
+                    print(f"\nContinuing to {agent.upper()}")
+                    self.run_agent(agent, instructions)
             
     def approve_completion(self):
         """Approve completion and mark task done"""
@@ -2588,10 +2597,9 @@ Continuing to next task in workflow
             "completion-approved.md",
             "criteria-modification-request.md",
             "pending-criteria-gate.md",
-            "current-completion-gate.md",
+            "pending-completion-gate.md",
             "pending-user_validation-gate.md",
             "current-status.md",
-            "current-criteria-gate.md",
             "current-user-validation.md",
             "next-command.txt",
             "status.txt"

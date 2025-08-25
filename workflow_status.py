@@ -37,6 +37,23 @@ class StatusReader:
         except:
             pass
 
+    def _get_current_mode(self) -> str:
+        """Detect current mode by checking for .agent-outputs-meta directory existence"""
+        meta_dir = self.project_root / '.agent-outputs-meta'
+        return 'meta' if meta_dir.exists() else 'regular'
+
+    def _get_outputs_dir(self, mode: str = None) -> Path:
+        """Get appropriate outputs directory based on mode"""
+        if mode is None:
+            mode = self._get_current_mode()
+        return self.project_root / ('.agent-outputs-meta' if mode == 'meta' else '.agent-outputs')
+
+    def _get_claude_dir(self, mode: str = None) -> Path:
+        """Get appropriate claude directory based on mode"""
+        if mode is None:
+            mode = self._get_current_mode()
+        return self.project_root / ('.claude-meta' if mode == 'meta' else '.claude')
+
     def _read_file_safely(self, file_path: Path, encoding='utf-8') -> str:
         """Thread-safe file reading with proper error handling"""
         def _read_file():
@@ -59,10 +76,12 @@ class StatusReader:
             print(f"[StatusReader] Thread pool read timeout for {file_path}: {e}")
             return None
         
-    def read_status(self, mode='regular'):
+    def read_status(self, mode=None):
         """Read workflow status from appropriate directory"""
-        outputs_dir = '.agent-outputs-meta' if mode == 'meta' else '.agent-outputs'
-        status_file = self.project_root / outputs_dir / 'current-status.md'
+        if mode is None:
+            mode = self._get_current_mode()
+        outputs_dir = self._get_outputs_dir(mode)
+        status_file = outputs_dir / 'current-status.md'
         
         print(f"[StatusReader] Reading status for mode '{mode}' from {status_file}")
         
@@ -214,21 +233,26 @@ class StatusReader:
         
         return True
     
-    def _has_user_validation_gate(self, mode: str = 'regular'):
+    def _has_user_validation_gate(self, mode: str = None):
         """Check if pending-user_validation-gate.md exists"""
-        outputs_dir = '.agent-outputs-meta' if mode == 'meta' else '.agent-outputs'
-        validation_file = self.project_root / outputs_dir / 'pending-user_validation-gate.md'
+        if mode is None:
+            mode = self._get_current_mode()
+        outputs_dir = self._get_outputs_dir(mode)
+        validation_file = outputs_dir / 'pending-user_validation-gate.md'
         return validation_file.exists()
     
-    def has_pending_gate(self, gate_type: str, mode: str = 'regular') -> bool:
+    def has_pending_gate(self, gate_type: str, mode: str = None) -> bool:
         """Check if a specific pending gate file exists"""
-        outputs_dir = '.agent-outputs-meta' if mode == 'meta' else '.agent-outputs'
-        pending_gate_file = self.project_root / outputs_dir / f'pending-{gate_type}-gate.md'
-        current_gate_file = self.project_root / outputs_dir / f'current-{gate_type}-gate.md'
-        return pending_gate_file.exists() or current_gate_file.exists()
+        if mode is None:
+            mode = self._get_current_mode()
+        outputs_dir = self._get_outputs_dir(mode)
+        pending_gate_file = outputs_dir / f'pending-{gate_type}-gate.md'
+        return pending_gate_file.exists()
     
-    def get_pending_gates(self, mode: str = 'regular') -> List[str]:
+    def get_pending_gates(self, mode: str = None) -> List[str]:
         """Get list of all pending gate types"""
+        if mode is None:
+            mode = self._get_current_mode()
         gate_types = ['criteria', 'completion', 'user_validation']
         pending_gates = []
         
@@ -238,11 +262,13 @@ class StatusReader:
         
         return pending_gates
     
-    def _is_workflow_complete(self, mode='regular'):
+    def _is_workflow_complete(self, mode=None):
         """Check if workflow has been completed (completion approved or all checklist tasks done)"""        
+        if mode is None:
+            mode = self._get_current_mode()
         # Use mode-specific directories with absolute paths based on project_root
-        outputs_dir = self.project_root / ('.agent-outputs-meta' if mode == 'meta' else '.agent-outputs')
-        claude_dir = self.project_root / ('.claude-meta' if mode == 'meta' else '.claude')
+        outputs_dir = self._get_outputs_dir(mode)
+        claude_dir = self._get_claude_dir(mode)
         
         # Check for standard completion approval
         completion_file = outputs_dir / 'completion-approved.md'
@@ -283,9 +309,11 @@ class StatusReader:
         
         return False
     
-    def get_current_outputs_status(self, mode='regular') -> Dict[str, bool]:
+    def get_current_outputs_status(self, mode=None) -> Dict[str, bool]:
         """Get current outputs status dict (used by orchestrate.py completion detection)"""
-        outputs_dir = self.project_root / ('.agent-outputs-meta' if mode == 'meta' else '.agent-outputs')
+        if mode is None:
+            mode = self._get_current_mode()
+        outputs_dir = self._get_outputs_dir(mode)
         
         return {
             "exploration.md": (outputs_dir / "exploration.md").exists(),
@@ -329,9 +357,11 @@ class StatusReader:
         else:
             return f'Will handle: {base}'
     
-    def _get_current_task_from_checklist(self, mode='regular'):
+    def _get_current_task_from_checklist(self, mode=None):
         """Extract the first uncompleted task from checklist as current task"""
-        claude_dir = self.project_root / ('.claude-meta' if mode == 'meta' else '.claude')
+        if mode is None:
+            mode = self._get_current_mode()
+        claude_dir = self._get_claude_dir(mode)
         checklist_file = claude_dir / 'tasks-checklist.md'
         
         if not checklist_file.exists():
@@ -349,17 +379,17 @@ class StatusReader:
                 # Extract task text and clean it up
                 task_text = re.sub(r'^\s*-\s*\[\s\]\s*', '', line).strip()
                 if task_text:
-                    # Limit length for display
-                    if len(task_text) > 100:
-                        task_text = task_text[:97] + "..."
+                    # Return full text without truncation
                     return task_text
         
         return self._get_current_task_from_alternatives(mode)
     
-    def _get_current_task_from_alternatives(self, mode='regular'):
+    def _get_current_task_from_alternatives(self, mode=None):
         """Get current task from alternative sources when checklist doesn't exist or has no tasks"""
+        if mode is None:
+            mode = self._get_current_mode()
         # Check for current task in status file first
-        outputs_dir = self.project_root / ('.agent-outputs-meta' if mode == 'meta' else '.agent-outputs')
+        outputs_dir = self._get_outputs_dir(mode)
         status_file = outputs_dir / 'current-status.md'
         
         if status_file.exists():
@@ -372,7 +402,7 @@ class StatusReader:
                     if line.startswith('Current task:') or line.startswith('**Current task:**'):
                         task_text = re.sub(r'^(\*\*)?Current task:(\*\*)?\s*', '', line).strip()
                         if task_text and len(task_text) > 3:  # Avoid very short/empty tasks
-                            return task_text[:100] + "..." if len(task_text) > 100 else task_text
+                            return task_text
         
         # Check for active tasks in output files
         task_sources = [
@@ -398,7 +428,7 @@ class StatusReader:
                             clean_line = re.sub(r'^\d+\.\s*', '', line)  # Remove numbered list prefix
                             clean_line = re.sub(r'^[-*]\s*', '', clean_line)  # Remove bullet points
                             if len(clean_line) > 15:  # Ensure it's substantial
-                                return clean_line[:100] + "..." if len(clean_line) > 100 else clean_line
+                                return clean_line
                     
                     # If no good line found, use the default task for this phase
                     return default_task
@@ -409,8 +439,10 @@ class StatusReader:
         
         return 'No active task'
     
-    def _get_default_status(self, mode='regular'):
+    def _get_default_status(self, mode=None):
         """Return default status when files are missing"""
+        if mode is None:
+            mode = self._get_current_mode()
         # Check for uncompleted checklist tasks first
         current_task = self._get_current_task_from_checklist(mode)
         
@@ -436,18 +468,20 @@ class StatusReader:
         }
 
 
-def get_workflow_status(project_root: Path = None, mode: str = 'regular') -> Dict[str, Any]:
+def get_workflow_status(project_root: Path = None, mode: str = None) -> Dict[str, Any]:
     """
     Unified function to get workflow status - used by both orchestrate.py and api_server.py
     
     Args:
         project_root: Project root directory (defaults to current working directory)
-        mode: 'regular' or 'meta' mode
+        mode: 'regular' or 'meta' mode (defaults to auto-detection based on directory state)
     
     Returns:
         Dict containing currentTask, workflow, agents, workflowComplete, and additional state info
     """
     reader = StatusReader(project_root)
+    if mode is None:
+        mode = reader._get_current_mode()
     status = reader.read_status(mode)
     
     # Add additional state information for consistency

@@ -200,6 +200,11 @@ install_orchestrator_runtime() {
     # Copy main orchestrator script
     cp "$TEMP_DIR/orchestrate.py" "$runtime_dir/orchestrate.py"
     
+    # Copy workflow status module (required for orchestrate.py)
+    if [ -f "$TEMP_DIR/workflow_status.py" ]; then
+        cp "$TEMP_DIR/workflow_status.py" "$runtime_dir/workflow_status.py"
+    fi
+    
     # Copy process manager if it exists
     if [ -f "$TEMP_DIR/process_manager.py" ]; then
         cp "$TEMP_DIR/process_manager.py" "$runtime_dir/process_manager.py"

@@ -76,6 +76,166 @@ class OrchestratorLogger:
         self._write_log(f"=== {self.component_name.upper()} SHUTDOWN ===")
 
 
+class LogProcessor:
+    """Processes agent log files to add automatic timestamps"""
+    
+    def __init__(self):
+        self.cache = {}  # Cache processed logs with timestamps
+        self.cache_timestamps = {}  # Track when files were last modified
+    
+    def process_agent_log(self, log_content: str, agent_type: str, file_mod_time: datetime = None) -> str:
+        """
+        Process raw agent log content to add batch timestamps
+        Groups new lines with same timestamp, only showing timestamp on last line of batch
+        """
+        if not log_content or not log_content.strip():
+            return log_content
+            
+        lines = log_content.split('\n')
+        processed_lines = []
+        # Use file modification time if provided, otherwise current time
+        base_time = file_mod_time if file_mod_time else datetime.now()
+        
+        i = 0
+        while i < len(lines):
+            line = lines[i].rstrip()
+            
+            # Handle all session-related headers (both start and complete)
+            if '## 20' in line and 'Agent Session' in line:
+                session_match = re.search(r'## (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)', line)
+                if session_match:
+                    # Convert to same format as agent logs
+                    timestamp_str = session_match.group(1)
+                    session_dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                    formatted_time = session_dt.strftime("[%Y-%m-%d %H:%M:%S]")
+                    rest_of_line = line.split(' - ', 1)[1] if ' - ' in line else line
+                    
+                    # Handle completion vs start differently
+                    if 'Complete' in line:
+                        # Find the most recent content batch and place completion after it
+                        # Look backwards to find the last timestamped content line
+                        insert_position = len(processed_lines)
+                        for j in range(len(processed_lines) - 1, -1, -1):
+                            if processed_lines[j].startswith('[2025-') and not 'Session' in processed_lines[j]:
+                                # Found last agent log entry - insert completion after it
+                                insert_position = j + 1
+                                break
+                        
+                        # Remove any empty lines at insertion point
+                        while (insert_position < len(processed_lines) and 
+                               not processed_lines[insert_position].strip()):
+                            processed_lines.pop(insert_position)
+                        
+                        # Insert completion at the right position (no separator here anymore)
+                        processed_lines.insert(insert_position, f"{formatted_time} {rest_of_line}")
+                        processed_lines.insert(insert_position + 1, "")
+                    else:
+                        # Regular session start - add separator above it, no empty line after separator
+                        processed_lines.append("═" * 66)  # 3 times longer separator
+                        processed_lines.append(f"{formatted_time} {rest_of_line}")
+                        # Skip the next empty line if it exists in the raw file
+                        if i + 1 < len(lines) and not lines[i + 1].strip():
+                            i += 1
+                else:
+                    processed_lines.append(line)
+                    if 'Complete' in line:
+                        processed_lines.append("═" * 21)
+                        processed_lines.append("")
+                i += 1
+                continue
+                
+            # Handle other headers and separators  
+            if (not line.strip() or line.startswith('#') or line.startswith('---') 
+                or line.startswith('TASK:')):
+                processed_lines.append(line)
+                i += 1
+                continue
+            
+            # Handle existing timestamps - preserve them
+            if re.match(r'^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\]', line) or re.match(r'^\[\d{2}:\d{2}:\d{2}\]', line):
+                processed_lines.append(line)
+                i += 1
+                continue
+            
+            # Found content lines without timestamps - collect them into a batch
+            batch = []
+            while i < len(lines):
+                current_line = lines[i].rstrip()
+                
+                # Stop if we hit a header, empty line, or existing timestamp
+                if (not current_line.strip() or current_line.startswith('#') 
+                    or current_line.startswith('---') or current_line.startswith('TASK:')
+                    or re.match(r'^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\]', current_line)
+                    or re.match(r'^\[\d{2}:\d{2}:\d{2}\]', current_line)):
+                    break
+                    
+                batch.append(current_line)
+                i += 1
+            
+            # Process the batch if we found content
+            if batch:
+                time_str = base_time.strftime("[%Y-%m-%d %H:%M:%S]")
+                
+                # Check if the last line is redundant with session completion
+                # Look ahead to see if there's a session completion coming up
+                upcoming_session_complete = False
+                for future_i in range(i, min(i + 5, len(lines))):
+                    if ('Complete' in lines[future_i] and 'Agent Session' in lines[future_i] and 
+                        batch and 'work complete' in batch[-1].lower()):
+                        upcoming_session_complete = True
+                        break
+                
+                # If last line is redundant, remove it
+                if upcoming_session_complete and batch and 'work complete' in batch[-1].lower():
+                    batch = batch[:-1]  # Remove the redundant last line
+                
+                # Add all lines in batch with proper alignment
+                if batch:  # Only if there are still lines after redundancy removal
+                    for j, content in enumerate(batch):
+                        if j == len(batch) - 1:  # Last line gets timestamp
+                            processed_lines.append(f"{time_str} {content}")
+                        else:  # Earlier lines get 22 spaces to align with full timestamp format [YYYY-MM-DD HH:MM:SS] + space  
+                            processed_lines.append(f"                      {content}")
+        
+        return '\n'.join(processed_lines)
+    
+    def get_processed_log(self, file_path: Path, agent_type: str) -> str:
+        """
+        Get processed log content with caching
+        """
+        try:
+            if not file_path.exists():
+                return ""
+                
+            # Check if we need to refresh cache
+            file_mtime = file_path.stat().st_mtime
+            cache_key = str(file_path)
+            
+            if (cache_key in self.cache and 
+                cache_key in self.cache_timestamps and
+                self.cache_timestamps[cache_key] >= file_mtime):
+                return self.cache[cache_key]
+            
+            # Read and process the file, passing file modification time
+            raw_content = file_path.read_text(encoding='utf-8', errors='ignore')
+            from datetime import datetime
+            file_mod_time = datetime.fromtimestamp(file_mtime)
+            processed_content = self.process_agent_log(raw_content, agent_type, file_mod_time)
+            
+            # Update cache
+            self.cache[cache_key] = processed_content
+            self.cache_timestamps[cache_key] = file_mtime
+            
+            return processed_content
+            
+        except Exception as e:
+            # Return raw content if processing fails
+            try:
+                return file_path.read_text(encoding='utf-8', errors='ignore')
+            except:
+                return ""
+
+
 # Global state for concurrent operation tracking
 OPERATION_STATE = {
     'current_operation': None,  # 'idle', 'starting', 'continuing', 'cleaning'
@@ -161,7 +321,7 @@ class SharedResourceManager:
             if self._initialized:
                 return
                 
-            self.project_root = project_root or Path(os.getcwd())
+            self.project_root = project_root or Path.cwd()
             
             # Single shared status reader
             try:
@@ -203,6 +363,9 @@ class StatusHandler(BaseHTTPRequestHandler):
         self.status_reader = self.shared.status_reader
         self._subprocess_executor = self.shared.subprocess_executor
         self.api_logger = self.shared.api_logger
+        
+        # Initialize log processor
+        self.log_processor = LogProcessor()
         
         # Request-specific lock (lightweight)
         self._request_lock = threading.RLock()
@@ -515,9 +678,9 @@ class StatusHandler(BaseHTTPRequestHandler):
     def _process_gate_decision(self, decision_type, mode, decision_data):
         """Process gate decision by calling orchestrate.py"""
         try:
-            # Build command
-            orchestrate_path = os.path.expanduser('~/.claude-orchestrator/orchestrate.py')
-            cmd = ['python3', orchestrate_path, decision_type]
+            # Build command - use orchestrate.py from current project directory
+            orchestrate_path = os.path.join(self.project_root, 'orchestrate.py')
+            cmd = ['python3', orchestrate_path, '--no-browser', decision_type]
             
             if mode == 'meta':
                 cmd.append('meta')
@@ -593,14 +756,14 @@ class StatusHandler(BaseHTTPRequestHandler):
                 return
             
             # Get appropriate outputs directory
-            outputs_dir = self._get_outputs_directory(mode)
+            outputs_dir = self.status_reader._get_outputs_dir(mode)
             file_path = outputs_dir / filename
             
             # Check if file exists in outputs directory, if not try claude directory for checklist files
             if not file_path.exists():
                 if filename == 'tasks-checklist.md':
                     # Try .claude or .claude-meta directory for checklist files
-                    claude_dir = Path('.claude-meta') if mode == 'meta' else Path('.claude')
+                    claude_dir = self.status_reader._get_claude_dir(mode)
                     claude_file_path = claude_dir / filename
                     if claude_file_path.exists():
                         file_path = claude_file_path
@@ -611,15 +774,33 @@ class StatusHandler(BaseHTTPRequestHandler):
                     self._send_error(404, f'File "{filename}" not found')
                     return
             
-            # Read file content using non-blocking file read
-            content, error = self._read_file_safely(file_path)
-            
-            if content is not None:
-                # Send markdown response
-                self._send_markdown_response(content)
+            # Check if this is an agent log file that needs timestamp processing
+            if filename.endswith('-log.md'):
+                # Extract agent type from filename (e.g., 'coder-log.md' -> 'coder')
+                agent_type = filename.replace('-log.md', '')
+                
+                # Use LogProcessor for agent log files
+                try:
+                    processed_content = self.log_processor.get_processed_log(file_path, agent_type)
+                    self._send_markdown_response(processed_content)
+                except Exception as e:
+                    print(f"Error processing agent log {file_path}: {e}")
+                    # Fallback to raw content
+                    content, error = self._read_file_safely(file_path)
+                    if content is not None:
+                        self._send_markdown_response(content)
+                    else:
+                        self._send_error(500, f'Error reading file: {error}')
             else:
-                print(f"Error reading file {file_path}: {error}")
-                self._send_error(500, f'Error reading file: {error}')
+                # Read regular files without processing
+                content, error = self._read_file_safely(file_path)
+                
+                if content is not None:
+                    # Send markdown response
+                    self._send_markdown_response(content)
+                else:
+                    print(f"Error reading file {file_path}: {error}")
+                    self._send_error(500, f'Error reading file: {error}')
             
         except Exception as e:
             print(f"Error handling outputs request: {e}")
@@ -670,12 +851,6 @@ class StatusHandler(BaseHTTPRequestHandler):
         print(f"[DEBUG] No pattern matched, rejecting")
         return False
     
-    def _get_outputs_directory(self, mode):
-        """Get appropriate outputs directory based on mode"""
-        if mode == 'meta':
-            return Path('.agent-outputs-meta')
-        else:
-            return Path('.agent-outputs')
     
     def _send_markdown_response(self, content):
         """Send markdown content response with appropriate headers"""
@@ -1103,7 +1278,7 @@ class OrchestratorAPIServer:
             
             # Initialize shared resources ONCE before creating server
             shared_manager = SharedResourceManager()
-            shared_manager.initialize(project_root=Path(os.getcwd()))
+            shared_manager.initialize(project_root=Path.cwd())
                 
             self.api_logger.info(f"Initializing ThreadingHTTPServer on {self.host}:{self.port}")
             

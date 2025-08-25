@@ -1,0 +1,290 @@
+[2025-08-24 12:39:11] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 12:39:11] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 12:39:11] [INFO] Dashboard server registered (PID: 81176)
+[2025-08-24 12:39:11] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 12:39:11] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 12:39:11] [INFO] Health check at: http://localhost:5678/health
+[2025-08-24 13:56:36] [INFO] Dashboard server stopped
+[2025-08-24 13:56:36] [INFO] === DASHBOARD-SERVER SHUTDOWN ===
+[2025-08-24 14:19:57] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 14:19:57] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 14:19:57] [INFO] Dashboard server registered (PID: 84029)
+[2025-08-24 14:19:57] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 14:19:57] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 14:19:57] [INFO] Health check at: http://localhost:5678/health
+[2025-08-24 14:43:24] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 14:43:24] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 14:43:24] [INFO] Dashboard server registered (PID: 86679)
+[2025-08-24 14:43:24] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 14:43:24] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 14:43:24] [INFO] Health check at: http://localhost:5678/health
+[2025-08-24 14:44:10] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 14:44:10] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 14:44:10] [INFO] Dashboard server registered (PID: 86719)
+[2025-08-24 14:44:10] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 14:44:10] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 14:44:10] [INFO] Health check at: http://localhost:5678/health
+[2025-08-24 14:51:29] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 14:51:29] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 14:51:29] [INFO] Dashboard server registered (PID: 87202)
+[2025-08-24 14:51:29] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 14:51:29] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 14:51:29] [INFO] Health check at: http://localhost:5678/health
+[2025-08-24 15:21:28] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 15:21:28] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 15:21:28] [INFO] Dashboard server registered (PID: 90410)
+[2025-08-24 15:21:28] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 15:21:28] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 15:21:28] [INFO] Health check at: http://localhost:5678/health
+[2025-08-24 15:22:11] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 15:22:11] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 15:22:11] [INFO] Dashboard server registered (PID: 90609)
+[2025-08-24 15:22:11] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 15:22:11] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 15:22:11] [INFO] Health check at: http://localhost:5678/health
+[2025-08-24 15:36:47] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 15:36:47] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 15:36:47] [INFO] Dashboard server registered (PID: 92650)
+[2025-08-24 15:36:47] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 15:36:47] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 15:36:47] [INFO] Health check at: http://localhost:5678/health
+[2025-08-24 15:44:00] [INFO] Dashboard server stopped
+[2025-08-24 15:44:00] [INFO] === DASHBOARD-SERVER SHUTDOWN ===
+[2025-08-24 15:46:25] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 15:46:25] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 15:46:25] [INFO] Dashboard server registered (PID: 94121)
+[2025-08-24 15:46:25] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 15:46:25] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 15:46:25] [INFO] Health check at: http://localhost:5678/health
+[2025-08-24 16:15:28] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 16:15:28] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 16:15:28] [INFO] Dashboard server registered (PID: 118)
+[2025-08-24 16:15:28] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 16:15:28] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 16:15:28] [INFO] Health check at: http://localhost:5678/health
+[2025-08-24 16:16:00] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 16:16:00] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 16:16:00] [INFO] Dashboard server registered (PID: 208)
+[2025-08-24 16:16:00] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 16:16:00] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 16:16:00] [INFO] Health check at: http://localhost:5678/health
+[2025-08-24 17:55:52] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 17:55:52] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 17:55:52] [INFO] Dashboard server registered (PID: 5840)
+[2025-08-24 17:55:52] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 17:55:52] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 17:55:52] [INFO] Health check at: http://localhost:5678/health
+[2025-08-24 18:55:07] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 18:55:07] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 18:55:07] [INFO] Dashboard server registered (PID: 8274)
+[2025-08-24 18:55:07] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 18:55:07] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 18:55:07] [INFO] Health check at: http://localhost:5678/health
+[2025-08-24 19:37:07] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 19:37:07] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 19:37:07] [INFO] Dashboard server registered (PID: 16925)
+[2025-08-24 19:37:07] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 19:37:07] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 19:37:07] [INFO] Health check at: http://localhost:5678/health
+[2025-08-24 20:14:16] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 20:14:16] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 20:14:16] [INFO] Dashboard server registered (PID: 21484)
+[2025-08-24 20:14:16] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 20:14:16] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 20:14:16] [INFO] Health check at: http://localhost:5678/health
+[2025-08-24 20:28:16] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 20:28:16] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 20:28:16] [INFO] Dashboard server registered (PID: 24084)
+[2025-08-24 20:28:16] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 20:28:16] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 20:28:16] [INFO] Health check at: http://localhost:5678/health
+[2025-08-24 20:32:25] [INFO] Dashboard server stopped
+[2025-08-24 20:32:25] [INFO] === DASHBOARD-SERVER SHUTDOWN ===
+[2025-08-24 20:37:36] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 20:37:36] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 20:37:36] [INFO] Dashboard server registered (PID: 27780)
+[2025-08-24 20:37:36] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 20:37:36] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 20:37:36] [INFO] Health check at: http://localhost:5678/health
+[2025-08-24 20:41:20] [INFO] Dashboard server stopped
+[2025-08-24 20:41:20] [INFO] === DASHBOARD-SERVER SHUTDOWN ===
+[2025-08-24 20:41:52] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 20:41:52] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 20:41:52] [INFO] Dashboard server registered (PID: 29406)
+[2025-08-24 20:41:52] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 20:41:52] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 20:41:52] [INFO] Health check at: http://localhost:5678/health
+[2025-08-24 20:43:16] [INFO] Dashboard server stopped
+[2025-08-24 20:43:16] [INFO] === DASHBOARD-SERVER SHUTDOWN ===
+[2025-08-24 20:48:54] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 20:48:54] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 20:48:54] [INFO] Dashboard server registered (PID: 31778)
+[2025-08-24 20:48:54] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 20:48:54] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 20:48:54] [INFO] Health check at: http://localhost:5678/health
+[2025-08-24 20:56:19] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 20:56:19] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 20:56:19] [INFO] Dashboard server registered (PID: 32251)
+[2025-08-24 20:56:19] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 20:56:19] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 20:56:19] [INFO] Health check at: http://localhost:5678/health
+[2025-08-24 21:00:28] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 21:00:28] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 21:00:28] [INFO] Dashboard server registered (PID: 32843)
+[2025-08-24 21:00:28] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 21:00:28] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 21:00:28] [INFO] Health check at: http://localhost:5678/health
+[2025-08-24 21:04:29] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 21:04:29] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 21:04:29] [INFO] Dashboard server registered (PID: 33215)
+[2025-08-24 21:04:29] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 21:04:29] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 21:04:29] [INFO] Health check at: http://localhost:5678/health
+[2025-08-24 21:08:22] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 21:08:22] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 21:08:22] [INFO] Dashboard server registered (PID: 33985)
+[2025-08-24 21:08:22] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 21:08:22] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 21:08:22] [INFO] Health check at: http://localhost:5678/health
+[2025-08-24 21:14:43] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 21:14:43] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 21:14:43] [INFO] Dashboard server registered (PID: 34745)
+[2025-08-24 21:14:43] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 21:14:43] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 21:14:43] [INFO] Health check at: http://localhost:5678/health
+[2025-08-24 21:20:39] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 21:20:39] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 21:20:39] [INFO] Dashboard server registered (PID: 35896)
+[2025-08-24 21:20:39] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 21:20:39] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 21:20:39] [INFO] Health check at: http://localhost:5678/health
+[2025-08-24 21:25:39] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 21:25:39] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 21:25:39] [INFO] Dashboard server registered (PID: 36473)
+[2025-08-24 21:25:39] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 21:25:39] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 21:25:39] [INFO] Health check at: http://localhost:5678/health
+[2025-08-24 21:28:07] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 21:28:07] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 21:28:07] [INFO] Dashboard server registered (PID: 37080)
+[2025-08-24 21:28:07] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 21:28:07] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 21:28:07] [INFO] Health check at: http://localhost:5678/health
+[2025-08-24 21:30:22] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 21:30:22] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 21:30:22] [INFO] Dashboard server registered (PID: 37410)
+[2025-08-24 21:30:22] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 21:30:22] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 21:30:22] [INFO] Health check at: http://localhost:5678/health
+[2025-08-24 21:38:39] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 21:38:39] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 21:38:39] [INFO] Dashboard server registered (PID: 39191)
+[2025-08-24 21:38:39] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 21:38:39] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 21:38:39] [INFO] Health check at: http://localhost:5678/health
+[2025-08-24 21:41:46] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 21:41:46] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 21:41:46] [INFO] Dashboard server registered (PID: 39719)
+[2025-08-24 21:41:46] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 21:41:46] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 21:41:46] [INFO] Health check at: http://localhost:5678/health
+[2025-08-24 21:43:57] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 21:43:57] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 21:43:57] [INFO] Dashboard server registered (PID: 40284)
+[2025-08-24 21:43:57] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 21:43:57] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 21:43:57] [INFO] Health check at: http://localhost:5678/health
+[2025-08-24 21:47:57] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 21:47:57] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 21:47:57] [INFO] Dashboard server registered (PID: 41299)
+[2025-08-24 21:47:57] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 21:47:57] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 21:47:57] [INFO] Health check at: http://localhost:5678/health
+[2025-08-24 21:53:43] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 21:53:43] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 21:53:43] [INFO] Dashboard server registered (PID: 42790)
+[2025-08-24 21:53:43] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 21:53:43] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 21:53:43] [INFO] Health check at: http://localhost:5678/health
+[2025-08-24 22:13:54] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 22:13:54] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 22:13:54] [INFO] Dashboard server registered (PID: 45199)
+[2025-08-24 22:13:54] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 22:13:54] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 22:13:54] [INFO] Health check at: http://localhost:5678/health
+[2025-08-24 22:15:49] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-24 22:15:49] [INFO] Dashboard server started on localhost:5678
+[2025-08-24 22:15:49] [INFO] Dashboard server registered (PID: 45508)
+[2025-08-24 22:15:49] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-24 22:15:49] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-24 22:15:49] [INFO] Health check at: http://localhost:5678/health
+[2025-08-25 02:32:52] [INFO] Dashboard server stopped
+[2025-08-25 02:32:52] [INFO] === DASHBOARD-SERVER SHUTDOWN ===
+[2025-08-25 02:37:45] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-25 02:37:45] [INFO] Dashboard server started on localhost:5678
+[2025-08-25 02:37:45] [INFO] Dashboard server registered (PID: 53886)
+[2025-08-25 02:37:45] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-25 02:37:45] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-25 02:37:45] [INFO] Health check at: http://localhost:5678/health
+[2025-08-25 03:40:39] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-25 03:40:39] [INFO] Dashboard server started on localhost:5678
+[2025-08-25 03:40:39] [INFO] Dashboard server registered (PID: 63277)
+[2025-08-25 03:40:39] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-25 03:40:39] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-25 03:40:39] [INFO] Health check at: http://localhost:5678/health
+[2025-08-25 09:56:57] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-25 09:56:57] [INFO] Dashboard server started on localhost:5678
+[2025-08-25 09:56:57] [INFO] Dashboard server registered (PID: 71338)
+[2025-08-25 09:56:57] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-25 09:56:57] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-25 09:56:57] [INFO] Health check at: http://localhost:5678/health
+[2025-08-25 10:19:32] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-25 10:19:32] [INFO] Dashboard server started on localhost:5678
+[2025-08-25 10:19:32] [INFO] Dashboard server registered (PID: 73896)
+[2025-08-25 10:19:32] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-25 10:19:32] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-25 10:19:32] [INFO] Health check at: http://localhost:5678/health
+[2025-08-25 10:20:56] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-25 10:20:56] [INFO] Dashboard server started on localhost:5678
+[2025-08-25 10:20:56] [INFO] Dashboard server registered (PID: 74102)
+[2025-08-25 10:20:56] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-25 10:20:56] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-25 10:20:56] [INFO] Health check at: http://localhost:5678/health
+[2025-08-25 10:24:21] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-25 10:24:21] [INFO] Dashboard server started on localhost:5678
+[2025-08-25 10:24:21] [INFO] Dashboard server registered (PID: 74509)
+[2025-08-25 10:24:21] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-25 10:24:21] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-25 10:24:21] [INFO] Health check at: http://localhost:5678/health
+[2025-08-25 10:37:48] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-25 10:37:48] [INFO] Dashboard server started on localhost:5678
+[2025-08-25 10:37:48] [INFO] Dashboard server registered (PID: 76492)
+[2025-08-25 10:37:48] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-25 10:37:48] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-25 10:37:48] [INFO] Health check at: http://localhost:5678/health
+[2025-08-25 10:49:49] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-25 10:49:49] [INFO] Dashboard server started on localhost:5678
+[2025-08-25 10:49:49] [INFO] Dashboard server registered (PID: 78840)
+[2025-08-25 10:49:49] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-25 10:49:49] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-25 10:49:49] [INFO] Health check at: http://localhost:5678/health
+[2025-08-25 10:54:50] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-25 10:54:50] [INFO] Dashboard server started on localhost:5678
+[2025-08-25 10:54:50] [INFO] Dashboard server registered (PID: 79571)
+[2025-08-25 10:54:50] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-25 10:54:50] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-25 10:54:50] [INFO] Health check at: http://localhost:5678/health
+[2025-08-25 11:11:10] [INFO] Dashboard server stopped
+[2025-08-25 11:11:10] [INFO] === DASHBOARD-SERVER SHUTDOWN ===
+[2025-08-25 11:19:14] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-25 11:19:14] [INFO] Dashboard server started on localhost:5678
+[2025-08-25 11:19:14] [INFO] Dashboard server registered (PID: 81453)
+[2025-08-25 11:19:14] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-25 11:19:14] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-25 11:19:14] [INFO] Health check at: http://localhost:5678/health
+[2025-08-25 11:38:08] [INFO] === DASHBOARD-SERVER STARTED ===
+[2025-08-25 11:38:08] [INFO] Dashboard server started on localhost:5678
+[2025-08-25 11:38:08] [INFO] Dashboard server registered (PID: 83556)
+[2025-08-25 11:38:08] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-25 11:38:08] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-25 11:38:08] [INFO] Health check at: http://localhost:5678/health
