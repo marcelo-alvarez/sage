@@ -2573,6 +2573,8 @@
         
         // Execute command with debouncing and state management
         async function executeCommand(command) {
+            console.log(`[DEBUG] executeCommand called with: ${command}`);
+            
             // Reset exit flag when continue is executed
             if (command === 'continue') {
                 userValidationExited = false;
@@ -2581,25 +2583,30 @@
             // Debounce rapid clicks
             const now = Date.now();
             if (buttonDebounce[command] && now - buttonDebounce[command] < 1000) {
-                console.log(`Debounced rapid click for ${command}`);
+                console.log(`[DEBUG] Debounced rapid click for ${command}`);
                 return;
             }
             buttonDebounce[command] = now;
             
             // Don't allow concurrent operations except status
             if (currentOperation && currentOperation !== 'idle' && command !== 'status') {
+                console.log(`[DEBUG] Operation in progress: ${currentOperation}, blocking ${command}`);
                 showCommandStatus(`Operation in progress: ${currentOperation}`, 'error');
                 return;
             }
             
             try {
+                console.log(`[DEBUG] Setting operation state for: ${command}`);
                 // Update UI state
                 setOperationState(command);
                 
+                console.log(`[DEBUG] About to call callExecuteAPI for: ${command}`);
                 // Execute the command via API
                 const result = await callExecuteAPI(command);
+                console.log(`[DEBUG] callExecuteAPI returned:`, result);
                 
                 if (result.success) {
+                    console.log(`[DEBUG] Command ${command} succeeded`);
                     showCommandStatus(result.message || `${command} completed successfully`, 'success');
                     
                     // Update workflow state if provided
@@ -2613,14 +2620,18 @@
                         refreshStatus();
                         // File viewer removed - using log modals instead
                     }, 1500);
+                    
+                    return result;
                 } else {
                     throw new Error(result.error || 'Command execution failed');
                 }
                 
             } catch (error) {
-                console.error(`Error executing ${command}:`, error);
+                console.error(`[DEBUG] Error executing ${command}:`, error);
                 showCommandStatus(`Error: ${error.message}`, 'error');
+                throw error;
             } finally {
+                console.log(`[DEBUG] executeCommand finally block for: ${command}`);
                 // Reset operation state after completion (except for long-running operations)
                 if (command === 'status') {
                     clearOperationState();
@@ -2635,7 +2646,11 @@
         
         // Call the execute API endpoint
         async function callExecuteAPI(command) {
+            console.log(`[DEBUG] callExecuteAPI called with command: ${command}`);
+            console.log(`[DEBUG] forceMockMode: ${forceMockMode}, useRealAPI: ${useRealAPI}, discoveredAPIPort: ${discoveredAPIPort}`);
+            
             if (forceMockMode || !useRealAPI || !discoveredAPIPort) {
+                console.log(`[DEBUG] Using mock mode`);
                 // Mock implementation for testing
                 return {
                     success: true,
@@ -2652,6 +2667,9 @@
                 mode: currentMode
             };
             
+            console.log(`[DEBUG] Making POST request to: ${apiUrl}`);
+            console.log(`[DEBUG] Request body:`, requestBody);
+            
             const response = await fetch(apiUrl, {
                 method: 'POST',
                 headers: {
@@ -2661,12 +2679,17 @@
                 signal: AbortSignal.timeout(30000) // 30 second timeout
             });
             
+            console.log(`[DEBUG] Response received - status: ${response.status}, ok: ${response.ok}`);
+            
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));
+                console.log(`[DEBUG] Error response:`, errorData);
                 throw new Error(errorData.error || `API responded with status ${response.status}`);
             }
             
-            return await response.json();
+            const result = await response.json();
+            console.log(`[DEBUG] Success response:`, result);
+            return result;
         }
         
         // Set operation state and update UI

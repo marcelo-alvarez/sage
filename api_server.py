@@ -678,11 +678,10 @@ class StatusHandler(BaseHTTPRequestHandler):
     def _process_gate_decision(self, decision_type, mode, decision_data):
         """Process gate decision by calling orchestrate.py"""
         try:
-            # Build command - use orchestrate.py from current project directory
-            orchestrate_path = os.path.join(self.project_root, 'orchestrate.py')
-            cmd = ['python3', orchestrate_path, '--no-browser', decision_type]
+            # Build command - use cc-orchestrate wrapper
+            cmd = ['cc-orchestrate', '--no-browser', decision_type]
             
-            if mode == 'meta':
+            if self.status_reader._get_current_mode() == 'meta':
                 cmd.append('meta')
             
             # Add modification text if provided
@@ -951,8 +950,8 @@ class StatusHandler(BaseHTTPRequestHandler):
                 if command == 'start':
                     # Run orchestrator in separate process to avoid blocking API server
                     import subprocess
-                    cmd = [sys.executable, 'orchestrate.py', 'start']
-                    if mode == 'meta':
+                    cmd = ['cc-orchestrate', 'start']
+                    if self.status_reader._get_current_mode() == 'meta':
                         cmd.append('meta')
                     
                     # Start the process in background with shorter timeout handling
@@ -960,7 +959,7 @@ class StatusHandler(BaseHTTPRequestHandler):
                         process = subprocess.Popen(cmd, 
                                                    stdout=subprocess.PIPE, 
                                                    stderr=subprocess.PIPE,
-                                                   cwd=os.getcwd(),
+                                                   cwd=str(self.project_root),
                                                    start_new_session=True)  # Prevent signal propagation
                     except Exception as start_error:
                         OPERATION_STATE['current_operation'] = 'idle'
@@ -978,15 +977,15 @@ class StatusHandler(BaseHTTPRequestHandler):
                 elif command == 'continue':
                     # Run orchestrator continue in separate process
                     import subprocess
-                    cmd = [sys.executable, 'orchestrate.py', 'continue']
-                    if mode == 'meta':
+                    cmd = ['cc-orchestrate', 'continue']
+                    if self.status_reader._get_current_mode() == 'meta':
                         cmd.append('meta')
                     
                     try:
                         process = subprocess.Popen(cmd, 
                                                    stdout=subprocess.PIPE, 
                                                    stderr=subprocess.PIPE,
-                                                   cwd=os.getcwd(),
+                                                   cwd=str(self.project_root),
                                                    start_new_session=True)  # Prevent signal propagation
                     except Exception as continue_error:
                         OPERATION_STATE['current_operation'] = 'idle'
@@ -1011,8 +1010,8 @@ class StatusHandler(BaseHTTPRequestHandler):
                 elif command == 'clean':
                     # Run clean in separate process
                     import subprocess
-                    cmd = [sys.executable, 'orchestrate.py', 'clean']
-                    if mode == 'meta':
+                    cmd = ['cc-orchestrate', 'clean']
+                    if self.status_reader._get_current_mode() == 'meta':
                         cmd.append('meta')
                     
                     # Use non-blocking subprocess call for clean command
@@ -1156,7 +1155,7 @@ class StatusHandler(BaseHTTPRequestHandler):
                                        capture_output=True, 
                                        text=True, 
                                        timeout=30,
-                                       cwd=os.getcwd())
+                                       cwd=str(self.project_root))
                 
                 if process.returncode != 0:
                     return {
@@ -1192,7 +1191,7 @@ class StatusHandler(BaseHTTPRequestHandler):
                 serve_process = subprocess.Popen(serve_cmd,
                                                stdout=subprocess.DEVNULL,
                                                stderr=subprocess.DEVNULL,
-                                               cwd=os.getcwd(),
+                                               cwd=str(self.project_root),
                                                start_new_session=True)  # Detach from current process
                 
                 print(f"[API Restart] Serve command started (PID: {serve_process.pid})")

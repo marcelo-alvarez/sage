@@ -1444,3 +1444,230 @@
 [2025-08-25 11:38:10] [INFO] Dashboard available at: http://localhost:5678
 [2025-08-25 11:38:10] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
 [2025-08-25 11:38:10] [INFO] Health check at: http://localhost:5678/health
+[2025-08-25 12:02:14] [WARNING] API server on port 8000 is unresponsive
+[2025-08-25 12:05:49] [WARNING] API server on port 8000 is unresponsive
+[2025-08-25 12:45:55] [WARNING] API server on port 8000 is unresponsive
+[2025-08-25 12:58:31] [WARNING] API server on port 8000 is unresponsive
+[2025-08-25 13:14:02] [WARNING] Dashboard server on port 5678 is unresponsive
+[2025-08-25 13:14:02] [WARNING] API server on port 8000 is unresponsive
+[2025-08-25 13:14:22] [INFO] Shutting down servers...
+[2025-08-25 13:14:24] [INFO] All servers stopped successfully
+[2025-08-25 13:14:24] [INFO] === ORCHESTRATOR-SERVE SHUTDOWN ===
+[2025-08-25 13:14:34] [INFO] === ORCHESTRATOR-SERVE STARTED ===
+[2025-08-25 13:14:34] [INFO] Starting orchestrator serve command
+[2025-08-25 13:14:34] [INFO] Dashboard server will use port 5678
+[2025-08-25 13:14:34] [INFO] API server will use port 8000
+[2025-08-25 13:14:34] [INFO] Starting API server on port 8000...
+[2025-08-25 13:14:34] [INFO] API server registered (PID: 89621)
+[2025-08-25 13:14:36] [INFO] API server healthy on http://localhost:8000
+[2025-08-25 13:14:36] [INFO] Starting dashboard server on port 5678...
+[2025-08-25 13:14:36] [INFO] Press Ctrl+C to stop all servers
+[2025-08-25 13:14:36] [INFO] --------------------------------------------------
+[2025-08-25 13:14:36] [INFO] Dashboard server registered (PID: 89629)
+[2025-08-25 13:14:36] [INFO] Waiting for dashboard server to start...
+[2025-08-25 13:14:38] [INFO] Dashboard server is ready!
+[2025-08-25 13:14:38] [INFO] Opening browser to http://localhost:5678
+[2025-08-25 13:14:38] [INFO] Browser opened successfully
+[2025-08-25 13:14:38] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-25 13:14:38] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-25 13:14:38] [INFO] Health check at: http://localhost:5678/health
+[2025-08-25 13:26:41] [WARNING] API server on port 8000 is unresponsive
+[2025-08-25 13:34:47] [WARNING] API server on port 8000 is unresponsive
+[2025-08-25 13:35:52] [WARNING] API server on port 8000 is unresponsive
+[2025-08-25 13:37:27] [WARNING] API server on port 8000 is unresponsive
+[2025-08-25 13:47:57] [WARNING] Dashboard server on port 5678 is unresponsive
+[2025-08-25 13:47:57] [WARNING] API server on port 8000 is unresponsive
+[2025-08-25 13:48:27] [WARNING] Dashboard server on port 5678 is unresponsive
+[2025-08-25 13:48:27] [WARNING] API server on port 8000 is unresponsive
+[2025-08-25 13:48:49] [INFO] Shutting down servers...
+[2025-08-25 13:48:51] [INFO] All servers stopped successfully
+[2025-08-25 13:48:51] [INFO] === ORCHESTRATOR-SERVE SHUTDOWN ===
+[2025-08-25 13:48:54] [INFO] === ORCHESTRATOR-SERVE STARTED ===
+[2025-08-25 13:48:54] [INFO] Starting orchestrator serve command
+[2025-08-25 13:48:54] [INFO] Dashboard server will use port 5678
+[2025-08-25 13:48:54] [INFO] API server will use port 8000
+[2025-08-25 13:48:54] [INFO] Starting API server on port 8000...
+[2025-08-25 13:48:54] [INFO] API server registered (PID: 93605)
+[2025-08-25 13:48:56] [INFO] API server healthy on http://localhost:8000
+[2025-08-25 13:48:56] [INFO] Starting dashboard server on port 5678...
+[2025-08-25 13:48:56] [INFO] Press Ctrl+C to stop all servers
+[2025-08-25 13:48:56] [INFO] --------------------------------------------------
+[2025-08-25 13:48:56] [INFO] Dashboard server registered (PID: 93606)
+[2025-08-25 13:48:56] [INFO] Waiting for dashboard server to start...
+[2025-08-25 13:48:59] [INFO] Dashboard server is ready!
+[2025-08-25 13:48:59] [INFO] Opening browser to http://localhost:5678
+[2025-08-25 13:48:59] [INFO] Browser opened successfully
+[2025-08-25 13:48:59] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-25 13:48:59] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-25 13:48:59] [INFO] Health check at: http://localhost:5678/health
+[2025-08-25 13:50:04] [INFO] Shutting down servers...
+[2025-08-25 13:50:09] [INFO] All servers stopped successfully
+[2025-08-25 13:50:09] [INFO] === ORCHESTRATOR-SERVE SHUTDOWN ===
+[2025-08-25 13:50:16] [INFO] === ORCHESTRATOR-SERVE STARTED ===
+[2025-08-25 13:50:16] [INFO] Starting orchestrator serve command
+[2025-08-25 13:50:16] [INFO] Dashboard server will use port 5678
+[2025-08-25 13:50:16] [INFO] API server will use port 8000
+[2025-08-25 13:50:16] [INFO] Starting API server on port 8000...
+[2025-08-25 13:50:16] [INFO] API server registered (PID: 93738)
+[2025-08-25 13:50:18] [INFO] API server healthy on http://localhost:8000
+[2025-08-25 13:50:18] [INFO] Starting dashboard server on port 5678...
+[2025-08-25 13:50:18] [INFO] Press Ctrl+C to stop all servers
+[2025-08-25 13:50:18] [INFO] --------------------------------------------------
+[2025-08-25 13:50:18] [INFO] Dashboard server registered (PID: 93740)
+[2025-08-25 13:50:18] [INFO] Waiting for dashboard server to start...
+[2025-08-25 13:50:20] [INFO] Dashboard server is ready!
+[2025-08-25 13:50:20] [INFO] Opening browser to http://localhost:5678
+[2025-08-25 13:50:21] [INFO] Browser opened successfully
+[2025-08-25 13:50:21] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-25 13:50:21] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-25 13:50:21] [INFO] Health check at: http://localhost:5678/health
+[2025-08-25 13:57:18] [WARNING] Dashboard server on port 5678 is unresponsive
+[2025-08-25 13:57:18] [WARNING] API server on port 8000 is unresponsive
+[2025-08-25 13:57:48] [WARNING] Dashboard server on port 5678 is unresponsive
+[2025-08-25 13:57:48] [WARNING] API server on port 8000 is unresponsive
+[2025-08-25 13:57:49] [INFO] Shutting down servers...
+[2025-08-25 13:57:51] [INFO] All servers stopped successfully
+[2025-08-25 13:57:51] [INFO] === ORCHESTRATOR-SERVE SHUTDOWN ===
+[2025-08-25 13:57:55] [INFO] === ORCHESTRATOR-SERVE STARTED ===
+[2025-08-25 13:57:55] [INFO] Starting orchestrator serve command
+[2025-08-25 13:57:55] [INFO] Dashboard server will use port 5678
+[2025-08-25 13:57:55] [INFO] API server will use port 8000
+[2025-08-25 13:57:55] [INFO] Starting API server on port 8000...
+[2025-08-25 13:57:55] [INFO] API server registered (PID: 94752)
+[2025-08-25 13:57:57] [INFO] API server healthy on http://localhost:8000
+[2025-08-25 13:57:57] [INFO] Starting dashboard server on port 5678...
+[2025-08-25 13:57:57] [INFO] Press Ctrl+C to stop all servers
+[2025-08-25 13:57:57] [INFO] --------------------------------------------------
+[2025-08-25 13:57:57] [INFO] Dashboard server registered (PID: 94753)
+[2025-08-25 13:57:57] [INFO] Waiting for dashboard server to start...
+[2025-08-25 13:57:59] [INFO] Dashboard server is ready!
+[2025-08-25 13:57:59] [INFO] Opening browser to http://localhost:5678
+[2025-08-25 13:57:59] [INFO] Browser opened successfully
+[2025-08-25 13:57:59] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-25 13:57:59] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-25 13:57:59] [INFO] Health check at: http://localhost:5678/health
+[2025-08-25 14:06:27] [WARNING] Dashboard server on port 5678 is unresponsive
+[2025-08-25 14:06:27] [WARNING] API server on port 8000 is unresponsive
+[2025-08-25 14:06:57] [WARNING] Dashboard server on port 5678 is unresponsive
+[2025-08-25 14:06:57] [WARNING] API server on port 8000 is unresponsive
+[2025-08-25 14:07:16] [INFO] Shutting down servers...
+[2025-08-25 14:07:18] [INFO] All servers stopped successfully
+[2025-08-25 14:07:18] [INFO] === ORCHESTRATOR-SERVE SHUTDOWN ===
+[2025-08-25 14:07:21] [INFO] === ORCHESTRATOR-SERVE STARTED ===
+[2025-08-25 14:07:21] [INFO] Starting orchestrator serve command
+[2025-08-25 14:07:21] [INFO] Dashboard server will use port 5678
+[2025-08-25 14:07:21] [INFO] API server will use port 8000
+[2025-08-25 14:07:21] [INFO] Starting API server on port 8000...
+[2025-08-25 14:07:21] [INFO] API server registered (PID: 96273)
+[2025-08-25 14:07:24] [INFO] API server healthy on http://localhost:8000
+[2025-08-25 14:07:24] [INFO] Starting dashboard server on port 5678...
+[2025-08-25 14:07:24] [INFO] Press Ctrl+C to stop all servers
+[2025-08-25 14:07:24] [INFO] --------------------------------------------------
+[2025-08-25 14:07:24] [INFO] Dashboard server registered (PID: 96275)
+[2025-08-25 14:07:24] [INFO] Waiting for dashboard server to start...
+[2025-08-25 14:07:26] [INFO] Dashboard server is ready!
+[2025-08-25 14:07:26] [INFO] Opening browser to http://localhost:5678
+[2025-08-25 14:07:26] [INFO] Browser opened successfully
+[2025-08-25 14:07:26] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-25 14:07:26] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-25 14:07:26] [INFO] Health check at: http://localhost:5678/health
+[2025-08-25 14:18:24] [WARNING] Dashboard server on port 5678 is unresponsive
+[2025-08-25 14:18:24] [WARNING] API server on port 8000 is unresponsive
+[2025-08-25 14:18:54] [WARNING] Dashboard server on port 5678 is unresponsive
+[2025-08-25 14:18:54] [WARNING] API server on port 8000 is unresponsive
+[2025-08-25 14:19:15] [INFO] Shutting down servers...
+[2025-08-25 14:19:16] [INFO] Shutting down servers...
+[2025-08-25 14:19:16] [INFO] Shutting down servers...
+[2025-08-25 14:19:16] [INFO] Shutting down servers...
+[2025-08-25 14:19:17] [INFO] Shutting down servers...
+[2025-08-25 14:19:17] [INFO] Shutting down servers...
+[2025-08-25 14:19:17] [INFO] Shutting down servers...
+[2025-08-25 14:19:17] [INFO] Shutting down servers...
+[2025-08-25 14:19:17] [INFO] Shutting down servers...
+[2025-08-25 14:19:17] [INFO] Shutting down servers...
+[2025-08-25 14:19:17] [INFO] Shutting down servers...
+[2025-08-25 14:19:17] [INFO] Shutting down servers...
+[2025-08-25 14:19:17] [INFO] Shutting down servers...
+[2025-08-25 14:19:19] [INFO] All servers stopped successfully
+[2025-08-25 14:19:19] [INFO] === ORCHESTRATOR-SERVE SHUTDOWN ===
+[2025-08-25 14:19:29] [INFO] === ORCHESTRATOR-SERVE STARTED ===
+[2025-08-25 14:19:29] [INFO] Starting orchestrator serve command
+[2025-08-25 14:19:29] [INFO] Dashboard server will use port 5678
+[2025-08-25 14:19:29] [INFO] API server will use port 8000
+[2025-08-25 14:19:29] [INFO] Starting API server on port 8000...
+[2025-08-25 14:19:29] [INFO] API server registered (PID: 98119)
+[2025-08-25 14:19:31] [INFO] API server healthy on http://localhost:8000
+[2025-08-25 14:19:31] [INFO] Starting dashboard server on port 5678...
+[2025-08-25 14:19:31] [INFO] Press Ctrl+C to stop all servers
+[2025-08-25 14:19:31] [INFO] --------------------------------------------------
+[2025-08-25 14:19:31] [INFO] Dashboard server registered (PID: 98124)
+[2025-08-25 14:19:31] [INFO] Waiting for dashboard server to start...
+[2025-08-25 14:19:33] [INFO] Dashboard server is ready!
+[2025-08-25 14:19:33] [INFO] Opening browser to http://localhost:5678
+[2025-08-25 14:19:33] [INFO] Browser opened successfully
+[2025-08-25 14:19:33] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-25 14:19:33] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-25 14:19:33] [INFO] Health check at: http://localhost:5678/health
+[2025-08-25 14:23:13] [INFO] Shutting down servers...
+[2025-08-25 14:23:18] [INFO] All servers stopped successfully
+[2025-08-25 14:23:18] [INFO] === ORCHESTRATOR-SERVE SHUTDOWN ===
+[2025-08-25 14:23:21] [INFO] === ORCHESTRATOR-SERVE STARTED ===
+[2025-08-25 14:23:21] [INFO] Starting orchestrator serve command
+[2025-08-25 14:23:21] [INFO] Dashboard server will use port 5678
+[2025-08-25 14:23:21] [INFO] API server will use port 8000
+[2025-08-25 14:23:21] [INFO] Starting API server on port 8000...
+[2025-08-25 14:23:21] [INFO] API server registered (PID: 98569)
+[2025-08-25 14:23:23] [INFO] API server healthy on http://localhost:8000
+[2025-08-25 14:23:23] [INFO] Starting dashboard server on port 5678...
+[2025-08-25 14:23:23] [INFO] Press Ctrl+C to stop all servers
+[2025-08-25 14:23:23] [INFO] --------------------------------------------------
+[2025-08-25 14:23:23] [INFO] Dashboard server registered (PID: 98573)
+[2025-08-25 14:23:23] [INFO] Waiting for dashboard server to start...
+[2025-08-25 14:23:25] [INFO] Dashboard server is ready!
+[2025-08-25 14:23:25] [INFO] Opening browser to http://localhost:5678
+[2025-08-25 14:23:26] [INFO] Browser opened successfully
+[2025-08-25 14:23:26] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-25 14:23:26] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-25 14:23:26] [INFO] Health check at: http://localhost:5678/health
+[2025-08-25 14:31:58] [WARNING] API server on port 8000 is unresponsive
+[2025-08-25 14:33:04] [WARNING] API server on port 8000 is unresponsive
+[2025-08-25 14:34:09] [WARNING] API server on port 8000 is unresponsive
+[2025-08-25 14:35:14] [WARNING] API server on port 8000 is unresponsive
+[2025-08-25 14:46:14] [WARNING] Dashboard server on port 5678 is unresponsive
+[2025-08-25 14:46:32] [INFO] Shutting down servers...
+[2025-08-25 14:46:34] [INFO] All servers stopped successfully
+[2025-08-25 14:46:34] [INFO] === ORCHESTRATOR-SERVE SHUTDOWN ===
+[2025-08-25 14:46:37] [INFO] === ORCHESTRATOR-SERVE STARTED ===
+[2025-08-25 14:46:37] [INFO] Starting orchestrator serve command
+[2025-08-25 14:46:37] [INFO] Dashboard server will use port 5678
+[2025-08-25 14:46:37] [INFO] API server will use port 8000
+[2025-08-25 14:46:37] [INFO] Starting API server on port 8000...
+[2025-08-25 14:46:37] [INFO] API server registered (PID: 2379)
+[2025-08-25 14:46:39] [INFO] API server healthy on http://localhost:8000
+[2025-08-25 14:46:39] [INFO] Starting dashboard server on port 5678...
+[2025-08-25 14:46:39] [INFO] Press Ctrl+C to stop all servers
+[2025-08-25 14:46:39] [INFO] --------------------------------------------------
+[2025-08-25 14:46:39] [INFO] Dashboard server registered (PID: 2380)
+[2025-08-25 14:46:39] [INFO] Waiting for dashboard server to start...
+[2025-08-25 14:46:41] [INFO] Dashboard server is ready!
+[2025-08-25 14:46:41] [INFO] Opening browser to http://localhost:5678
+[2025-08-25 14:46:42] [INFO] Browser opened successfully
+[2025-08-25 14:46:42] [INFO] Dashboard available at: http://localhost:5678
+[2025-08-25 14:46:42] [INFO] Dashboard UI at: http://localhost:5678/dashboard.html
+[2025-08-25 14:46:42] [INFO] Health check at: http://localhost:5678/health
+[2025-08-25 14:55:14] [WARNING] API server on port 8000 is unresponsive
+[2025-08-25 15:53:52] [WARNING] API server on port 8000 is unresponsive
+[2025-08-25 16:13:58] [WARNING] API server on port 8000 is unresponsive
+[2025-08-25 16:26:33] [WARNING] API server on port 8000 is unresponsive
+[2025-08-25 16:31:39] [WARNING] API server on port 8000 is unresponsive
+[2025-08-25 16:48:14] [WARNING] API server on port 8000 is unresponsive
+[2025-08-25 16:49:18] [INFO] Shutting down servers...
+[2025-08-25 16:49:18] [INFO] Shutting down servers...
+[2025-08-25 16:49:19] [INFO] Shutting down servers...
+[2025-08-25 16:49:19] [INFO] Shutting down servers...
+[2025-08-25 16:49:19] [INFO] Shutting down servers...
+[2025-08-25 16:49:19] [INFO] Shutting down servers...
+[2025-08-25 16:49:19] [INFO] Shutting down servers...
+[2025-08-25 16:49:19] [INFO] Shutting down servers...
+[2025-08-25 16:49:24] [INFO] All servers stopped successfully
+[2025-08-25 16:49:24] [INFO] === ORCHESTRATOR-SERVE SHUTDOWN ===
