@@ -929,7 +929,7 @@ class AgentExecutor:
 
     def _append_scribe_to_orchestrator_log(self):
         """Append scribe.md content to orchestrator-log.md for permanent record"""
-        scribe_file = self.outputs_dir / "scribe.md"
+        scribe_file = self.outputs_dir / "documentation.md"
         orchestrator_log = self.outputs_dir / "orchestrator-log.md"
         
         if scribe_file.exists():
@@ -1374,13 +1374,17 @@ class ClaudeCodeOrchestrator:
         # Get current time for example
         current_time = datetime.now().strftime("%H:%M:%S")
         
+        # Get the actual current task from the checklist instead of using generic primary_objective
+        actual_task = self._get_current_task_raw()
+        task_for_header = actual_task if actual_task else primary_objective
+        
         logging_instructions = f"""
 AGENT LOGGING (for debugging transparency):
 APPEND (do not overwrite) progress updates to {log_file} using this format:
 
 FIRST: Add task header if this is a new log file or first session:
 ---
-TASK: {primary_objective}
+TASK: {task_for_header}
 ---
 
 THEN: Add your session log entries (Python automatically adds session start/end timestamps):
@@ -1958,7 +1962,11 @@ CRITICAL REQUIREMENTS:
             
         else:
             # Generic agent preparation for work agents
-            return self.agent_factory.create_agent(agent_type)
+            current_task = self._get_current_task_raw()
+            if current_task:
+                return self.agent_factory.create_agent(agent_type, task=current_task)
+            else:
+                return self.agent_factory.create_agent(agent_type)
 
     def _get_current_task_raw(self):
         """Extract current task from checklist without handling it"""

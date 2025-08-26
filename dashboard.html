@@ -3091,12 +3091,22 @@
             
             // Find the currently active gate to apply animation only to it
             const hasRunningTasks = workflow.some(step => step.status === 'in-progress' && step.type !== 'gate');
-            const hasCompletedWork = workflow.some(step => step.status === 'completed' || step.status === 'in-progress');
+            const hasCompletedWork = workflow.some(step => step.status === 'completed' && step.type !== 'gate');
+            
+            // Find the next pending gate that should be active
+            const nextPendingGateIndex = workflow.findIndex(step => step.type === 'gate' && step.status === 'pending');
+            let shouldActivateNextGate = false;
+            
+            if (nextPendingGateIndex >= 0 && !hasRunningTasks) {
+                // Check if all agents before this gate are completed
+                const agentsBeforeGate = workflow.slice(0, nextPendingGateIndex).filter(step => step.type !== 'gate');
+                shouldActivateNextGate = agentsBeforeGate.length > 0 && agentsBeforeGate.every(step => step.status === 'completed');
+            }
             
             const activeGate = workflow.find(step => 
                 step.type === 'gate' && (
                     step.status === 'in-progress' || // Gate is actively waiting for decision
-                    (step.status === 'pending' && !hasRunningTasks && hasCompletedWork) // Gate is next after some work was done
+                    (step.status === 'pending' && shouldActivateNextGate && workflow.indexOf(step) === nextPendingGateIndex) // Only the next pending gate after completed work
                 )
             );
             
@@ -3322,12 +3332,22 @@
             
             // Find active gate - only show gate controls when gate is actually blocking
             const hasRunningTasks = workflow.some(step => step.status === 'in-progress' && step.type !== 'gate');
-            const hasCompletedWork = workflow.some(step => step.status === 'completed' || step.status === 'in-progress');
+            const hasCompletedWork = workflow.some(step => step.status === 'completed' && step.type !== 'gate');
+            
+            // Find the next pending gate that should be active
+            const nextPendingGateIndex = workflow.findIndex(step => step.type === 'gate' && step.status === 'pending');
+            let shouldActivateNextGate = false;
+            
+            if (nextPendingGateIndex >= 0 && !hasRunningTasks) {
+                // Check if all agents before this gate are completed
+                const agentsBeforeGate = workflow.slice(0, nextPendingGateIndex).filter(step => step.type !== 'gate');
+                shouldActivateNextGate = agentsBeforeGate.length > 0 && agentsBeforeGate.every(step => step.status === 'completed');
+            }
             
             const activeGate = workflow.find(step => 
                 step.type === 'gate' && (
                     step.status === 'in-progress' || // Gate is actively waiting for decision
-                    (step.status === 'pending' && !hasRunningTasks && hasCompletedWork) // Gate is next after some work was done
+                    (step.status === 'pending' && shouldActivateNextGate && workflow.indexOf(step) === nextPendingGateIndex) // Only the next pending gate after completed work
                 )
             );
             
