@@ -257,29 +257,40 @@ class AgentConfig:
         
     def _load_from_templates(self):
         """Load agent definitions from template files"""
-        # Scan all subdirectories in templates/agents/ for custom agents
-        if self.templates_dir.exists():
-            for agent_dir in self.templates_dir.iterdir():
-                if agent_dir.is_dir():
-                    agent_type = agent_dir.name
-                    template_path = agent_dir / 'CLAUDE.md'
-                    if template_path.exists():
-                        try:
-                            content = template_path.read_text()
-                            template = self._parse_template_file(agent_type, content)
-                            # Validate template before adding
-                            if self.validate_template(template):
-                                # Only add if not already loaded from config file (config takes precedence)
-                                if agent_type not in self.agents:
-                                    self.agents[agent_type] = template
+        # Try to load from local templates first, then global templates
+        template_dirs = [
+            self.templates_dir,  # Local: templates/agents/
+            Path.home() / '.claude-orchestrator' / 'agents'  # Global: ~/.claude-orchestrator/agents/
+        ]
+        
+        for templates_dir in template_dirs:
+            if templates_dir.exists():
+                for agent_dir in templates_dir.iterdir():
+                    if agent_dir.is_dir():
+                        agent_type = agent_dir.name
+                        template_path = agent_dir / 'CLAUDE.md'
+                        if template_path.exists():
+                            try:
+                                content = template_path.read_text()
+                                template = self._parse_template_file(agent_type, content)
+                                # Validate template before adding
+                                if self.validate_template(template):
+                                    # Only add if not already loaded from config file or previous template location
+                                    # (config takes precedence, local templates take precedence over global)
+                                    if agent_type not in self.agents:
+                                        self.agents[agent_type] = template
+                                        debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+                                        if debug_mode:
+                                            template_source = "local" if templates_dir == self.templates_dir else "global"
+                                            print(f"Info: Loaded {agent_type} template from {template_source} directory")
+                                    else:
+                                        debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+                                        if debug_mode:
+                                            print(f"Info: Skipping template {agent_type} - already loaded from higher priority source")
                                 else:
-                                    debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
-                                    if debug_mode:
-                                        print(f"Info: Skipping template {agent_type} - already loaded from config")
-                            else:
-                                print(f"Warning: Template validation failed for {agent_type}")
-                        except Exception as e:
-                            print(f"Warning: Failed to load template for {agent_type}: {e}")
+                                    print(f"Warning: Template validation failed for {agent_type}")
+                            except Exception as e:
+                                print(f"Warning: Failed to load template for {agent_type}: {e}")
                     
     def _parse_template_file(self, agent_name: str, content: str) -> AgentTemplate:
         """Parse template file content into AgentTemplate"""
@@ -2258,6 +2269,7 @@ CRITICAL REQUIREMENTS:
             ("plan.md", "Planner"),
             ("changes.md", "Coder"),
             ("verification.md", "Verifier"),
+            ("orchestrator-log.md", "Scribe"),
             ("completion-approved.md", "Completion Gate")
         ]
         
@@ -2286,6 +2298,7 @@ CRITICAL REQUIREMENTS:
             ("plan.md", "Planner"),
             ("changes.md", "Coder"),
             ("verification.md", "Verifier"),
+            ("orchestrator-log.md", "Scribe"),
             ("completion-approved.md", "Completion Gate")
         ]
         
@@ -2353,6 +2366,7 @@ CRITICAL REQUIREMENTS:
             ("plan.md", "Planner"),
             ("changes.md", "Coder"),
             ("verification.md", "Verifier"),
+            ("orchestrator-log.md", "Scribe"),
             ("completion-approved.md", "Completion Gate")
         ]
         
