@@ -860,6 +860,10 @@ class AgentExecutor:
                 # Update status file immediately when agent completes
                 self.orchestrator._update_status_file()
                 
+                # Special handling for Scribe: append scribe.md to orchestrator-log.md
+                if agent_type == "scribe":
+                    self._append_scribe_to_orchestrator_log()
+                
                 return f"✅ {agent_type.upper()} completed successfully"
             else:
                 # Build detailed error report for better debugging
@@ -922,6 +926,22 @@ class AgentExecutor:
             
             error_message = f"System error: {str(e)}. Check system resources and file system access."
             return f"❌ {agent_type.upper()} failed: {self._sanitize_error_message(error_message)}"
+
+    def _append_scribe_to_orchestrator_log(self):
+        """Append scribe.md content to orchestrator-log.md for permanent record"""
+        scribe_file = self.outputs_dir / "scribe.md"
+        orchestrator_log = self.outputs_dir / "orchestrator-log.md"
+        
+        if scribe_file.exists():
+            scribe_content = scribe_file.read_text()
+            
+            # Append to orchestrator log
+            with open(orchestrator_log, 'a', encoding='utf-8') as f:
+                if orchestrator_log.exists() and orchestrator_log.stat().st_size > 0:
+                    f.write('\n')  # Add separator line
+                f.write(scribe_content)
+                
+            print(f"✓ Scribe content appended to {orchestrator_log.name}")
 
     def _execute_via_interactive(self, agent_type, instructions):
         """Legacy interactive mode - return instructions unchanged for Claude to execute"""
@@ -1102,24 +1122,9 @@ class WorkflowConfig:
                 # Regular agent - check if output file exists
                 output_file = self._get_output_file(agent_type)
                 
-                # Special case for scribe: run after verifier if verification is newer than last scribe run
-                if agent_type == "scribe" and outputs_dir:
-                    if current_outputs.get("verification.md", False):
-                        verification_file = outputs_dir / "verification.md"
-                        scribe_file = outputs_dir / "orchestrator-log.md"
-                        
-                        # Run scribe if orchestrator-log doesn't exist or verification is newer
-                        if not scribe_file.exists():
-                            return agent_type
-                        elif verification_file.exists():
-                            verification_time = verification_file.stat().st_mtime
-                            scribe_time = scribe_file.stat().st_mtime
-                            if verification_time > scribe_time:
-                                return agent_type
-                else:
-                    # Normal agents - check if output file exists
-                    if not current_outputs.get(output_file, False):
-                        return agent_type
+                # Normal agents - check if output file exists
+                if not current_outputs.get(output_file, False):
+                    return agent_type
                     
         return None  # All complete
         
@@ -1132,7 +1137,7 @@ class WorkflowConfig:
         elif agent_type == "coder":
             return "changes.md"
         elif agent_type == "scribe":
-            return "orchestrator-log.md"
+            return "scribe.md"
         elif agent_type == "verifier":
             return "verification.md"
         else:
@@ -1164,9 +1169,10 @@ class ClaudeCodeOrchestrator:
         # Initialize status reader early for path resolution
         self.status_reader = StatusReader(project_root=self.project_root)
         
-        # Set directories using centralized path resolution
-        self.claude_dir = self.status_reader._get_claude_dir()
-        self.outputs_dir = self.status_reader._get_outputs_dir()
+        # Set directories using centralized path resolution with explicit mode
+        mode = 'meta' if self.meta_mode else 'regular'
+        self.claude_dir = self.status_reader._get_claude_dir(mode)
+        self.outputs_dir = self.status_reader._get_outputs_dir(mode)
         
         self.agents_dir = Path.home() / ".claude-orchestrator" / "agents"
         
@@ -1576,8 +1582,9 @@ CRITICAL REQUIREMENTS:
     def get_continue_agent(self):
         """Get the next agent to run and its instructions using configurable workflow"""
         
-        # Check for pending gate state first (for resume functionality) - use shared StatusReader
-        pending_gates = self.status_reader.get_pending_gates(self.status_reader._get_current_mode())
+        # Check for pending gate state first (for resume functionality) - use explicit mode
+        mode = 'meta' if self.meta_mode else 'regular'
+        pending_gates = self.status_reader.get_pending_gates(mode)
         
         if 'user_validation' in pending_gates:
             gate_file = self.outputs_dir / "pending-user_validation-gate.md"
@@ -1599,14 +1606,14 @@ CRITICAL REQUIREMENTS:
             if approval_file.exists():
                 approval_file.unlink()  # Remove approval file so we don't loop
                 # Remove pending gate file if it exists
-                if self.status_reader.has_pending_gate('user_validation', self.status_reader._get_current_mode()):
+                if self.status_reader.has_pending_gate('user_validation', mode):
                     gate_file = self.outputs_dir / "pending-user_validation-gate.md"
                     gate_file.unlink()
                 # Continue to next task
                 print("User validation approved, continuing to next task...")
         
-        # Check what outputs exist to determine next phase - use shared StatusReader
-        current_outputs = self.status_reader.get_current_outputs_status(self.status_reader._get_current_mode())
+        # Check what outputs exist to determine next phase - use explicit mode
+        current_outputs = self.status_reader.get_current_outputs_status(mode)
         
         # Check if current task is a USER validation task before determining workflow phase
         current_task_raw = self._get_current_task_raw()
@@ -1616,7 +1623,7 @@ CRITICAL REQUIREMENTS:
             result = self._handle_user_validation(current_task_raw)
             if result is None:
                 # Gate was created, check for pending user validation gate
-                if self.status_reader.has_pending_gate('user_validation', self.status_reader._get_current_mode()):
+                if self.status_reader.has_pending_gate('user_validation', mode):
                     gate_file = self.outputs_dir / "pending-user_validation-gate.md"
                     gate_content = gate_file.read_text()
                     return self._handle_interactive_gate("user_validation", gate_content)
@@ -1718,8 +1725,9 @@ CRITICAL REQUIREMENTS:
         while iteration < max_iterations:
             iteration += 1
             
-            # First, check for pending gates before determining next phase - use shared StatusReader
-            pending_gates = self.status_reader.get_pending_gates(self.status_reader._get_current_mode())
+            # First, check for pending gates before determining next phase - use explicit mode
+            mode = 'meta' if self.meta_mode else 'regular'
+            pending_gates = self.status_reader.get_pending_gates(mode)
             
             if 'user_validation' in pending_gates:
                 gate_file = self.outputs_dir / "pending-user_validation-gate.md"
@@ -1734,8 +1742,8 @@ CRITICAL REQUIREMENTS:
                 gate_content = gate_file.read_text()
                 return self._handle_interactive_gate("completion", gate_content)
             
-            # Check what outputs exist to determine next phase - use shared StatusReader
-            current_outputs = self.status_reader.get_current_outputs_status(self.status_reader._get_current_mode())
+            # Check what outputs exist to determine next phase - use explicit mode
+            current_outputs = self.status_reader.get_current_outputs_status(mode)
             
             # Use workflow configuration to determine next agent
             next_agent = self.workflow_config.get_next_agent(current_outputs, self.outputs_dir)
@@ -2269,7 +2277,7 @@ CRITICAL REQUIREMENTS:
             ("plan.md", "Planner"),
             ("changes.md", "Coder"),
             ("verification.md", "Verifier"),
-            ("orchestrator-log.md", "Scribe"),
+            ("scribe.md", "Scribe"),
             ("completion-approved.md", "Completion Gate")
         ]
         
@@ -2298,7 +2306,7 @@ CRITICAL REQUIREMENTS:
             ("plan.md", "Planner"),
             ("changes.md", "Coder"),
             ("verification.md", "Verifier"),
-            ("orchestrator-log.md", "Scribe"),
+            ("scribe.md", "Scribe"),
             ("completion-approved.md", "Completion Gate")
         ]
         
@@ -2357,7 +2365,7 @@ CRITICAL REQUIREMENTS:
             "planner": ("plan.md", "Planner"), 
             "coder": ("changes.md", "Coder"),
             "verifier": ("verification.md", "Verifier"),
-            "scribe": ("orchestrator-log.md", "Scribe")
+            "scribe": ("scribe.md", "Scribe")
         }
         
         files = [
@@ -2366,7 +2374,7 @@ CRITICAL REQUIREMENTS:
             ("plan.md", "Planner"),
             ("changes.md", "Coder"),
             ("verification.md", "Verifier"),
-            ("orchestrator-log.md", "Scribe"),
+            ("scribe.md", "Scribe"),
             ("completion-approved.md", "Completion Gate")
         ]
         
@@ -2608,6 +2616,7 @@ Continuing to next task in workflow
             "plan.md",
             "changes.md", 
             "verification.md",
+            "scribe.md",
             "completion-approved.md",
             "criteria-modification-request.md",
             "pending-criteria-gate.md",

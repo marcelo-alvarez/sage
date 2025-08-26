@@ -681,7 +681,7 @@ class StatusHandler(BaseHTTPRequestHandler):
             # Build command - use cc-orchestrate wrapper
             cmd = ['cc-orchestrate', '--no-browser', decision_type]
             
-            if self.status_reader._get_current_mode() == 'meta':
+            if mode == 'meta':
                 cmd.append('meta')
             
             # Add modification text if provided
@@ -951,7 +951,7 @@ class StatusHandler(BaseHTTPRequestHandler):
                     # Run orchestrator in separate process to avoid blocking API server
                     import subprocess
                     cmd = ['cc-orchestrate', 'start']
-                    if self.status_reader._get_current_mode() == 'meta':
+                    if mode == 'meta':
                         cmd.append('meta')
                     
                     # Start the process in background with shorter timeout handling
@@ -978,7 +978,7 @@ class StatusHandler(BaseHTTPRequestHandler):
                     # Run orchestrator continue in separate process
                     import subprocess
                     cmd = ['cc-orchestrate', 'continue']
-                    if self.status_reader._get_current_mode() == 'meta':
+                    if mode == 'meta':
                         cmd.append('meta')
                     
                     try:
@@ -1011,7 +1011,7 @@ class StatusHandler(BaseHTTPRequestHandler):
                     # Run clean in separate process
                     import subprocess
                     cmd = ['cc-orchestrate', 'clean']
-                    if self.status_reader._get_current_mode() == 'meta':
+                    if mode == 'meta':
                         cmd.append('meta')
                     
                     # Use non-blocking subprocess call for clean command
