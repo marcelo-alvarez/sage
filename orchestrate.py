@@ -416,9 +416,11 @@ class AgentConfig:
                 self.dashboard_available = False
                 return
                 
-            # Start API server as subprocess (without --background since subprocess IS the background)
+            # Start API server as subprocess using installed version
+            orchestrator_dir = os.path.expanduser("~/.claude-orchestrator")
+            api_script = os.path.join(orchestrator_dir, "api_server.py")
             self.api_process = subprocess.Popen([
-                sys.executable, 'api_server.py', 
+                sys.executable, api_script, 
                 '--port', str(self.api_port)
             ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=self.project_root)
             
@@ -427,9 +429,10 @@ class AgentConfig:
                 self.process_manager.register_process('api_server', self.api_process)
             print(f"API server started as subprocess (PID: {self.api_process.pid}) on port {self.api_port}")
             
-            # Start dashboard server as subprocess
+            # Start dashboard server as subprocess using installed version
+            dashboard_script = os.path.join(orchestrator_dir, "dashboard_server.py")
             self.dashboard_process = subprocess.Popen([
-                sys.executable, 'dashboard_server.py', str(self.dashboard_port)
+                sys.executable, dashboard_script, str(self.dashboard_port)
             ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=self.project_root)
             
             # Register dashboard process with ProcessManager if available
@@ -929,7 +932,7 @@ class AgentExecutor:
 
     def _append_scribe_to_orchestrator_log(self):
         """Append scribe.md content to orchestrator-log.md for permanent record"""
-        scribe_file = self.outputs_dir / "documentation.md"
+        scribe_file = self.outputs_dir / "scribe.md"
         orchestrator_log = self.outputs_dir / "orchestrator-log.md"
         
         if scribe_file.exists():
@@ -3085,15 +3088,8 @@ def serve_command(args):
         serve_logger.info("Press Ctrl+C to stop all servers")
         serve_logger.info("-" * 50)
         
-        # Start dashboard server using local version to serve current directory files
-        current_dir = os.getcwd()
-        local_dashboard_script = os.path.join(current_dir, "dashboard_server.py")
-        
-        # Check if local dashboard_server.py exists, fall back to global if not
-        if os.path.exists(local_dashboard_script):
-            dashboard_script = local_dashboard_script
-        else:
-            dashboard_script = os.path.join(os.path.expanduser("~/.claude-orchestrator"), "dashboard_server.py")
+        # Start dashboard server using installed version only
+        dashboard_script = os.path.join(os.path.expanduser("~/.claude-orchestrator"), "dashboard_server.py")
         
         dashboard_process = subprocess.Popen([
             sys.executable, dashboard_script, str(dashboard_port)

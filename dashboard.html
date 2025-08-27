@@ -192,6 +192,16 @@
             gap: 12px;
         }
 
+        /* Auto Approve Switcher */
+        .auto-approve-switcher {
+            position: absolute;
+            right: 65px;
+            top: 30px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
         .mode-toggle {
             position: relative;
             display: inline-block;
@@ -1525,6 +1535,12 @@
                 margin-top: 15px;
             }
 
+            .auto-approve-switcher {
+                position: static;
+                margin-top: 10px;
+                justify-content: center;
+            }
+
             .main-content {
                 padding: 16px 16px 16px 45px;
             }
@@ -1821,6 +1837,13 @@
                 </label>
                 <span class="mode-label">Meta Mode</span>
             </div>
+            <div class="auto-approve-switcher">
+                <label class="mode-toggle">
+                    <input type="checkbox" id="unsupervisedToggle">
+                    <span class="slider"></span>
+                </label>
+                <span class="mode-label">Auto Approve</span>
+            </div>
             <h1>Sage <i data-lucide="leaf"></i></h1>
         </header>
 
@@ -2105,6 +2128,7 @@
         };
 
         let currentMode = checkMetaModeParameter() ? 'meta' : 'regular';
+        let unsupervisedMode = false; // Will be loaded from backend
         let simulationStep = 0;
         let realTimeData = null;
         let useRealAPI = true;
@@ -2279,6 +2303,9 @@
             if (modeToggle) {
                 modeToggle.checked = (currentMode === 'meta');
             }
+            
+            // Initialize unsupervised mode
+            await initializeUnsupervisedMode();
             
             // Initialize meta mode styling
             updateMetaModeStyle();
@@ -2543,6 +2570,9 @@
             // Update UI immediately
             updateMetaModeStyle();
             
+            // Update unsupervised mode toggle state for new mode
+            await initializeUnsupervisedMode();
+            
             // Show loading state
             showLoadingState();
             
@@ -2558,6 +2588,22 @@
             // Refresh agent logs for the new mode
             refreshCurrentAgentLog();
         });
+
+        // Unsupervised mode switching
+        document.getElementById('unsupervisedToggle').addEventListener('change', async function() {
+            unsupervisedMode = this.checked;
+            console.log(`Switching to ${unsupervisedMode ? 'unsupervised' : 'supervised'} mode`);
+            
+            // Update backend
+            if (useRealAPI && discoveredAPIPort) {
+                await setUnsupervisedMode(unsupervisedMode);
+            } else {
+                console.log('API not available - cannot save unsupervised mode state');
+                // Revert toggle if API is not available
+                this.checked = !unsupervisedMode;
+                unsupervisedMode = !unsupervisedMode;
+            }
+        });
         
         // Update meta mode styling
         function updateMetaModeStyle() {
@@ -2572,6 +2618,55 @@
                 if (workflowSection) {
                     workflowSection.classList.remove('meta-mode');
                 }
+            }
+        }
+
+        // Initialize unsupervised mode state
+        async function initializeUnsupervisedMode() {
+            if (useRealAPI && discoveredAPIPort) {
+                try {
+                    const response = await fetch(`${getAPIBaseURL()}/api/unsupervised-mode?mode=${currentMode}`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        unsupervisedMode = data.enabled;
+                        const unsupervisedToggle = document.getElementById('unsupervisedToggle');
+                        if (unsupervisedToggle) {
+                            unsupervisedToggle.checked = unsupervisedMode;
+                        }
+                        console.log(`Initialized unsupervised mode: ${unsupervisedMode} for ${currentMode} mode`);
+                    } else {
+                        console.warn('Failed to get unsupervised mode status');
+                    }
+                } catch (error) {
+                    console.warn('Error getting unsupervised mode status:', error);
+                }
+            }
+        }
+
+        // Set unsupervised mode state
+        async function setUnsupervisedMode(enabled) {
+            try {
+                const response = await fetch(`${getAPIBaseURL()}/api/unsupervised-mode`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        enabled: enabled,
+                        mode: currentMode
+                    })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log(`Unsupervised mode ${enabled ? 'enabled' : 'disabled'} for ${currentMode} mode:`, data.message);
+                } else {
+                    console.error('Failed to set unsupervised mode');
+                    throw new Error('Failed to set unsupervised mode');
+                }
+            } catch (error) {
+                console.error('Error setting unsupervised mode:', error);
+                throw error;
             }
         }
         
@@ -4247,7 +4342,7 @@
                 'explorer': 'exploration.md',
                 'planner': 'plan.md', 
                 'coder': 'changes.md',
-                'scribe': 'documentation.md',
+                'scribe': 'scribe.md',
                 'verifier': 'verification.md'
             };
             
@@ -4403,7 +4498,7 @@
                 'planner': 'plan.md',
                 'coder': 'changes.md',
                 'verifier': 'verification.md',
-                'scribe': 'documentation.md'
+                'scribe': 'scribe.md'
             };
             
             const filename = agentFileMap[name] || `${name}.md`;

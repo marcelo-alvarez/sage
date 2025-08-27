@@ -445,6 +445,8 @@ class StatusHandler(BaseHTTPRequestHandler):
                 self._handle_status_request(parsed_url, request_id)
             elif parsed_url.path == '/api/health':
                 self._handle_health_request(request_id)
+            elif parsed_url.path == '/api/unsupervised-mode':
+                self._handle_unsupervised_mode_get_request(parsed_url, request_id)
             elif parsed_url.path.startswith('/api/outputs/'):
                 self._handle_outputs_request(parsed_url, request_id)
             else:
@@ -470,6 +472,8 @@ class StatusHandler(BaseHTTPRequestHandler):
                 self._handle_execute_request(parsed_url, request_id)
             elif parsed_url.path == '/api/restart':
                 self._handle_restart_request(parsed_url, request_id)
+            elif parsed_url.path == '/api/unsupervised-mode':
+                self._handle_unsupervised_mode_post_request(parsed_url, request_id)
             else:
                 self._send_error(404, 'Not Found')
                 self._log_request(request_id, f"POST {self.path} - 404 Not Found")
@@ -827,6 +831,8 @@ class StatusHandler(BaseHTTPRequestHandler):
             'verification.md',
             'current-status.md',
             'documentation.md',
+            'scribe.md',
+            'orchestrator-log.md',
             'success-criteria.md',
             'pending-user_validation-gate.md',
             'tasks-checklist.md'
@@ -1228,6 +1234,99 @@ class StatusHandler(BaseHTTPRequestHandler):
                 'error': f'Restart sequence failed: {str(e)}'
             }
     
+    def _handle_unsupervised_mode_get_request(self, parsed_url, request_id):
+        """Handle GET /api/unsupervised-mode endpoint to check unsupervised mode status"""
+        try:
+            self._log_request(request_id, f"Unsupervised mode status request: {parsed_url.query}")
+            
+            # Parse query parameters
+            query_params = urllib.parse.parse_qs(parsed_url.query)
+            mode = query_params.get('mode', ['regular'])[0]
+            
+            self._log_request(request_id, f"Checking unsupervised mode for {mode} mode")
+            
+            # Determine the correct .claude directory based on mode
+            claude_dir = Path.cwd() / ('.claude-meta' if mode == 'meta' else '.claude')
+            unsupervised_file = claude_dir / 'unsupervised'
+            
+            # Check if unsupervised file exists
+            enabled = unsupervised_file.exists()
+            
+            response_data = {
+                'enabled': enabled,
+                'mode': mode,
+                'file_path': str(unsupervised_file)
+            }
+            
+            self._send_json(response_data)
+            self._log_request(request_id, f"Unsupervised mode status: {enabled} for {mode} mode")
+            
+        except Exception as e:
+            self._log_request(request_id, f"Unsupervised mode status check error: {e}", 'error')
+            self._send_error(500, f'Error checking unsupervised mode: {str(e)}')
+
+    def _handle_unsupervised_mode_post_request(self, parsed_url, request_id):
+        """Handle POST /api/unsupervised-mode endpoint to enable/disable unsupervised mode"""
+        try:
+            self._log_request(request_id, f"Unsupervised mode toggle request: {parsed_url.path}")
+            
+            # Read request body
+            content_length = int(self.headers.get('Content-Length', 0))
+            if content_length == 0:
+                self._send_error(400, 'No request body provided')
+                return
+            
+            request_body = self.rfile.read(content_length).decode('utf-8')
+            try:
+                request_data = json.loads(request_body)
+            except json.JSONDecodeError:
+                self._send_error(400, 'Invalid JSON in request body')
+                return
+            
+            # Validate required fields
+            if 'enabled' not in request_data:
+                self._send_error(400, 'Missing required field: enabled')
+                return
+            
+            enabled = request_data['enabled']
+            mode = request_data.get('mode', 'regular')
+            
+            self._log_request(request_id, f"Setting unsupervised mode to {enabled} for {mode} mode")
+            
+            # Determine the correct .claude directory based on mode
+            claude_dir = Path.cwd() / ('.claude-meta' if mode == 'meta' else '.claude')
+            unsupervised_file = claude_dir / 'unsupervised'
+            
+            # Ensure the claude directory exists
+            claude_dir.mkdir(exist_ok=True)
+            
+            if enabled:
+                # Create unsupervised file
+                unsupervised_file.write_text("# Unsupervised Mode Active\n\nAutomatically approves gates when criteria are met.\n")
+                message = f'Unsupervised mode enabled for {mode} mode - created {unsupervised_file}'
+            else:
+                # Remove unsupervised file if it exists
+                if unsupervised_file.exists():
+                    unsupervised_file.unlink()
+                    message = f'Supervised mode enabled for {mode} mode - removed {unsupervised_file}'
+                else:
+                    message = f'Already in supervised mode for {mode} mode - no unsupervised file found'
+            
+            response_data = {
+                'success': True,
+                'message': message,
+                'enabled': enabled,
+                'mode': mode,
+                'file_path': str(unsupervised_file)
+            }
+            
+            self._send_json(response_data)
+            self._log_request(request_id, f"Unsupervised mode {'enabled' if enabled else 'disabled'} for {mode} mode")
+            
+        except Exception as e:
+            self._log_request(request_id, f"Unsupervised mode toggle error: {e}", 'error')
+            self._send_error(500, f'Error setting unsupervised mode: {str(e)}')
+
     def log_message(self, format, *args):
         """Override to customize logging"""
         print(f"[{self.log_date_time_string()}] {format % args}")
@@ -1307,6 +1406,7 @@ class OrchestratorAPIServer:
             self.api_logger.info(f"Gate decision endpoint: http://{self.host}:{self.port}/api/gate-decision")
             self.api_logger.info(f"Command execution endpoint: http://{self.host}:{self.port}/api/execute")
             self.api_logger.info(f"System restart endpoint: http://{self.host}:{self.port}/api/restart")
+            self.api_logger.info(f"Unsupervised mode endpoint: http://{self.host}:{self.port}/api/unsupervised-mode")
             self.api_logger.info(f"With meta mode: http://{self.host}:{self.port}/api/status?mode=meta")
             self.api_logger.info("Press Ctrl+C to stop the server")
             
@@ -1377,6 +1477,7 @@ class OrchestratorAPIServer:
                 print(f"Gate decision endpoint: http://{self.host}:{self.port}/api/gate-decision")
                 print(f"Command execution endpoint: http://{self.host}:{self.port}/api/execute")
                 print(f"System restart endpoint: http://{self.host}:{self.port}/api/restart")
+                print(f"Unsupervised mode endpoint: http://{self.host}:{self.port}/api/unsupervised-mode")
                 print(f"With meta mode: http://{self.host}:{self.port}/api/status?mode=meta")
                 
                 # Start server without signal handlers (background mode)
