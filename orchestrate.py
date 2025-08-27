@@ -809,14 +809,22 @@ class AgentExecutor:
         timestamp = start_time.strftime("%Y-%m-%dT%H:%M:%SZ")
         log_file = self.outputs_dir / f"{agent_type}-log.md"
         
-        # Add start timestamp
+        # Get current task for header
+        actual_task = self.orchestrator._get_current_task_raw()
+        task_for_header = actual_task if actual_task else f"Complete {agent_type} work according to responsibilities"
+        
+        # Add start timestamp and task header
         start_log = f"\n## {timestamp} - {agent_type.upper()} Agent Session\n\n"
+        task_header = f"---\nTASK: {task_for_header}\n---\n\n"
+        
         if log_file.exists():
             with open(log_file, 'a') as f:
                 f.write(start_log)
+                f.write(task_header)
         else:
             with open(log_file, 'w') as f:
                 f.write(start_log)
+                f.write(task_header)
         
         try:
             result_process = subprocess.run(
@@ -1371,20 +1379,10 @@ class ClaudeCodeOrchestrator:
         # Get current time for example
         current_time = datetime.now().strftime("%H:%M:%S")
         
-        # Get the actual current task from the checklist instead of using generic primary_objective
-        actual_task = self._get_current_task_raw()
-        task_for_header = actual_task if actual_task else primary_objective
-        
         logging_instructions = f"""
 AGENT LOGGING (for debugging transparency):
 APPEND (do not overwrite) progress updates to {log_file} using this format:
 
-FIRST: Add task header if this is a new log file or first session:
----
-TASK: {task_for_header}
----
-
-THEN: Add your session log entries (Python automatically adds session start/end timestamps):
 Starting {agent_name} agent work
 Reading required input files...
 [Describe what you found/understood]
@@ -1395,7 +1393,7 @@ Writing output files...
 
 CRITICAL REQUIREMENTS:
 - APPEND to the file (do not overwrite existing content)
-- DO NOT add session start/end timestamps - Python handles those automatically
+- DO NOT add session start/end timestamps or task headers - Python handles those automatically
 - Focus on clear, descriptive progress updates
 - Use Write tool with append mode or add content to existing file
 
