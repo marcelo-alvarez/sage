@@ -4202,11 +4202,13 @@
                     // Show the modal with criteria content
                     const modal = document.getElementById('reportModal');
                     const reportContent = document.getElementById('reportModalBody');
-                    const agentNameSpan = document.getElementById('reportModalTitle');
-                    const titleIcon = document.querySelector('#reportModal [data-lucide]');
+                    const agentNameSpan = document.getElementById('reportModalTitleText');
+                    const titleIcon = document.getElementById('reportModalIcon');
                     
                     agentNameSpan.textContent = title;
-                    titleIcon.setAttribute('data-lucide', 'check-circle');
+                    if (titleIcon) {
+                        titleIcon.setAttribute('data-lucide', 'check-circle');
+                    }
                     
                     // Render as markdown if available
                     if (window.markdownit) {
@@ -4278,7 +4280,7 @@
                     }
                     
                     // Set modal content
-                    const modalTitle = document.getElementById('reportModalTitle');
+                    const modalTitle = document.getElementById('reportModalTitleText');
                     const modalBody = document.getElementById('reportModalBody');
                     const modal = document.getElementById('reportModal');
                     
@@ -4298,7 +4300,7 @@
                         console.error('Report modal elements not found');
                     }
                 } else if (response.status === 404) {
-                    const modalTitle = document.getElementById('reportModalTitle');
+                    const modalTitle = document.getElementById('reportModalTitleText');
                     const modalBody = document.getElementById('reportModalBody');
                     const modal = document.getElementById('reportModal');
                     
@@ -4309,7 +4311,7 @@
                     }
                 } else {
                     const errorText = await response.text().catch(() => 'Unknown error');
-                    const modalTitle = document.getElementById('reportModalTitle');
+                    const modalTitle = document.getElementById('reportModalTitleText');
                     const modalBody = document.getElementById('reportModalBody');
                     const modal = document.getElementById('reportModal');
                     
@@ -4321,7 +4323,7 @@
                 }
             } catch (error) {
                 console.error('Error loading report:', error);
-                const modalTitle = document.getElementById('reportModalTitle');
+                const modalTitle = document.getElementById('reportModalTitleText');
                 const modalBody = document.getElementById('reportModalBody');
                 const modal = document.getElementById('reportModal');
                 
@@ -5139,7 +5141,10 @@
 <div id="reportModal" class="modal">
     <div class="modal-content">
         <div class="modal-header">
-            <h2 id="reportModalTitle">Agent Report</h2>
+            <h2 id="reportModalTitle">
+                <i data-lucide="file-text" class="modal-icon" id="reportModalIcon"></i>
+                <span id="reportModalTitleText">Agent Report</span>
+            </h2>
             <span class="close" onclick="closeReportModal()">&times;</span>
         </div>
         <div class="modal-body" id="reportModalBody">

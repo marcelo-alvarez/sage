@@ -2802,10 +2802,10 @@ Begin by analyzing the current directory and asking about the goal.
         """Clean outputs from specified phase onwards"""
         
         phase_files = {
-            "explorer": ["exploration.md", "success-criteria.md", "plan.md", "changes.md", "verification.md", "completion-approved.md"],
-            "planner": ["plan.md", "changes.md", "verification.md", "completion-approved.md"],
-            "coder": ["changes.md", "verification.md", "completion-approved.md"],
-            "verifier": ["verification.md", "completion-approved.md"]
+            "explorer": ["exploration.md", "success-criteria.md", "plan.md", "changes.md", "verification.md", "scribe.md", "completion-approved.md"],
+            "planner": ["plan.md", "changes.md", "verification.md", "scribe.md", "completion-approved.md"],
+            "coder": ["changes.md", "verification.md", "scribe.md", "completion-approved.md"],
+            "verifier": ["verification.md", "scribe.md", "completion-approved.md"]
         }
         
         files_to_clean = phase_files.get(phase, [])
@@ -2933,6 +2933,9 @@ def serve_command(args):
     # Initialize process manager (check for meta mode via environment)
     meta_mode = os.getenv('CLAUDE_ORCHESTRATOR_META_MODE') == '1'
     process_manager = ProcessManager(meta_mode=meta_mode)
+    
+    # Register main serve process so it can be terminated by stop command
+    process_manager.register_main_process("serve-main")
     
     # Health monitoring state
     health_monitoring_active = True
