@@ -422,7 +422,7 @@ class AgentConfig:
             self.api_process = subprocess.Popen([
                 sys.executable, api_script, 
                 '--port', str(self.api_port)
-            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=self.project_root)
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=self.project_root, start_new_session=True, preexec_fn=os.setpgrp)
             
             # Register API process with ProcessManager if available
             if self.process_manager:
@@ -433,7 +433,7 @@ class AgentConfig:
             dashboard_script = os.path.join(orchestrator_dir, "dashboard_server.py")
             self.dashboard_process = subprocess.Popen([
                 sys.executable, dashboard_script, str(self.dashboard_port)
-            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=self.project_root)
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=self.project_root, start_new_session=True, preexec_fn=os.setpgrp)
             
             # Register dashboard process with ProcessManager if available
             if self.process_manager:
@@ -490,12 +490,12 @@ class AgentConfig:
             self.dashboard_available = False
     
     def stop_dashboard(self):
-        """Stop dashboard and API server subprocesses"""
+        """Stop dashboard and API server subprocesses using ProcessManager"""
         try:
             # Stop health monitoring first
             self.stop_health_monitoring()
             
-            # Use ProcessManager for clean shutdown if available
+            # Use ProcessManager for clean shutdown
             if self.process_manager:
                 dashboard_stopped = self.process_manager.terminate_process('dashboard_server')
                 api_stopped = self.process_manager.terminate_process('api_server')
@@ -505,13 +505,7 @@ class AgentConfig:
                 if api_stopped:
                     self.api_process = None
             else:
-                # Fallback to direct process termination
-                if self.dashboard_process:
-                    self.dashboard_process.terminate()
-                    self.dashboard_process = None
-                if self.api_process:
-                    self.api_process.terminate()
-                    self.api_process = None
+                print("Warning: ProcessManager not available for clean shutdown")
                 
         except Exception as e:
             print(f"Error stopping servers: {e}")
@@ -2499,7 +2493,9 @@ CRITICAL REQUIREMENTS:
                 ] + (['meta'] if 'meta' in sys.argv else []), 
                 cwd=self.project_root, 
                 stdout=subprocess.DEVNULL, 
-                stderr=subprocess.DEVNULL)
+                stderr=subprocess.DEVNULL, 
+                start_new_session=True, 
+                preexec_fn=os.setpgrp)
                 print("Background continue process started")
             else:
                 # In interactive mode, continue to next agent
@@ -2875,93 +2871,28 @@ Begin by analyzing the current directory and asking about the goal.
 
 
 def clear_ui_command(args):
-    """Kill all dashboard and API server processes"""
-    import subprocess
+    """Kill all dashboard and API server processes using ProcessManager"""
+    from process_manager import ProcessManager
     import sys
     
     print("Stopping all dashboard and API server processes...")
     
     try:
-        # Kill API server processes (multiple patterns to catch all variants)
-        patterns_killed = []
-        result = subprocess.run(['pkill', '-f', 'api_server'], capture_output=True)
-        if result.returncode == 0:
-            patterns_killed.append("api_server processes")
+        # Use ProcessManager for system-wide cleanup
+        # Determine mode for ProcessManager initialization
+        meta_mode = 'meta' in sys.argv
+        process_manager = ProcessManager(meta_mode=meta_mode)
+        
+        # Use ProcessManager's system-wide cleanup
+        success = process_manager.cleanup_system_wide()
+        
+        if success:
+            print("✓ All UI server processes have been stopped.")
+        else:
+            print("⚠ Warning: Some processes may still be running after cleanup")
             
-        # Also kill by exact python script name patterns
-        subprocess.run(['pkill', '-f', 'api_server.py'], capture_output=True)
-        subprocess.run(['pkill', '-f', 'Python.*api_server'], capture_output=True)
-        
-        print("✓ Stopped API server processes")
-        
-        # Kill dashboard server processes  
-        subprocess.run(['pkill', '-f', 'dashboard_server'], capture_output=True)
-        subprocess.run(['pkill', '-f', 'dashboard_server.py'], capture_output=True)
-        subprocess.run(['pkill', '-f', 'Python.*dashboard_server'], capture_output=True)
-        print("✓ Stopped dashboard server processes")
-        
-        # Kill any orchestrate serve processes
-        subprocess.run(['pkill', '-f', 'cc-orchestrate serve'], capture_output=True)
-        subprocess.run(['pkill', '-f', 'orchestrate serve'], capture_output=True)
-        print("✓ Stopped orchestrate serve processes")
-        
-        # Give processes time to terminate and verify cleanup
-        import time
-        
-        # Wait progressively for all processes to fully terminate
-        for attempt in range(5):  # Check up to 5 times over 10 seconds
-            time.sleep(2)
-            
-            # Check if any are still actually running (not just terminating)
-            remaining = subprocess.run(['ps', 'aux'], capture_output=True, text=True)
-            running_processes = []
-            
-            for line in remaining.stdout.split('\n'):
-                if ('api_server' in line or 'dashboard_server' in line) and 'grep' not in line:
-                    # Double-check the process is actually responsive
-                    try:
-                        pid = line.split()[1]
-                        # Try to get process status
-                        status_check = subprocess.run(['ps', '-o', 'stat', '-p', pid], 
-                                                    capture_output=True, text=True)
-                        if status_check.returncode == 0 and 'Z' not in status_check.stdout:
-                            running_processes.append(line.strip())
-                    except:
-                        pass
-            
-            if not running_processes:
-                print("✓ All UI server processes have been stopped.")
-                return
-            elif attempt == 4:  # Last attempt
-                print(f"⚠ Warning: {len(running_processes)} process(es) still running after cleanup:")
-                for proc in running_processes:
-                    print(f"  {proc}")
-                print("Force-killing unresponsive processes...")
-                for proc in running_processes:
-                    try:
-                        pid = int(proc.split()[1])
-                        os.kill(pid, signal.SIGKILL)
-                        print(f"✓ Force-killed process {pid}")
-                    except (OSError, ProcessLookupError, ValueError) as e:
-                        print(f"✗ Could not force-kill process {pid}: {e}")
-                    except Exception as e:
-                        print(f"✗ Unexpected error force-killing process: {e}")
-                
-                # Wait a moment and verify cleanup
-                time.sleep(1)
-                final_check = subprocess.run(['pgrep', '-f', 'api_server|dashboard_server'], 
-                                           capture_output=True, text=True)
-                if final_check.returncode == 0:
-                    remaining_count = len([line for line in final_check.stdout.split('\n') 
-                                         if line.strip() and 'grep' not in line])
-                    if remaining_count > 0:
-                        print(f"⚠ {remaining_count} process(es) still remain after force-kill")
-                    else:
-                        print("✓ All processes successfully terminated")
-                else:
-                    print("✓ All processes successfully terminated")
-            else:
-                print(f"Waiting for {len(running_processes)} process(es) to finish terminating... (attempt {attempt + 1}/5)")
+        # Additional cleanup of any ProcessManager-tracked processes
+        process_manager.cleanup_all_processes()
         
         print("Process cleanup completed.")
         
@@ -3057,6 +2988,22 @@ def serve_command(args):
     signal.signal(signal.SIGINT, cleanup_and_exit)
     signal.signal(signal.SIGTERM, cleanup_and_exit)
     
+    # Register SIGCHLD handler to reap zombie children automatically
+    def handle_sigchld(signum, frame):
+        """Reap zombie child processes"""
+        try:
+            while True:
+                # Reap any zombie children without blocking
+                pid, status = os.waitpid(-1, os.WNOHANG)
+                if pid == 0:  # No more zombies
+                    break
+                serve_logger.debug(f"Reaped zombie child process {pid} with status {status}")
+        except (OSError, ChildProcessError):
+            # No children to reap
+            pass
+    
+    signal.signal(signal.SIGCHLD, handle_sigchld)
+    
     try:
         # Start API server as subprocess using the real api_server.py
         serve_logger.info(f"Starting API server on port {api_port}...")
@@ -3066,7 +3013,7 @@ def serve_command(args):
         
         # Start API server from current project directory to read .agent-outputs files
         current_dir = os.getcwd()
-        api_process = subprocess.Popen(api_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=current_dir)
+        api_process = subprocess.Popen(api_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=current_dir, start_new_session=True, preexec_fn=os.setpgrp)
         process_manager.register_process('api_server', api_process)
         serve_logger.info(f"API server registered (PID: {api_process.pid})")
         
@@ -3093,7 +3040,7 @@ def serve_command(args):
         
         dashboard_process = subprocess.Popen([
             sys.executable, dashboard_script, str(dashboard_port)
-        ], cwd=current_dir)
+        ], cwd=current_dir, start_new_session=True, preexec_fn=os.setpgrp)
         process_manager.register_process('dashboard_server', dashboard_process)
         serve_logger.info(f"Dashboard server registered (PID: {dashboard_process.pid})")
         
@@ -3400,25 +3347,18 @@ def main():
         except:
             pass  # Ignore errors, we'll force kill everything anyway
         
-        # Force kill all orchestrator-related Python processes
-        import subprocess
+        # Use ProcessManager for force cleanup
         try:
-            # Find all Python processes running orchestrator files
-            result = subprocess.run(['pgrep', '-f', 'orchestrate.py|api_server.py|dashboard_server.py'], 
-                                  capture_output=True, text=True)
-            if result.returncode == 0:
-                pids = result.stdout.strip().split('\n')
-                for pid in pids:
-                    if pid.strip():
-                        try:
-                            os.kill(int(pid), signal.SIGKILL)
-                            print(f"✓ Force-killed process {pid}")
-                        except (OSError, ProcessLookupError, ValueError):
-                            pass  # Process already dead
+            # Use ProcessManager's system-wide cleanup for graceful and force termination
+            success = process_manager.cleanup_system_wide()
             
-            # Clean up PID files
-            process_manager.cleanup_system_wide()
-            print("✓ All orchestrator processes terminated and cleaned up.")
+            # Also cleanup any ProcessManager-tracked processes
+            process_manager.cleanup_all_processes()
+            
+            if success:
+                print("✓ All orchestrator processes terminated and cleaned up.")
+            else:
+                print("⚠ Warning: Some processes may not have been terminated properly.")
             
         except Exception as e:
             print(f"Error during killall: {e}")

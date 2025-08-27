@@ -38,9 +38,17 @@ class ProcessManager:
     
     def _cleanup_stale_pids(self, data: Dict):
         active_pids = {}
-        for name, pid in data.items():
-            if self._is_process_running(pid):
-                active_pids[name] = pid
+        for name, proc_info in data.items():
+            # Handle both old format (just PID) and new format (dict with pid/pgid)
+            if isinstance(proc_info, dict):
+                pid = proc_info.get('pid')
+                if pid and self._is_process_running(pid):
+                    active_pids[name] = proc_info  # Keep the full dict format
+            else:
+                # Old format - just PID
+                pid = proc_info
+                if self._is_process_running(pid):
+                    active_pids[name] = pid  # Keep old format for backward compatibility
         self._save_pids(active_pids)
     
     def _save_pids(self, data: Dict):
@@ -49,9 +57,42 @@ class ProcessManager:
     
     def _is_process_running(self, pid: int) -> bool:
         try:
-            return psutil.pid_exists(pid)
+            if not psutil.pid_exists(pid):
+                return False
+            
+            # Check if process is zombie - zombies are effectively dead
+            try:
+                process = psutil.Process(pid)
+                status = process.status()
+                # Zombie processes should be considered as terminated
+                if status == psutil.STATUS_ZOMBIE:
+                    return False
+                return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                return False
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             return False
+    
+    def _reap_zombie_if_child(self, pid: int):
+        """Attempt to reap zombie process if it's our child"""
+        try:
+            # Only reap if process is a zombie and we're the parent
+            if psutil.pid_exists(pid):
+                try:
+                    process = psutil.Process(pid)
+                    if process.status() == psutil.STATUS_ZOMBIE:
+                        # Try to reap the zombie using waitpid with WNOHANG
+                        import os
+                        try:
+                            os.waitpid(pid, os.WNOHANG)
+                            print(f"Successfully reaped zombie process {pid}")
+                        except (OSError, ChildProcessError):
+                            # Not our child or already reaped - this is fine
+                            pass
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
     
     def register_process(self, name: str, process: subprocess.Popen):
         self.processes[name] = process
@@ -65,7 +106,16 @@ class ProcessManager:
             except (json.JSONDecodeError, FileNotFoundError):
                 current_pids = {}
         
-        current_pids[name] = process.pid
+        # Store both PID and PGID for process group management
+        try:
+            pgid = os.getpgid(process.pid)
+        except (OSError, ProcessLookupError):
+            pgid = process.pid  # Fallback to PID if PGID lookup fails
+        
+        current_pids[name] = {
+            'pid': process.pid,
+            'pgid': pgid
+        }
         self._save_pids(current_pids)
     
     def register_main_process(self, name: str, pid: int = None):
@@ -82,7 +132,16 @@ class ProcessManager:
             except (json.JSONDecodeError, FileNotFoundError):
                 current_pids = {}
         
-        current_pids[name] = pid
+        # Store both PID and PGID for main process too
+        try:
+            pgid = os.getpgid(pid)
+        except (OSError, ProcessLookupError):
+            pgid = pid  # Fallback to PID if PGID lookup fails
+        
+        current_pids[name] = {
+            'pid': pid,
+            'pgid': pgid
+        }
         self._save_pids(current_pids)
     
     def deregister_process(self, name: str):
@@ -119,13 +178,29 @@ class ProcessManager:
             return True
         
         process = self.processes[name]
+        pid = process.pid
         
         try:
-            # Try graceful termination first
-            process.terminate()
+            # Get process group ID
+            try:
+                pgid = os.getpgid(pid)
+            except (OSError, ProcessLookupError):
+                # Process already dead or no permission
+                self.deregister_process(name)
+                return True
+            
+            # Try graceful termination first on entire process group
+            try:
+                os.kill(-pgid, signal.SIGTERM)  # Use negative PID to target process group
+                print(f"Sent SIGTERM to process group {pgid} for process {name} (PID: {pid})")
+            except (OSError, ProcessLookupError):
+                # Process or process group already dead
+                self.deregister_process(name)
+                return True
+            
             try:
                 process.wait(timeout=timeout)
-                print(f"Process {name} (PID: {process.pid}) terminated gracefully")
+                print(f"Process {name} (PID: {pid}) and its group terminated gracefully")
                 self.deregister_process(name)
                 return True
             except subprocess.TimeoutExpired:
@@ -135,14 +210,21 @@ class ProcessManager:
                 # - For timeout=2: total should be ≤8s, so force timeout = 8-2 = 6s
                 # Use min(3, max(2, 8-timeout)) to handle edge cases
                 force_timeout = min(3, max(2, 8 - timeout))
-                process.kill()
+                try:
+                    os.kill(-pgid, signal.SIGKILL)  # Use negative PID to target process group
+                    print(f"Sent SIGKILL to process group {pgid} for process {name} (PID: {pid})")
+                except (OSError, ProcessLookupError):
+                    # Process or process group already dead
+                    self.deregister_process(name)
+                    return True
+                
                 try:
                     process.wait(timeout=force_timeout)
-                    print(f"Process {name} (PID: {process.pid}) force-killed")
+                    print(f"Process {name} (PID: {pid}) and its group force-killed")
                     self.deregister_process(name)
                     return True
                 except subprocess.TimeoutExpired:
-                    print(f"Failed to terminate process {name} (PID: {process.pid})")
+                    print(f"Failed to terminate process group {pgid} for process {name} (PID: {pid})")
                     return False
         except (OSError, subprocess.SubprocessError) as e:
             print(f"Error terminating process {name}: {e}")
@@ -178,23 +260,46 @@ class ProcessManager:
             return True
         
         success = True
-        for name, pid in pids.items():
+        for name, proc_info in pids.items():
+            # Handle both old format (just PID) and new format (dict with pid/pgid)
+            if isinstance(proc_info, dict):
+                pid = proc_info.get('pid')
+                pgid = proc_info.get('pgid', pid)  # Fallback to PID if no PGID
+            else:
+                # Old format - just PID
+                pid = proc_info
+                pgid = pid
+            
             if self._is_process_running(pid):
                 try:
-                    # Try graceful termination
-                    os.kill(pid, signal.SIGTERM)
+                    # Try graceful termination on process group
+                    try:
+                        os.kill(-pgid, signal.SIGTERM)  # Use negative PID to target process group
+                        print(f"Sent SIGTERM to process group {pgid} for process {name} (PID: {pid})")
+                    except (OSError, ProcessLookupError):
+                        # Fallback to individual process if process group fails
+                        os.kill(pid, signal.SIGTERM)
+                        print(f"Sent SIGTERM to process {name} (PID: {pid})")
                     
                     # Wait for graceful termination
                     for _ in range(100):  # 10 seconds at 0.1s intervals
                         if not self._is_process_running(pid):
-                            print(f"Process {name} (PID: {pid}) terminated gracefully")
+                            print(f"Process {name} (PID: {pid}) and its group terminated gracefully")
+                            # Reap zombie processes to prevent accumulation
+                            self._reap_zombie_if_child(pid)
                             break
                         time.sleep(0.1)
                     else:
                         # Force kill if still running
                         try:
-                            os.kill(pid, signal.SIGKILL)
-                            print(f"Process {name} (PID: {pid}) force-killed")
+                            try:
+                                os.kill(-pgid, signal.SIGKILL)  # Use negative PID to target process group
+                                print(f"Sent SIGKILL to process group {pgid} for process {name} (PID: {pid})")
+                            except (OSError, ProcessLookupError):
+                                # Fallback to individual process if process group fails
+                                os.kill(pid, signal.SIGKILL)
+                                print(f"Sent SIGKILL to process {name} (PID: {pid})")
+                            
                             # Wait up to 5 seconds for force termination to complete
                             terminated = False
                             for _ in range(50):  # 5 seconds at 0.1s intervals
@@ -204,13 +309,17 @@ class ProcessManager:
                                 time.sleep(0.1)
                             
                             if terminated:
-                                print(f"Process {name} (PID: {pid}) terminated after force kill")
+                                print(f"Process {name} (PID: {pid}) and its group terminated after force kill")
+                                # Reap zombie processes to prevent accumulation
+                                self._reap_zombie_if_child(pid)
                             else:
-                                print(f"Failed to kill process {name} (PID: {pid})")
+                                print(f"Failed to kill process {name} (PID: {pid}) and its group")
                                 success = False
                         except (OSError, ProcessLookupError):
                             # Process already dead - this is success
                             print(f"Process {name} (PID: {pid}) already terminated")
+                            # Reap zombie processes to prevent accumulation
+                            self._reap_zombie_if_child(pid)
                 except (OSError, ProcessLookupError):
                     # Process already dead or no permission
                     print(f"Process {name} (PID: {pid}) already dead or no permission")
@@ -226,8 +335,15 @@ class ProcessManager:
             try:
                 with open(self.pid_file, 'r') as f:
                     pids = json.load(f)
-                for name, pid in pids.items():
-                    if self._is_process_running(pid):
+                for name, proc_info in pids.items():
+                    # Handle both old format (just PID) and new format (dict with pid/pgid)
+                    if isinstance(proc_info, dict):
+                        pid = proc_info.get('pid')
+                    else:
+                        # Old format - just PID
+                        pid = proc_info
+                    
+                    if pid and self._is_process_running(pid):
                         running[name] = pid
             except (json.JSONDecodeError, FileNotFoundError):
                 pass
@@ -240,3 +356,50 @@ class ProcessManager:
                 unhealthy.append(name)
                 self.deregister_process(name)
         return unhealthy
+    
+    def get_process_group_id(self, name: str) -> Optional[int]:
+        """Get the process group ID for a named process"""
+        if name not in self.processes:
+            return None
+        
+        process = self.processes[name]
+        try:
+            return os.getpgid(process.pid)
+        except (OSError, ProcessLookupError):
+            return None
+    
+    def kill_process_group(self, pgid: int, signal_type: int = signal.SIGTERM) -> bool:
+        """Send a signal to an entire process group"""
+        try:
+            os.kill(-pgid, signal_type)
+            return True
+        except (OSError, ProcessLookupError):
+            return False
+    
+    def is_process_group_running(self, pgid: int) -> bool:
+        """Check if any processes exist in the given process group"""
+        try:
+            # Try to send signal 0 (no-op) to the process group to check if it exists
+            os.kill(-pgid, 0)
+            return True
+        except (OSError, ProcessLookupError):
+            return False
+    
+    def get_process_group_info(self) -> Dict[str, Dict[str, int]]:
+        """Get detailed process and process group information for all tracked processes"""
+        info = {}
+        for name, process in self.processes.items():
+            try:
+                pgid = os.getpgid(process.pid)
+                info[name] = {
+                    'pid': process.pid,
+                    'pgid': pgid,
+                    'running': self._is_process_running(process.pid)
+                }
+            except (OSError, ProcessLookupError):
+                info[name] = {
+                    'pid': process.pid,
+                    'pgid': None,
+                    'running': False
+                }
+        return info

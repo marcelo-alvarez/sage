@@ -590,7 +590,7 @@
         }
 
         .step-label {
-            font-size: 1.034em; /* 10% larger than 0.94em */
+            font-size: 1.189em; /* 15% larger than 1.034em */
             font-weight: 500; /* Thicker than 300 */
             text-align: center;
             color: #ffffff;
@@ -4200,10 +4200,10 @@
                 
                 if (reportText.trim()) {
                     // Show the modal with criteria content
-                    const modal = document.getElementById('agentReportModal');
-                    const reportContent = document.getElementById('reportContent');
-                    const agentNameSpan = document.getElementById('agentReportName');
-                    const titleIcon = document.getElementById('agentReportIcon');
+                    const modal = document.getElementById('reportModal');
+                    const reportContent = document.getElementById('reportModalBody');
+                    const agentNameSpan = document.getElementById('reportModalTitle');
+                    const titleIcon = document.querySelector('#reportModal [data-lucide]');
                     
                     agentNameSpan.textContent = title;
                     titleIcon.setAttribute('data-lucide', 'check-circle');
