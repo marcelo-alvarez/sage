@@ -210,6 +210,11 @@ install_orchestrator_runtime() {
         cp "$TEMP_DIR/process_manager.py" "$runtime_dir/process_manager.py"
     fi
     
+    # Copy orchestrator logger if it exists
+    if [ -f "$TEMP_DIR/orchestrator_logger.py" ]; then
+        cp "$TEMP_DIR/orchestrator_logger.py" "$runtime_dir/orchestrator_logger.py"
+    fi
+    
     # Copy dashboard server files if they exist
     if [ -f "$TEMP_DIR/dashboard_server.py" ]; then
         cp "$TEMP_DIR/dashboard_server.py" "$runtime_dir/dashboard_server.py"
