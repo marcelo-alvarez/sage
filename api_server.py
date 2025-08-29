@@ -22,58 +22,168 @@ from workflow_status import StatusReader, get_workflow_status
 import uuid
 import logging
 from datetime import datetime
+from orchestrator_logger import OrchestratorLogger
 # ClaudeCodeOrchestrator now run in separate process via subprocess
 
 
-class OrchestratorLogger:
-    """Unified logging system for all orchestrator components"""
+class LogProcessor:
+    """Processes agent log files to add automatic timestamps"""
     
-    def __init__(self, component_name: str, log_dir: Path = None):
-        self.component_name = component_name
-        self.log_dir = log_dir or Path.cwd()
-        self.log_file = self.log_dir / f"{component_name}.log"
-        
-        # Ensure log directory exists
-        self.log_dir.mkdir(exist_ok=True)
-        
-        # Initialize log file with startup message
-        self._write_log(f"=== {component_name.upper()} STARTED ===")
+    def __init__(self):
+        self.cache = {}  # Cache processed logs with timestamps
+        self.cache_timestamps = {}  # Track when files were last modified
     
-    def _write_log(self, message: str, level: str = "INFO"):
-        """Write message to log file with timestamp"""
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        log_entry = f"[{timestamp}] [{level}] {message}\n"
+    def process_agent_log(self, log_content: str, agent_type: str, file_mod_time: datetime = None) -> str:
+        """
+        Process raw agent log content to add batch timestamps
+        Groups new lines with same timestamp, only showing timestamp on last line of batch
+        """
+        if not log_content or not log_content.strip():
+            return log_content
+            
+        lines = log_content.split('\n')
+        processed_lines = []
+        # Use file modification time if provided, otherwise current time
+        base_time = file_mod_time if file_mod_time else datetime.now()
         
+        i = 0
+        while i < len(lines):
+            line = lines[i].rstrip()
+            
+            # Handle all session-related headers (both start and complete)
+            if '## 20' in line and 'Agent Session' in line:
+                session_match = re.search(r'## (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)', line)
+                if session_match:
+                    # Convert to same format as agent logs
+                    timestamp_str = session_match.group(1)
+                    session_dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                    formatted_time = session_dt.strftime("[%Y-%m-%d %H:%M:%S]")
+                    rest_of_line = line.split(' - ', 1)[1] if ' - ' in line else line
+                    
+                    # Handle completion vs start differently
+                    if 'Complete' in line:
+                        # Find the most recent content batch and place completion after it
+                        # Look backwards to find the last timestamped content line
+                        insert_position = len(processed_lines)
+                        for j in range(len(processed_lines) - 1, -1, -1):
+                            if processed_lines[j].startswith('[2025-') and not 'Session' in processed_lines[j]:
+                                # Found last agent log entry - insert completion after it
+                                insert_position = j + 1
+                                break
+                        
+                        # Remove any empty lines at insertion point
+                        while (insert_position < len(processed_lines) and 
+                               not processed_lines[insert_position].strip()):
+                            processed_lines.pop(insert_position)
+                        
+                        # Insert completion at the right position (no separator here anymore)
+                        processed_lines.insert(insert_position, f"{formatted_time} {rest_of_line}")
+                        processed_lines.insert(insert_position + 1, "")
+                    else:
+                        # Regular session start - add separator above it, no empty line after separator
+                        processed_lines.append("═" * 66)  # 3 times longer separator
+                        processed_lines.append(f"{formatted_time} {rest_of_line}")
+                        # Skip the next empty line if it exists in the raw file
+                        if i + 1 < len(lines) and not lines[i + 1].strip():
+                            i += 1
+                else:
+                    processed_lines.append(line)
+                    if 'Complete' in line:
+                        processed_lines.append("═" * 21)
+                        processed_lines.append("")
+                i += 1
+                continue
+                
+            # Handle other headers and separators  
+            if (not line.strip() or line.startswith('#') or line.startswith('---') 
+                or line.startswith('TASK:')):
+                processed_lines.append(line)
+                i += 1
+                continue
+            
+            # Handle existing timestamps - preserve them
+            if re.match(r'^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\]', line) or re.match(r'^\[\d{2}:\d{2}:\d{2}\]', line):
+                processed_lines.append(line)
+                i += 1
+                continue
+            
+            # Found content lines without timestamps - collect them into a batch
+            batch = []
+            while i < len(lines):
+                current_line = lines[i].rstrip()
+                
+                # Stop if we hit a header, empty line, or existing timestamp
+                if (not current_line.strip() or current_line.startswith('#') 
+                    or current_line.startswith('---') or current_line.startswith('TASK:')
+                    or re.match(r'^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\]', current_line)
+                    or re.match(r'^\[\d{2}:\d{2}:\d{2}\]', current_line)):
+                    break
+                    
+                batch.append(current_line)
+                i += 1
+            
+            # Process the batch if we found content
+            if batch:
+                time_str = base_time.strftime("[%Y-%m-%d %H:%M:%S]")
+                
+                # Check if the last line is redundant with session completion
+                # Look ahead to see if there's a session completion coming up
+                upcoming_session_complete = False
+                for future_i in range(i, min(i + 5, len(lines))):
+                    if ('Complete' in lines[future_i] and 'Agent Session' in lines[future_i] and 
+                        batch and 'work complete' in batch[-1].lower()):
+                        upcoming_session_complete = True
+                        break
+                
+                # If last line is redundant, remove it
+                if upcoming_session_complete and batch and 'work complete' in batch[-1].lower():
+                    batch = batch[:-1]  # Remove the redundant last line
+                
+                # Add all lines in batch with proper alignment
+                if batch:  # Only if there are still lines after redundancy removal
+                    for j, content in enumerate(batch):
+                        if j == len(batch) - 1:  # Last line gets timestamp
+                            processed_lines.append(f"{time_str} {content}")
+                        else:  # Earlier lines get 22 spaces to align with full timestamp format [YYYY-MM-DD HH:MM:SS] + space  
+                            processed_lines.append(f"                      {content}")
+        
+        return '\n'.join(processed_lines)
+    
+    def get_processed_log(self, file_path: Path, agent_type: str) -> str:
+        """
+        Get processed log content with caching
+        """
         try:
-            with open(self.log_file, 'a', encoding='utf-8') as f:
-                f.write(log_entry)
+            if not file_path.exists():
+                return ""
+                
+            # Check if we need to refresh cache
+            file_mtime = file_path.stat().st_mtime
+            cache_key = str(file_path)
+            
+            if (cache_key in self.cache and 
+                cache_key in self.cache_timestamps and
+                self.cache_timestamps[cache_key] >= file_mtime):
+                return self.cache[cache_key]
+            
+            # Read and process the file, passing file modification time
+            raw_content = file_path.read_text(encoding='utf-8', errors='ignore')
+            from datetime import datetime
+            file_mod_time = datetime.fromtimestamp(file_mtime)
+            processed_content = self.process_agent_log(raw_content, agent_type, file_mod_time)
+            
+            # Update cache
+            self.cache[cache_key] = processed_content
+            self.cache_timestamps[cache_key] = file_mtime
+            
+            return processed_content
+            
         except Exception as e:
-            # Fallback to stderr if log file writing fails
-            print(f"Log write failed: {e}", file=sys.stderr)
-    
-    def info(self, message: str):
-        """Log info message"""
-        self._write_log(message, "INFO")
-        print(f"[{self.component_name}] {message}")
-    
-    def error(self, message: str):
-        """Log error message"""
-        self._write_log(message, "ERROR")
-        print(f"[{self.component_name}] ERROR: {message}", file=sys.stderr)
-    
-    def warning(self, message: str):
-        """Log warning message"""
-        self._write_log(message, "WARNING")
-        print(f"[{self.component_name}] WARNING: {message}")
-    
-    def debug(self, message: str):
-        """Log debug message"""
-        self._write_log(message, "DEBUG")
-        print(f"[{self.component_name}] DEBUG: {message}")
-    
-    def shutdown(self):
-        """Log shutdown message"""
-        self._write_log(f"=== {self.component_name.upper()} SHUTDOWN ===")
+            # Return raw content if processing fails
+            try:
+                return file_path.read_text(encoding='utf-8', errors='ignore')
+            except:
+                return ""
 
 
 # Global state for concurrent operation tracking
@@ -161,7 +271,7 @@ class SharedResourceManager:
             if self._initialized:
                 return
                 
-            self.project_root = project_root or Path(os.getcwd())
+            self.project_root = project_root or Path.cwd()
             
             # Single shared status reader
             try:
@@ -203,6 +313,9 @@ class StatusHandler(BaseHTTPRequestHandler):
         self.status_reader = self.shared.status_reader
         self._subprocess_executor = self.shared.subprocess_executor
         self.api_logger = self.shared.api_logger
+        
+        # Initialize log processor
+        self.log_processor = LogProcessor()
         
         # Request-specific lock (lightweight)
         self._request_lock = threading.RLock()
@@ -282,6 +395,8 @@ class StatusHandler(BaseHTTPRequestHandler):
                 self._handle_status_request(parsed_url, request_id)
             elif parsed_url.path == '/api/health':
                 self._handle_health_request(request_id)
+            elif parsed_url.path == '/api/unsupervised-mode':
+                self._handle_unsupervised_mode_get_request(parsed_url, request_id)
             elif parsed_url.path.startswith('/api/outputs/'):
                 self._handle_outputs_request(parsed_url, request_id)
             else:
@@ -307,6 +422,8 @@ class StatusHandler(BaseHTTPRequestHandler):
                 self._handle_execute_request(parsed_url, request_id)
             elif parsed_url.path == '/api/restart':
                 self._handle_restart_request(parsed_url, request_id)
+            elif parsed_url.path == '/api/unsupervised-mode':
+                self._handle_unsupervised_mode_post_request(parsed_url, request_id)
             else:
                 self._send_error(404, 'Not Found')
                 self._log_request(request_id, f"POST {self.path} - 404 Not Found")
@@ -515,9 +632,8 @@ class StatusHandler(BaseHTTPRequestHandler):
     def _process_gate_decision(self, decision_type, mode, decision_data):
         """Process gate decision by calling orchestrate.py"""
         try:
-            # Build command
-            orchestrate_path = os.path.expanduser('~/.claude-orchestrator/orchestrate.py')
-            cmd = ['python3', orchestrate_path, decision_type]
+            # Build command - use cc-orchestrate wrapper
+            cmd = ['cc-orchestrate', '--no-browser', decision_type]
             
             if mode == 'meta':
                 cmd.append('meta')
@@ -593,14 +709,14 @@ class StatusHandler(BaseHTTPRequestHandler):
                 return
             
             # Get appropriate outputs directory
-            outputs_dir = self._get_outputs_directory(mode)
+            outputs_dir = self.status_reader._get_outputs_dir(mode)
             file_path = outputs_dir / filename
             
             # Check if file exists in outputs directory, if not try claude directory for checklist files
             if not file_path.exists():
                 if filename == 'tasks-checklist.md':
                     # Try .claude or .claude-meta directory for checklist files
-                    claude_dir = Path('.claude-meta') if mode == 'meta' else Path('.claude')
+                    claude_dir = self.status_reader._get_claude_dir(mode)
                     claude_file_path = claude_dir / filename
                     if claude_file_path.exists():
                         file_path = claude_file_path
@@ -611,15 +727,33 @@ class StatusHandler(BaseHTTPRequestHandler):
                     self._send_error(404, f'File "{filename}" not found')
                     return
             
-            # Read file content using non-blocking file read
-            content, error = self._read_file_safely(file_path)
-            
-            if content is not None:
-                # Send markdown response
-                self._send_markdown_response(content)
+            # Check if this is an agent log file that needs timestamp processing
+            if filename.endswith('-log.md'):
+                # Extract agent type from filename (e.g., 'coder-log.md' -> 'coder')
+                agent_type = filename.replace('-log.md', '')
+                
+                # Use LogProcessor for agent log files
+                try:
+                    processed_content = self.log_processor.get_processed_log(file_path, agent_type)
+                    self._send_markdown_response(processed_content)
+                except Exception as e:
+                    print(f"Error processing agent log {file_path}: {e}")
+                    # Fallback to raw content
+                    content, error = self._read_file_safely(file_path)
+                    if content is not None:
+                        self._send_markdown_response(content)
+                    else:
+                        self._send_error(500, f'Error reading file: {error}')
             else:
-                print(f"Error reading file {file_path}: {error}")
-                self._send_error(500, f'Error reading file: {error}')
+                # Read regular files without processing
+                content, error = self._read_file_safely(file_path)
+                
+                if content is not None:
+                    # Send markdown response
+                    self._send_markdown_response(content)
+                else:
+                    print(f"Error reading file {file_path}: {error}")
+                    self._send_error(500, f'Error reading file: {error}')
             
         except Exception as e:
             print(f"Error handling outputs request: {e}")
@@ -647,6 +781,8 @@ class StatusHandler(BaseHTTPRequestHandler):
             'verification.md',
             'current-status.md',
             'documentation.md',
+            'scribe.md',
+            'orchestrator-log.md',
             'success-criteria.md',
             'pending-user_validation-gate.md',
             'tasks-checklist.md'
@@ -670,12 +806,6 @@ class StatusHandler(BaseHTTPRequestHandler):
         print(f"[DEBUG] No pattern matched, rejecting")
         return False
     
-    def _get_outputs_directory(self, mode):
-        """Get appropriate outputs directory based on mode"""
-        if mode == 'meta':
-            return Path('.agent-outputs-meta')
-        else:
-            return Path('.agent-outputs')
     
     def _send_markdown_response(self, content):
         """Send markdown content response with appropriate headers"""
@@ -776,7 +906,7 @@ class StatusHandler(BaseHTTPRequestHandler):
                 if command == 'start':
                     # Run orchestrator in separate process to avoid blocking API server
                     import subprocess
-                    cmd = [sys.executable, 'orchestrate.py', 'start']
+                    cmd = ['cc-orchestrate', 'start']
                     if mode == 'meta':
                         cmd.append('meta')
                     
@@ -785,7 +915,7 @@ class StatusHandler(BaseHTTPRequestHandler):
                         process = subprocess.Popen(cmd, 
                                                    stdout=subprocess.PIPE, 
                                                    stderr=subprocess.PIPE,
-                                                   cwd=os.getcwd(),
+                                                   cwd=str(self.project_root),
                                                    start_new_session=True)  # Prevent signal propagation
                     except Exception as start_error:
                         OPERATION_STATE['current_operation'] = 'idle'
@@ -803,7 +933,7 @@ class StatusHandler(BaseHTTPRequestHandler):
                 elif command == 'continue':
                     # Run orchestrator continue in separate process
                     import subprocess
-                    cmd = [sys.executable, 'orchestrate.py', 'continue']
+                    cmd = ['cc-orchestrate', 'continue']
                     if mode == 'meta':
                         cmd.append('meta')
                     
@@ -811,7 +941,7 @@ class StatusHandler(BaseHTTPRequestHandler):
                         process = subprocess.Popen(cmd, 
                                                    stdout=subprocess.PIPE, 
                                                    stderr=subprocess.PIPE,
-                                                   cwd=os.getcwd(),
+                                                   cwd=str(self.project_root),
                                                    start_new_session=True)  # Prevent signal propagation
                     except Exception as continue_error:
                         OPERATION_STATE['current_operation'] = 'idle'
@@ -836,7 +966,7 @@ class StatusHandler(BaseHTTPRequestHandler):
                 elif command == 'clean':
                     # Run clean in separate process
                     import subprocess
-                    cmd = [sys.executable, 'orchestrate.py', 'clean']
+                    cmd = ['cc-orchestrate', 'clean']
                     if mode == 'meta':
                         cmd.append('meta')
                     
@@ -981,7 +1111,7 @@ class StatusHandler(BaseHTTPRequestHandler):
                                        capture_output=True, 
                                        text=True, 
                                        timeout=30,
-                                       cwd=os.getcwd())
+                                       cwd=str(self.project_root))
                 
                 if process.returncode != 0:
                     return {
@@ -1017,7 +1147,7 @@ class StatusHandler(BaseHTTPRequestHandler):
                 serve_process = subprocess.Popen(serve_cmd,
                                                stdout=subprocess.DEVNULL,
                                                stderr=subprocess.DEVNULL,
-                                               cwd=os.getcwd(),
+                                               cwd=str(self.project_root),
                                                start_new_session=True)  # Detach from current process
                 
                 print(f"[API Restart] Serve command started (PID: {serve_process.pid})")
@@ -1054,6 +1184,99 @@ class StatusHandler(BaseHTTPRequestHandler):
                 'error': f'Restart sequence failed: {str(e)}'
             }
     
+    def _handle_unsupervised_mode_get_request(self, parsed_url, request_id):
+        """Handle GET /api/unsupervised-mode endpoint to check unsupervised mode status"""
+        try:
+            self._log_request(request_id, f"Unsupervised mode status request: {parsed_url.query}")
+            
+            # Parse query parameters
+            query_params = urllib.parse.parse_qs(parsed_url.query)
+            mode = query_params.get('mode', ['regular'])[0]
+            
+            self._log_request(request_id, f"Checking unsupervised mode for {mode} mode")
+            
+            # Determine the correct .claude directory based on mode
+            claude_dir = Path.cwd() / ('.claude-meta' if mode == 'meta' else '.claude')
+            unsupervised_file = claude_dir / 'unsupervised'
+            
+            # Check if unsupervised file exists
+            enabled = unsupervised_file.exists()
+            
+            response_data = {
+                'enabled': enabled,
+                'mode': mode,
+                'file_path': str(unsupervised_file)
+            }
+            
+            self._send_json(response_data)
+            self._log_request(request_id, f"Unsupervised mode status: {enabled} for {mode} mode")
+            
+        except Exception as e:
+            self._log_request(request_id, f"Unsupervised mode status check error: {e}", 'error')
+            self._send_error(500, f'Error checking unsupervised mode: {str(e)}')
+
+    def _handle_unsupervised_mode_post_request(self, parsed_url, request_id):
+        """Handle POST /api/unsupervised-mode endpoint to enable/disable unsupervised mode"""
+        try:
+            self._log_request(request_id, f"Unsupervised mode toggle request: {parsed_url.path}")
+            
+            # Read request body
+            content_length = int(self.headers.get('Content-Length', 0))
+            if content_length == 0:
+                self._send_error(400, 'No request body provided')
+                return
+            
+            request_body = self.rfile.read(content_length).decode('utf-8')
+            try:
+                request_data = json.loads(request_body)
+            except json.JSONDecodeError:
+                self._send_error(400, 'Invalid JSON in request body')
+                return
+            
+            # Validate required fields
+            if 'enabled' not in request_data:
+                self._send_error(400, 'Missing required field: enabled')
+                return
+            
+            enabled = request_data['enabled']
+            mode = request_data.get('mode', 'regular')
+            
+            self._log_request(request_id, f"Setting unsupervised mode to {enabled} for {mode} mode")
+            
+            # Determine the correct .claude directory based on mode
+            claude_dir = Path.cwd() / ('.claude-meta' if mode == 'meta' else '.claude')
+            unsupervised_file = claude_dir / 'unsupervised'
+            
+            # Ensure the claude directory exists
+            claude_dir.mkdir(exist_ok=True)
+            
+            if enabled:
+                # Create unsupervised file
+                unsupervised_file.write_text("# Unsupervised Mode Active\n\nAutomatically approves gates when criteria are met.\n")
+                message = f'Unsupervised mode enabled for {mode} mode - created {unsupervised_file}'
+            else:
+                # Remove unsupervised file if it exists
+                if unsupervised_file.exists():
+                    unsupervised_file.unlink()
+                    message = f'Supervised mode enabled for {mode} mode - removed {unsupervised_file}'
+                else:
+                    message = f'Already in supervised mode for {mode} mode - no unsupervised file found'
+            
+            response_data = {
+                'success': True,
+                'message': message,
+                'enabled': enabled,
+                'mode': mode,
+                'file_path': str(unsupervised_file)
+            }
+            
+            self._send_json(response_data)
+            self._log_request(request_id, f"Unsupervised mode {'enabled' if enabled else 'disabled'} for {mode} mode")
+            
+        except Exception as e:
+            self._log_request(request_id, f"Unsupervised mode toggle error: {e}", 'error')
+            self._send_error(500, f'Error setting unsupervised mode: {str(e)}')
+
     def log_message(self, format, *args):
         """Override to customize logging"""
         print(f"[{self.log_date_time_string()}] {format % args}")
@@ -1103,7 +1326,7 @@ class OrchestratorAPIServer:
             
             # Initialize shared resources ONCE before creating server
             shared_manager = SharedResourceManager()
-            shared_manager.initialize(project_root=Path(os.getcwd()))
+            shared_manager.initialize(project_root=Path.cwd())
                 
             self.api_logger.info(f"Initializing ThreadingHTTPServer on {self.host}:{self.port}")
             
@@ -1133,6 +1356,7 @@ class OrchestratorAPIServer:
             self.api_logger.info(f"Gate decision endpoint: http://{self.host}:{self.port}/api/gate-decision")
             self.api_logger.info(f"Command execution endpoint: http://{self.host}:{self.port}/api/execute")
             self.api_logger.info(f"System restart endpoint: http://{self.host}:{self.port}/api/restart")
+            self.api_logger.info(f"Unsupervised mode endpoint: http://{self.host}:{self.port}/api/unsupervised-mode")
             self.api_logger.info(f"With meta mode: http://{self.host}:{self.port}/api/status?mode=meta")
             self.api_logger.info("Press Ctrl+C to stop the server")
             
@@ -1203,6 +1427,7 @@ class OrchestratorAPIServer:
                 print(f"Gate decision endpoint: http://{self.host}:{self.port}/api/gate-decision")
                 print(f"Command execution endpoint: http://{self.host}:{self.port}/api/execute")
                 print(f"System restart endpoint: http://{self.host}:{self.port}/api/restart")
+                print(f"Unsupervised mode endpoint: http://{self.host}:{self.port}/api/unsupervised-mode")
                 print(f"With meta mode: http://{self.host}:{self.port}/api/status?mode=meta")
                 
                 # Start server without signal handlers (background mode)

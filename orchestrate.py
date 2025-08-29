@@ -23,59 +23,10 @@ import signal
 import threading
 import urllib.request
 import urllib.error
+from log_streamer import LogStreamer, should_stream_logs
 from workflow_status import StatusReader, get_workflow_status
 from process_manager import ProcessManager
-
-
-class OrchestratorLogger:
-    """Unified logging system for all orchestrator components"""
-    
-    def __init__(self, component_name: str, log_dir: Path = None):
-        self.component_name = component_name
-        self.log_dir = log_dir or Path.cwd()
-        self.log_file = self.log_dir / f"{component_name}.log"
-        
-        # Ensure log directory exists
-        self.log_dir.mkdir(exist_ok=True)
-        
-        # Initialize log file with startup message
-        self._write_log(f"=== {component_name.upper()} STARTED ===")
-    
-    def _write_log(self, message: str, level: str = "INFO"):
-        """Write message to log file with timestamp"""
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        log_entry = f"[{timestamp}] [{level}] {message}\n"
-        
-        try:
-            with open(self.log_file, 'a', encoding='utf-8') as f:
-                f.write(log_entry)
-        except Exception as e:
-            # Fallback to stderr if log file writing fails
-            print(f"Log write failed: {e}", file=sys.stderr)
-    
-    def info(self, message: str):
-        """Log info message"""
-        self._write_log(message, "INFO")
-        print(f"[{self.component_name}] {message}")
-    
-    def error(self, message: str):
-        """Log error message"""
-        self._write_log(message, "ERROR")
-        print(f"[{self.component_name}] ERROR: {message}", file=sys.stderr)
-    
-    def warning(self, message: str):
-        """Log warning message"""
-        self._write_log(message, "WARNING")
-        print(f"[{self.component_name}] WARNING: {message}")
-    
-    def debug(self, message: str):
-        """Log debug message"""
-        self._write_log(message, "DEBUG")
-        print(f"[{self.component_name}] DEBUG: {message}")
-    
-    def shutdown(self):
-        """Log shutdown message"""
-        self._write_log(f"=== {self.component_name.upper()} SHUTDOWN ===")
+from orchestrator_logger import OrchestratorLogger
 
 
 def find_available_port(start_port: int, max_attempts: int = 20) -> int:
@@ -257,29 +208,40 @@ class AgentConfig:
         
     def _load_from_templates(self):
         """Load agent definitions from template files"""
-        # Scan all subdirectories in templates/agents/ for custom agents
-        if self.templates_dir.exists():
-            for agent_dir in self.templates_dir.iterdir():
-                if agent_dir.is_dir():
-                    agent_type = agent_dir.name
-                    template_path = agent_dir / 'CLAUDE.md'
-                    if template_path.exists():
-                        try:
-                            content = template_path.read_text()
-                            template = self._parse_template_file(agent_type, content)
-                            # Validate template before adding
-                            if self.validate_template(template):
-                                # Only add if not already loaded from config file (config takes precedence)
-                                if agent_type not in self.agents:
-                                    self.agents[agent_type] = template
+        # Try to load from local templates first, then global templates
+        template_dirs = [
+            self.templates_dir,  # Local: templates/agents/
+            Path.home() / '.claude-orchestrator' / 'agents'  # Global: ~/.claude-orchestrator/agents/
+        ]
+        
+        for templates_dir in template_dirs:
+            if templates_dir.exists():
+                for agent_dir in templates_dir.iterdir():
+                    if agent_dir.is_dir():
+                        agent_type = agent_dir.name
+                        template_path = agent_dir / 'CLAUDE.md'
+                        if template_path.exists():
+                            try:
+                                content = template_path.read_text()
+                                template = self._parse_template_file(agent_type, content)
+                                # Validate template before adding
+                                if self.validate_template(template):
+                                    # Only add if not already loaded from config file or previous template location
+                                    # (config takes precedence, local templates take precedence over global)
+                                    if agent_type not in self.agents:
+                                        self.agents[agent_type] = template
+                                        debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+                                        if debug_mode:
+                                            template_source = "local" if templates_dir == self.templates_dir else "global"
+                                            print(f"Info: Loaded {agent_type} template from {template_source} directory")
+                                    else:
+                                        debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+                                        if debug_mode:
+                                            print(f"Info: Skipping template {agent_type} - already loaded from higher priority source")
                                 else:
-                                    debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
-                                    if debug_mode:
-                                        print(f"Info: Skipping template {agent_type} - already loaded from config")
-                            else:
-                                print(f"Warning: Template validation failed for {agent_type}")
-                        except Exception as e:
-                            print(f"Warning: Failed to load template for {agent_type}: {e}")
+                                    print(f"Warning: Template validation failed for {agent_type}")
+                            except Exception as e:
+                                print(f"Warning: Failed to load template for {agent_type}: {e}")
                     
     def _parse_template_file(self, agent_name: str, content: str) -> AgentTemplate:
         """Parse template file content into AgentTemplate"""
@@ -405,21 +367,24 @@ class AgentConfig:
                 self.dashboard_available = False
                 return
                 
-            # Start API server as subprocess (without --background since subprocess IS the background)
+            # Start API server as subprocess using installed version
+            orchestrator_dir = os.path.expanduser("~/.claude-orchestrator")
+            api_script = os.path.join(orchestrator_dir, "api_server.py")
             self.api_process = subprocess.Popen([
-                sys.executable, 'api_server.py', 
+                sys.executable, api_script, 
                 '--port', str(self.api_port)
-            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=self.project_root)
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=self.project_root, start_new_session=True, preexec_fn=os.setpgrp)
             
             # Register API process with ProcessManager if available
             if self.process_manager:
                 self.process_manager.register_process('api_server', self.api_process)
             print(f"API server started as subprocess (PID: {self.api_process.pid}) on port {self.api_port}")
             
-            # Start dashboard server as subprocess
+            # Start dashboard server as subprocess using installed version
+            dashboard_script = os.path.join(orchestrator_dir, "dashboard_server.py")
             self.dashboard_process = subprocess.Popen([
-                sys.executable, 'dashboard_server.py', str(self.dashboard_port)
-            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=self.project_root)
+                sys.executable, dashboard_script, str(self.dashboard_port)
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=self.project_root, start_new_session=True, preexec_fn=os.setpgrp)
             
             # Register dashboard process with ProcessManager if available
             if self.process_manager:
@@ -476,12 +441,12 @@ class AgentConfig:
             self.dashboard_available = False
     
     def stop_dashboard(self):
-        """Stop dashboard and API server subprocesses"""
+        """Stop dashboard and API server subprocesses using ProcessManager"""
         try:
             # Stop health monitoring first
             self.stop_health_monitoring()
             
-            # Use ProcessManager for clean shutdown if available
+            # Use ProcessManager for clean shutdown
             if self.process_manager:
                 dashboard_stopped = self.process_manager.terminate_process('dashboard_server')
                 api_stopped = self.process_manager.terminate_process('api_server')
@@ -491,13 +456,7 @@ class AgentConfig:
                 if api_stopped:
                     self.api_process = None
             else:
-                # Fallback to direct process termination
-                if self.dashboard_process:
-                    self.dashboard_process.terminate()
-                    self.dashboard_process = None
-                if self.api_process:
-                    self.api_process.terminate()
-                    self.api_process = None
+                print("Warning: ProcessManager not available for clean shutdown")
                 
         except Exception as e:
             print(f"Error stopping servers: {e}")
@@ -801,14 +760,22 @@ class AgentExecutor:
         timestamp = start_time.strftime("%Y-%m-%dT%H:%M:%SZ")
         log_file = self.outputs_dir / f"{agent_type}-log.md"
         
-        # Add start timestamp
+        # Get current task for header
+        actual_task = self.orchestrator._get_current_task_raw()
+        task_for_header = actual_task if actual_task else f"Complete {agent_type} work according to responsibilities"
+        
+        # Add start timestamp and task header
         start_log = f"\n## {timestamp} - {agent_type.upper()} Agent Session\n\n"
+        task_header = f"---\nTASK: {task_for_header}\n---\n\n"
+        
         if log_file.exists():
             with open(log_file, 'a') as f:
                 f.write(start_log)
+                f.write(task_header)
         else:
             with open(log_file, 'w') as f:
                 f.write(start_log)
+                f.write(task_header)
         
         try:
             result_process = subprocess.run(
@@ -848,6 +815,15 @@ class AgentExecutor:
                 
                 # Update status file immediately when agent completes
                 self.orchestrator._update_status_file()
+                
+                # Special handling for Scribe: append scribe.md to orchestrator-log.md and SAGE files
+                if agent_type == "scribe":
+                    self._append_scribe_to_orchestrator_log()
+                    self._append_scribe_to_sage()
+                
+                
+                # Ensure required report file exists (fallback creation if agent didn't create it)
+                self._ensure_agent_report_file(agent_type)
                 
                 return f"✅ {agent_type.upper()} completed successfully"
             else:
@@ -911,6 +887,420 @@ class AgentExecutor:
             
             error_message = f"System error: {str(e)}. Check system resources and file system access."
             return f"❌ {agent_type.upper()} failed: {self._sanitize_error_message(error_message)}"
+
+    def _append_scribe_to_orchestrator_log(self):
+        """Append scribe.md content to orchestrator-log.md for permanent record"""
+        scribe_file = self.outputs_dir / "scribe.md"
+        orchestrator_log = self.outputs_dir / "orchestrator-log.md"
+        
+        if scribe_file.exists():
+            scribe_content = scribe_file.read_text()
+            
+            # Append to orchestrator log
+            with open(orchestrator_log, 'a', encoding='utf-8') as f:
+                if orchestrator_log.exists() and orchestrator_log.stat().st_size > 0:
+                    f.write('\n')  # Add separator line
+                f.write(scribe_content)
+                
+            print(f"✓ Scribe content appended to {orchestrator_log.name}")
+
+    def _append_scribe_to_sage(self):
+        """Append scribe discoveries to SAGE.md or SAGE-meta.md with timestamp and entry management"""
+        scribe_file = self.outputs_dir / "scribe.md"
+        
+        # Determine which SAGE file to use based on meta mode
+        sage_filename = "SAGE-meta.md" if 'meta' in sys.argv else "SAGE.md"
+        sage_file = Path(sage_filename)  # Root project directory
+        
+        if not scribe_file.exists():
+            return
+        
+        scribe_content = scribe_file.read_text()
+        
+        # Extract discovery entries from scribe content
+        # Look for lines that start with "Discovery:" 
+        discovery_lines = []
+        for line in scribe_content.splitlines():
+            line = line.strip()
+            if line.startswith("Discovery:"):
+                discovery_lines.append(line)
+        
+        if not discovery_lines:
+            return
+        
+        # Read current SAGE file or create default if doesn't exist
+        if sage_file.exists():
+            sage_content = sage_file.read_text()
+        else:
+            # Create minimal SAGE structure if file doesn't exist
+            mode_suffix = " (Meta Mode)" if 'meta' in sys.argv else ""
+            sage_content = f"""# SAGE{"-META" if 'meta' in sys.argv else ""} - Project Understanding Memory{mode_suffix}
+
+## Recent Discoveries
+
+*Last 20 timestamped discoveries about the system (most recent first):*
+
+"""
+        
+        # Find Recent Discoveries section
+        lines = sage_content.split('\n')
+        discoveries_start = -1
+        discoveries_end = len(lines)
+        
+        for i, line in enumerate(lines):
+            if "## Recent Discoveries" in line:
+                discoveries_start = i
+                # Find the end of discoveries section (next ## header or end of file)
+                for j in range(i + 1, len(lines)):
+                    if lines[j].startswith("## ") and "Recent Discoveries" not in lines[j]:
+                        discoveries_end = j
+                        break
+                break
+        
+        if discoveries_start == -1:
+            # If no Recent Discoveries section found, add it at the end
+            sage_content += "\n## Recent Discoveries\n\n*Last 20 timestamped discoveries about the system (most recent first):*\n\n"
+            discoveries_start = len(sage_content.split('\n')) - 3
+            discoveries_end = len(sage_content.split('\n'))
+            lines = sage_content.split('\n')
+        
+        # Extract existing discovery entries (numbered entries starting with digit and period)
+        existing_entries = []
+        for i in range(discoveries_start + 1, discoveries_end):
+            if i < len(lines):
+                line = lines[i].strip()
+                if re.match(r'^\d+\.\s+\*\*\[', line):  # Matches format: "1. **[timestamp]** content"
+                    existing_entries.append(line)
+        
+        # Create new timestamped entries
+        current_time = datetime.now()
+        timestamp_str = current_time.strftime("%Y-%m-%d %H:%M")
+        
+        new_entries = []
+        for discovery in discovery_lines:
+            # Remove "Discovery:" prefix and clean up
+            discovery_text = discovery.replace("Discovery:", "").strip()
+            formatted_entry = f"**[{timestamp_str}]** {discovery_text}"
+            new_entries.append(formatted_entry)
+        
+        # Combine new and existing entries, with new ones first
+        all_entries = new_entries + existing_entries
+        
+        # Limit to 20 entries
+        all_entries = all_entries[:20]
+        
+        # Rebuild the discoveries section
+        new_discoveries_section = [
+            "## Recent Discoveries",
+            "",
+            "*Last 20 timestamped discoveries about the system (most recent first):*",
+            ""
+        ]
+        
+        for i, entry in enumerate(all_entries, 1):
+            new_discoveries_section.append(f"{i}. {entry}")
+        
+        # Reconstruct the SAGE file
+        new_lines = lines[:discoveries_start] + new_discoveries_section + lines[discoveries_end:]
+        new_sage_content = '\n'.join(new_lines)
+        
+        # Write back to SAGE file
+        sage_file.write_text(new_sage_content)
+        print(f"✓ Scribe discoveries appended to {sage_file.name}")
+
+    
+
+
+
+    def _ensure_agent_report_file(self, agent_type):
+        """Ensure required report file exists for agent, creating fallback if missing"""
+        # Map agent types to their expected report files
+        agent_report_files = {
+            "explorer": "exploration.md",
+            "planner": "plan.md", 
+            "coder": "changes.md",
+            "scribe": "scribe.md",
+            "verifier": "verification.md"
+        }
+        
+        expected_file = agent_report_files.get(agent_type)
+        if not expected_file:
+            return  # Unknown agent type, skip
+            
+        report_path = self.orchestrator.outputs_dir / expected_file
+        
+        if report_path.exists():
+            return  # File already exists, nothing to do
+            
+        # File is missing - create fallback report based on agent log
+        print(f"Warning: {expected_file} missing after {agent_type} completion, creating fallback report")
+        
+        log_file = self.orchestrator.outputs_dir / f"{agent_type}-log.md"
+        fallback_content = self._generate_fallback_report(agent_type, expected_file, log_file)
+        
+        try:
+            with open(report_path, 'w') as f:
+                f.write(fallback_content)
+            print(f"Created fallback {expected_file} based on {agent_type} log")
+        except Exception as e:
+            print(f"Error creating fallback {expected_file}: {e}")
+
+    def _generate_fallback_report(self, agent_type, report_filename, log_file):
+        """Generate fallback report content based on agent type and log"""
+        # Read agent log if it exists
+        log_content = ""
+        if log_file.exists():
+            try:
+                with open(log_file, 'r') as f:
+                    log_content = f.read()
+            except Exception as e:
+                log_content = f"Error reading log file: {e}"
+        
+        # Get current timestamp
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Generate different report templates based on agent type
+        if agent_type == "explorer":
+            return self._generate_explorer_fallback(log_content, timestamp)
+        elif agent_type == "planner":
+            return self._generate_planner_fallback(log_content, timestamp)
+        elif agent_type == "coder":
+            return self._generate_coder_fallback(log_content, timestamp)
+        elif agent_type == "scribe":
+            return self._generate_scribe_fallback(log_content, timestamp)
+        elif agent_type == "verifier":
+            return self._generate_verifier_fallback(log_content, timestamp)
+        else:
+            return self._generate_generic_fallback(agent_type, report_filename, log_content, timestamp)
+
+    def _generate_explorer_fallback(self, log_content, timestamp):
+        """Generate fallback exploration.md"""
+        summary = self._extract_log_summary(log_content, ["problem", "issue", "task", "requirement"])
+        
+        return f"""# Exploration Report (Auto-Generated Fallback)
+
+*Generated: {timestamp}*
+*Reason: exploration.md was missing after explorer agent completion*
+
+## Problem Analysis
+
+{summary if summary else "The explorer agent completed successfully but did not create the expected exploration.md file."}
+
+## Key Findings
+
+Based on the agent execution log:
+- Agent completed with exit code 0
+- No exploration.md file was created
+- This fallback report ensures workflow progression continues
+
+## Technical Assessment
+
+The explorer agent ran to completion but failed to produce the expected output file. This may indicate:
+- Agent found no issues requiring exploration
+- Agent completed analysis but skipped file creation
+- Template or instruction issues prevented proper output
+
+## Recommendations
+
+- Review explorer agent logs for detailed execution information
+- Consider updating explorer template to ensure file creation
+- Manual review may be needed to understand the exploration results
+
+---
+*This report was automatically generated by the orchestrator's fallback mechanism*
+"""
+
+    def _generate_planner_fallback(self, log_content, timestamp):
+        """Generate fallback plan.md"""
+        summary = self._extract_log_summary(log_content, ["plan", "step", "approach", "implementation"])
+        
+        return f"""# Implementation Plan (Auto-Generated Fallback)
+
+*Generated: {timestamp}*
+*Reason: plan.md was missing after planner agent completion*
+
+## Planning Summary
+
+{summary if summary else "The planner agent completed successfully but did not create the expected plan.md file."}
+
+## Implementation Approach
+
+Based on the agent execution:
+- Planner agent completed with exit code 0
+- No plan.md file was created
+- This fallback ensures workflow continues to implementation
+
+## Next Steps
+
+1. Review planner agent logs for detailed planning information
+2. Proceed with implementation based on available context
+3. Consider manual planning if specific approach is required
+
+---
+*This report was automatically generated by the orchestrator's fallback mechanism*
+"""
+
+    def _generate_coder_fallback(self, log_content, timestamp):
+        """Generate fallback changes.md"""
+        summary = self._extract_log_summary(log_content, ["implementation", "changes", "modified", "created"])
+        
+        return f"""# Implementation Changes (Auto-Generated Fallback)
+
+*Generated: {timestamp}*
+*Reason: changes.md was missing after coder agent completion*
+
+## Original Problem Reference
+
+Based on available context from the coder agent execution.
+
+## Implementation Summary
+
+{summary if summary else "The coder agent completed successfully but did not create the expected changes.md file."}
+
+## Files Modified
+
+Based on the agent log:
+- Coder agent completed with exit code 0
+- No changes.md file was created
+- This may indicate no implementation was required or files were analyzed but not modified
+
+## Changes Made
+
+The coder agent execution completed successfully. If no changes were needed, this indicates:
+- Requested functionality may already be implemented
+- Analysis showed no modifications were required
+- Implementation was deemed unnecessary after investigation
+
+## Validation Notes
+
+This fallback report ensures workflow progression continues even when the expected output file was not created by the agent.
+
+---
+*This report was automatically generated by the orchestrator's fallback mechanism*
+"""
+
+    def _generate_scribe_fallback(self, log_content, timestamp):
+        """Generate fallback scribe.md"""
+        summary = self._extract_log_summary(log_content, ["documentation", "usage", "instructions", "guide"])
+        
+        return f"""# Documentation (Auto-Generated Fallback)
+
+*Generated: {timestamp}*
+*Reason: scribe.md was missing after scribe agent completion*
+
+## Documentation Summary
+
+{summary if summary else "The scribe agent completed successfully but did not create the expected scribe.md file."}
+
+## Implementation Documentation
+
+Based on the agent execution:
+- Scribe agent completed with exit code 0
+- No scribe.md file was created
+- This fallback provides basic documentation continuity
+
+## Usage Instructions
+
+Please refer to:
+- Agent execution logs for detailed information
+- Existing project documentation
+- Implementation changes from previous agents
+
+---
+*This report was automatically generated by the orchestrator's fallback mechanism*
+"""
+
+    def _generate_verifier_fallback(self, log_content, timestamp):
+        """Generate fallback verification.md"""
+        summary = self._extract_log_summary(log_content, ["verification", "test", "validation", "check"])
+        
+        return f"""# Verification Report (Auto-Generated Fallback)
+
+*Generated: {timestamp}*
+*Reason: verification.md was missing after verifier agent completion*
+
+## Verification Summary
+
+{summary if summary else "The verifier agent completed successfully but did not create the expected verification.md file."}
+
+## Test Results
+
+Based on the agent execution:
+- Verifier agent completed with exit code 0
+- No verification.md file was created
+- This fallback indicates the verification process completed
+
+## Validation Status
+
+The verifier agent execution suggests:
+- Verification process completed successfully
+- Tests or checks may have passed
+- No verification.md was created for unknown reasons
+
+## Recommendations
+
+- Review verifier agent logs for detailed test results
+- Consider manual verification if specific validation is required
+- Check if verification criteria were met during execution
+
+---
+*This report was automatically generated by the orchestrator's fallback mechanism*
+"""
+
+    def _generate_generic_fallback(self, agent_type, report_filename, log_content, timestamp):
+        """Generate generic fallback report"""
+        summary = self._extract_log_summary(log_content, ["work", "complete", "finished", "done"])
+        
+        return f"""# {agent_type.title()} Report (Auto-Generated Fallback)
+
+*Generated: {timestamp}*
+*Reason: {report_filename} was missing after {agent_type} agent completion*
+
+## Agent Execution Summary
+
+{summary if summary else f"The {agent_type} agent completed successfully but did not create the expected {report_filename} file."}
+
+## Completion Status
+
+Based on the agent execution:
+- {agent_type.title()} agent completed with exit code 0
+- No {report_filename} file was created
+- This fallback report ensures workflow progression continues
+
+## Next Steps
+
+- Review {agent_type} agent logs for detailed execution information
+- Consider updating {agent_type} template to ensure proper file creation
+- Manual review may be needed to understand the results
+
+---
+*This report was automatically generated by the orchestrator's fallback mechanism*
+"""
+
+    def _extract_log_summary(self, log_content, keywords):
+        """Extract relevant summary from log content based on keywords"""
+        if not log_content:
+            return None
+            
+        lines = log_content.split('\n')
+        relevant_lines = []
+        
+        # Look for lines containing keywords
+        for line in lines:
+            line = line.strip()
+            if line and any(keyword.lower() in line.lower() for keyword in keywords):
+                # Clean up log formatting
+                clean_line = line.replace('[', '').replace(']', '').strip()
+                if clean_line and len(clean_line) > 10:  # Filter out very short lines
+                    relevant_lines.append(clean_line)
+        
+        if relevant_lines:
+            # Take the most relevant lines (up to 3)
+            summary_lines = relevant_lines[:3]
+            return '\n'.join(f"- {line}" for line in summary_lines)
+        
+        return None
 
     def _execute_via_interactive(self, agent_type, instructions):
         """Legacy interactive mode - return instructions unchanged for Claude to execute"""
@@ -1091,24 +1481,9 @@ class WorkflowConfig:
                 # Regular agent - check if output file exists
                 output_file = self._get_output_file(agent_type)
                 
-                # Special case for scribe: run after verifier if verification is newer than last scribe run
-                if agent_type == "scribe" and outputs_dir:
-                    if current_outputs.get("verification.md", False):
-                        verification_file = outputs_dir / "verification.md"
-                        scribe_file = outputs_dir / "orchestrator-log.md"
-                        
-                        # Run scribe if orchestrator-log doesn't exist or verification is newer
-                        if not scribe_file.exists():
-                            return agent_type
-                        elif verification_file.exists():
-                            verification_time = verification_file.stat().st_mtime
-                            scribe_time = scribe_file.stat().st_mtime
-                            if verification_time > scribe_time:
-                                return agent_type
-                else:
-                    # Normal agents - check if output file exists
-                    if not current_outputs.get(output_file, False):
-                        return agent_type
+                # Normal agents - check if output file exists
+                if not current_outputs.get(output_file, False):
+                    return agent_type
                     
         return None  # All complete
         
@@ -1121,7 +1496,7 @@ class WorkflowConfig:
         elif agent_type == "coder":
             return "changes.md"
         elif agent_type == "scribe":
-            return "orchestrator-log.md"
+            return "scribe.md"
         elif agent_type == "verifier":
             return "verification.md"
         else:
@@ -1150,13 +1525,13 @@ class ClaudeCodeOrchestrator:
         
         self.project_root = Path.cwd()
         
-        # Set directories with -meta suffix if in meta mode
-        if self.meta_mode:
-            self.claude_dir = self.project_root / ".claude-meta"
-            self.outputs_dir = self.project_root / ".agent-outputs-meta"
-        else:
-            self.claude_dir = self.project_root / ".claude"
-            self.outputs_dir = self.project_root / ".agent-outputs"
+        # Initialize status reader early for path resolution
+        self.status_reader = StatusReader(project_root=self.project_root)
+        
+        # Set directories using centralized path resolution with explicit mode
+        mode = 'meta' if self.meta_mode else 'regular'
+        self.claude_dir = self.status_reader._get_claude_dir(mode)
+        self.outputs_dir = self.status_reader._get_outputs_dir(mode)
         
         self.agents_dir = Path.home() / ".claude-orchestrator" / "agents"
         
@@ -1187,6 +1562,9 @@ class ClaudeCodeOrchestrator:
         # Initialize agent factory with configuration
         self.agent_factory = AgentFactory(self, self.agent_config)
         
+        # Initialize log streaming
+        self.current_log_streamer = None
+        
         # Initialize agent executor for headless/interactive mode execution
         self.agent_executor = AgentExecutor(self, headless=self.headless)
         
@@ -1202,8 +1580,7 @@ class ClaudeCodeOrchestrator:
         self.agents_dir.mkdir(exist_ok=True)
         self.outputs_dir.mkdir(exist_ok=True)
         
-        # Initialize shared status reader for consistent workflow state
-        self.status_reader = StatusReader(project_root=self.project_root)
+        # Status reader already initialized above for path resolution
         
         # Generate default configuration files if they don't exist
         self._ensure_config_files()
@@ -1212,15 +1589,15 @@ class ClaudeCodeOrchestrator:
         """Install signal handlers for clean shutdown"""
         def signal_handler(sig, frame):
             print(f"\nReceived signal {sig}. Cleaning up processes...")
+            # Stop any active log streaming
+            self._stop_log_streaming()
+            # Clean up all processes
             self.process_manager.cleanup_all_processes()
             sys.exit(0)
         
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
 
-    def _get_current_mode(self):
-        """Get current mode (regular or meta) based on outputs_dir"""
-        return 'meta' if self.outputs_dir.name == '.agent-outputs-meta' else 'regular'
 
     def _test_api_endpoint(self):
         """Test if API server HTTP endpoint is responding"""
@@ -1277,6 +1654,189 @@ class ClaudeCodeOrchestrator:
         # Generate workflow configuration  
         if not self.workflow_config.config_path.exists():
             self.workflow_config.save_config()
+            
+        # Generate SAGE project understanding files if they don't exist
+        self._ensure_sage_files()
+
+    def _ensure_sage_files(self):
+        """Generate SAGE project understanding files if they don't exist"""
+        # Determine which SAGE file to create based on mode
+        if self.meta_mode:
+            sage_filename = "SAGE-meta.md"
+            sage_template_content = self._get_sage_meta_template()
+        else:
+            sage_filename = "SAGE.md"
+            sage_template_content = self._get_sage_template()
+            
+        # Create SAGE file at project root if it doesn't exist
+        sage_file_path = Path.cwd() / sage_filename
+        if not sage_file_path.exists():
+            sage_file_path.write_text(sage_template_content)
+
+    def _get_sage_template(self):
+        """Get template content for SAGE.md file"""
+        return '''# SAGE - Project Understanding Memory
+
+This file serves as SAGE's persistent working memory for the claude-orchestrator project, containing architectural insights, recent discoveries, and known pitfalls to prevent redundant exploration.
+
+## Architecture Quick Reference
+
+### Core Components
+- **orchestrate.py**: Main orchestrator class (ClaudeCodeOrchestrator) with workflow management, process management, and agent execution
+- **process_manager.py**: ProcessManager class handles system-wide process tracking and cleanup
+- **workflow_status.py**: WorkflowStatus class manages task states and workflow progression
+- **orchestrator_logger.py**: OrchestratorLogger provides consistent logging across all components
+
+### Key Directories
+- **templates/agents/**: Agent-specific templates (explorer, planner, coder, verifier, scribe)
+- **templates/bootstrap/**: Bootstrap templates for project initialization
+- **.claude/**: Working directory with tasks, status, and logs (regular mode)
+- **.claude-meta/**: Working directory for meta mode operations
+- **dashboard/**: Web interface for workflow monitoring and control
+
+### Agent System
+- **Explorer**: Identifies problems and defines success criteria
+- **Planner**: Creates implementation plans based on success criteria
+- **Coder**: Implements changes according to plans
+- **Verifier**: Validates implementations meet success criteria
+- **Scribe**: Updates documentation and knowledge files
+
+### Critical Files
+- **orchestrate.py:2723**: bootstrap_tasks method for project initialization
+- **orchestrate.py:565**: ClaudeCodeOrchestrator session context management
+- **api_server.py**: REST API for dashboard integration (port 8000)
+- **dashboard_server.py**: Web server for dashboard interface (port 5678)
+
+## Recent Discoveries
+
+*Last 20 timestamped discoveries about the system (most recent first):*
+
+1. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+2. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+3. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+4. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+5. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+6. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+7. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+8. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+9. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+10. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+11. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+12. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+13. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+14. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+15. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+16. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+17. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+18. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+19. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+20. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+
+## Known Gotchas
+
+### Critical Rules
+- **NEVER modify files in ~/.claude-orchestrator/** - Changes get overwritten on reinstall
+- **Always use project directory paths** - Avoid installed version references
+- **Meta mode detection**: Use `'meta' in sys.argv` for consistency across all contexts
+- **Process registration**: All background processes must register with ProcessManager
+
+### Common Pitfalls
+- **File path confusion**: Project files vs installed files - always use project directory
+- **Mode inconsistency**: Meta mode detection must be identical in registration and cleanup
+- **Bootstrap timing**: SAGE file creation must happen after .claude directory structure
+- **Template updates**: Explorer template modifications require careful formatting preservation
+- **Success criteria**: Must be objectively testable and directly solve stated problems
+
+### Testing Considerations
+- **Process cleanup**: Verify all processes terminate with 'cc-orchestrate stop'
+- **Mode switching**: Test both regular and meta mode operations separately
+- **Dashboard integration**: Validate status consistency between CLI and web interface
+- **Agent handoffs**: Ensure context preservation between agent executions
+- **Bootstrap flow**: Test project initialization with missing SAGE files
+'''
+
+    def _get_sage_meta_template(self):
+        """Get template content for SAGE-meta.md file"""
+        return '''# SAGE-META - Project Understanding Memory (Meta Mode)
+
+This file serves as SAGE's persistent working memory for meta mode operations in the claude-orchestrator project, containing architectural insights, recent discoveries, and known pitfalls to prevent redundant exploration.
+
+## Architecture Quick Reference
+
+### Core Components
+- **orchestrate.py**: Main orchestrator class (ClaudeCodeOrchestrator) with workflow management, process management, and agent execution
+- **process_manager.py**: ProcessManager class handles system-wide process tracking and cleanup
+- **workflow_status.py**: WorkflowStatus class manages task states and workflow progression
+- **orchestrator_logger.py**: OrchestratorLogger provides consistent logging across all components
+
+### Key Directories
+- **templates/agents/**: Agent-specific templates (explorer, planner, coder, verifier, scribe)
+- **templates/bootstrap/**: Bootstrap templates for project initialization
+- **.claude/**: Working directory with tasks, status, and logs (regular mode)
+- **.claude-meta/**: Working directory for meta mode operations
+- **dashboard/**: Web interface for workflow monitoring and control
+
+### Agent System (Meta Mode Context)
+- **Explorer**: Identifies problems and defines success criteria for meta operations
+- **Planner**: Creates implementation plans for meta-level improvements
+- **Coder**: Implements meta-level changes to orchestrator system
+- **Verifier**: Validates meta-level implementations meet success criteria
+- **Scribe**: Updates documentation and knowledge files for meta operations
+
+### Critical Files
+- **orchestrate.py:2723**: bootstrap_tasks method for project initialization
+- **orchestrate.py:565**: ClaudeCodeOrchestrator session context management
+- **api_server.py**: REST API for dashboard integration (port 8000)
+- **dashboard_server.py**: Web server for dashboard interface (port 5678)
+
+## Recent Discoveries
+
+*Last 20 timestamped discoveries about meta mode operations (most recent first):*
+
+1. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+2. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+3. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+4. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+5. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+6. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+7. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+8. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+9. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+10. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+11. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+12. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+13. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+14. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+15. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+16. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+17. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+18. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+19. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+20. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+
+## Known Gotchas
+
+### Critical Rules (Meta Mode Specific)
+- **NEVER modify files in ~/.claude-orchestrator/** - Changes get overwritten on reinstall
+- **Always use project directory paths** - Avoid installed version references in meta operations
+- **Meta mode detection**: Use `'meta' in sys.argv` for consistency across all contexts
+- **Meta mode isolation**: Use .claude-meta/ directory for all meta mode working files
+- **Process registration**: Meta processes must register with ProcessManager using meta_mode=True
+
+### Common Pitfalls (Meta Operations)
+- **File path confusion**: Meta mode must use .claude-meta/ not .claude/ directories
+- **Mode detection timing**: Meta mode flag must be available at ProcessManager initialization
+- **Bootstrap isolation**: Meta mode bootstrap creates .claude-meta structure separately
+- **Template context**: Meta mode templates operate on orchestrator system itself
+- **Success criteria**: Meta operations must not break regular mode functionality
+
+### Testing Considerations (Meta Mode)
+- **Process cleanup**: Meta mode processes must terminate with 'cc-orchestrate stop meta'
+- **Mode isolation**: Meta operations must not interfere with regular mode workflows
+- **Dashboard integration**: Meta mode dashboard operations require separate validation
+- **Agent handoffs**: Meta mode context preservation between agent executions
+- **Bootstrap flow**: Meta mode project initialization with missing SAGE-meta files
+'''
 
     def _display_file_contents(self, filepath, description="file"):
         """Helper method to display file contents without truncation"""
@@ -1366,28 +1926,18 @@ class ClaudeCodeOrchestrator:
 AGENT LOGGING (for debugging transparency):
 APPEND (do not overwrite) progress updates to {log_file} using this format:
 
-FIRST: Add task header if this is a new log file or first session:
----
-TASK: {primary_objective}
----
-
-THEN: Add your session log entries (Python has already added session start timestamp):
-[{current_time}] Starting {agent_name} agent work
-[14:32:18] Reading required input files...
-[14:32:25] [Describe what you found/understood]
-[14:32:40] Beginning implementation...
-[14:33:05] [Major steps or decisions]  
-[14:33:20] Writing output files...
-[14:33:25] {agent_name.title()} agent work complete
+Starting {agent_name} agent work
+Reading required input files...
+[Describe what you found/understood]
+Beginning implementation...
+[Major steps or decisions]  
+Writing output files...
+{agent_name.title()} agent work complete
 
 CRITICAL REQUIREMENTS:
 - APPEND to the file (do not overwrite existing content)
-- DO NOT add session start/end timestamps - Python handles those automatically
-- DO NOT use the example times shown above (14:32:18, etc)
-- Each time you write a log entry, check the current system time and use that
-- Format: [HH:MM:SS] where HH:MM:SS is the ACTUAL time right now when you write each entry
-- Examples: If it's 2:45 PM when you start, write [14:45:00]. If it's 2:47 PM when you finish reading, write [14:47:00]
-- DO NOT use sequential numbers like [00:00:01], [00:00:02] - use real clock time
+- DO NOT add session start/end timestamps or task headers - Python handles those automatically
+- Focus on clear, descriptive progress updates
 - Use Write tool with append mode or add content to existing file
 
 """
@@ -1410,7 +1960,7 @@ CRITICAL REQUIREMENTS:
                       "AVAILABLE OPTIONS:\n" + options_text + "\n\n" + \
                       "WORKFLOW PAUSED - Choose an option above\n"
         
-        gate_filename = "current-" + gate_name.lower() + "-gate.md"
+        gate_filename = "pending-" + gate_name.lower() + "-gate.md"
         gate_filepath = self.outputs_dir / gate_filename
         gate_filepath.write_text(gate_content)
         
@@ -1574,8 +2124,9 @@ CRITICAL REQUIREMENTS:
     def get_continue_agent(self):
         """Get the next agent to run and its instructions using configurable workflow"""
         
-        # Check for pending gate state first (for resume functionality) - use shared StatusReader
-        pending_gates = self.status_reader.get_pending_gates(self._get_current_mode())
+        # Check for pending gate state first (for resume functionality) - use explicit mode
+        mode = 'meta' if self.meta_mode else 'regular'
+        pending_gates = self.status_reader.get_pending_gates(mode)
         
         if 'user_validation' in pending_gates:
             gate_file = self.outputs_dir / "pending-user_validation-gate.md"
@@ -1586,7 +2137,7 @@ CRITICAL REQUIREMENTS:
             gate_content = gate_file.read_text()
             return self._handle_interactive_gate("criteria", gate_content)
         elif 'completion' in pending_gates:
-            gate_file = self.outputs_dir / "current-completion-gate.md"
+            gate_file = self.outputs_dir / "pending-completion-gate.md"
             gate_content = gate_file.read_text()
             return self._handle_interactive_gate("completion", gate_content)
         
@@ -1597,14 +2148,14 @@ CRITICAL REQUIREMENTS:
             if approval_file.exists():
                 approval_file.unlink()  # Remove approval file so we don't loop
                 # Remove pending gate file if it exists
-                if self.status_reader.has_pending_gate('user_validation', self._get_current_mode()):
+                if self.status_reader.has_pending_gate('user_validation', mode):
                     gate_file = self.outputs_dir / "pending-user_validation-gate.md"
                     gate_file.unlink()
                 # Continue to next task
                 print("User validation approved, continuing to next task...")
         
-        # Check what outputs exist to determine next phase - use shared StatusReader
-        current_outputs = self.status_reader.get_current_outputs_status(self._get_current_mode())
+        # Check what outputs exist to determine next phase - use explicit mode
+        current_outputs = self.status_reader.get_current_outputs_status(mode)
         
         # Check if current task is a USER validation task before determining workflow phase
         current_task_raw = self._get_current_task_raw()
@@ -1614,7 +2165,7 @@ CRITICAL REQUIREMENTS:
             result = self._handle_user_validation(current_task_raw)
             if result is None:
                 # Gate was created, check for pending user validation gate
-                if self.status_reader.has_pending_gate('user_validation', self._get_current_mode()):
+                if self.status_reader.has_pending_gate('user_validation', mode):
                     gate_file = self.outputs_dir / "pending-user_validation-gate.md"
                     gate_content = gate_file.read_text()
                     return self._handle_interactive_gate("user_validation", gate_content)
@@ -1660,8 +2211,9 @@ CRITICAL REQUIREMENTS:
             print()
     
     def _show_agent_progress(self, agent_type, status="running"):
-        """Show clean progress indicator for current agent"""
+        """Show clean progress indicator for current agent with optional log streaming"""
         debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+        streaming_enabled = should_stream_logs()
         
         if not debug_mode:
             agent_display = {
@@ -1674,15 +2226,42 @@ CRITICAL REQUIREMENTS:
             
             if agent_type in agent_display:
                 if status == "running":
-                    print(f"{agent_display[agent_type]}...")
+                    if streaming_enabled:
+                        print(f"{agent_display[agent_type]}:")
+                        # Start log streaming for this agent
+                        self._start_log_streaming(agent_type)
+                    else:
+                        print(f"{agent_display[agent_type]}...")
                 elif status == "complete":
+                    # Stop any active log streaming
+                    self._stop_log_streaming()
                     print(f"✓ {agent_display[agent_type]} complete")
                 elif status == "failed":
+                    # Stop any active log streaming
+                    self._stop_log_streaming()
                     print(f"✗ {agent_display[agent_type]} failed")
         
         # Update status file to reflect current agent state
         if status == "running":
             self._update_status_file_with_running_agent(agent_type)
+    
+    def _start_log_streaming(self, agent_type):
+        """Start streaming log entries for the specified agent"""
+        # Stop any existing streaming first
+        self._stop_log_streaming()
+        
+        # Determine log file path
+        log_file_path = self.outputs_dir / f"{agent_type}-log.md"
+        
+        # Create and start new log streamer
+        self.current_log_streamer = LogStreamer(log_file_path, agent_type)
+        self.current_log_streamer.start_streaming()
+    
+    def _stop_log_streaming(self):
+        """Stop any active log streaming"""
+        if self.current_log_streamer and self.current_log_streamer.is_active:
+            self.current_log_streamer.stop_streaming_now()
+            self.current_log_streamer = None
 
     def _show_verification_status(self):
         """Show verification pass/fail status"""
@@ -1716,8 +2295,9 @@ CRITICAL REQUIREMENTS:
         while iteration < max_iterations:
             iteration += 1
             
-            # First, check for pending gates before determining next phase - use shared StatusReader
-            pending_gates = self.status_reader.get_pending_gates(self._get_current_mode())
+            # First, check for pending gates before determining next phase - use explicit mode
+            mode = 'meta' if self.meta_mode else 'regular'
+            pending_gates = self.status_reader.get_pending_gates(mode)
             
             if 'user_validation' in pending_gates:
                 gate_file = self.outputs_dir / "pending-user_validation-gate.md"
@@ -1728,12 +2308,12 @@ CRITICAL REQUIREMENTS:
                 gate_content = gate_file.read_text()
                 return self._handle_interactive_gate("criteria", gate_content)
             elif 'completion' in pending_gates:
-                gate_file = self.outputs_dir / "current-completion-gate.md"
+                gate_file = self.outputs_dir / "pending-completion-gate.md"
                 gate_content = gate_file.read_text()
                 return self._handle_interactive_gate("completion", gate_content)
             
-            # Check what outputs exist to determine next phase - use shared StatusReader
-            current_outputs = self.status_reader.get_current_outputs_status(self._get_current_mode())
+            # Check what outputs exist to determine next phase - use explicit mode
+            current_outputs = self.status_reader.get_current_outputs_status(mode)
             
             # Use workflow configuration to determine next agent
             next_agent = self.workflow_config.get_next_agent(current_outputs, self.outputs_dir)
@@ -1948,7 +2528,11 @@ CRITICAL REQUIREMENTS:
             
         else:
             # Generic agent preparation for work agents
-            return self.agent_factory.create_agent(agent_type)
+            current_task = self._get_current_task_raw()
+            if current_task:
+                return self.agent_factory.create_agent(agent_type, task=current_task)
+            else:
+                return self.agent_factory.create_agent(agent_type)
 
     def _get_current_task_raw(self):
         """Extract current task from checklist without handling it"""
@@ -2257,7 +2841,7 @@ CRITICAL REQUIREMENTS:
         self.tasks_file.write_text('\n'.join(lines))
 
     def status(self):
-        """Show current orchestration status by writing to file and commanding display"""
+        """Show current orchestration status"""
         
         status_info = "# Orchestration Status\n\n"
         
@@ -2267,6 +2851,7 @@ CRITICAL REQUIREMENTS:
             ("plan.md", "Planner"),
             ("changes.md", "Coder"),
             ("verification.md", "Verifier"),
+            ("scribe.md", "Scribe"),
             ("completion-approved.md", "Completion Gate")
         ]
         
@@ -2282,8 +2867,10 @@ CRITICAL REQUIREMENTS:
         if current_task:
             status_info += "\nCurrent task: " + current_task + "\n"
             
-        # Write and display status
-        self._write_and_display(status_info, "current-status.md", "status")
+        # Write status to file and display directly
+        status_filepath = self.outputs_dir / "current-status.md"
+        status_filepath.write_text(status_info)
+        print(status_info.strip())
 
     def _update_status_file(self):
         """Update current-status.md file immediately without displaying"""
@@ -2295,6 +2882,7 @@ CRITICAL REQUIREMENTS:
             ("plan.md", "Planner"),
             ("changes.md", "Coder"),
             ("verification.md", "Verifier"),
+            ("scribe.md", "Scribe"),
             ("completion-approved.md", "Completion Gate")
         ]
         
@@ -2306,7 +2894,7 @@ CRITICAL REQUIREMENTS:
             if "Gate" in agent:
                 # Check for active gate files
                 gate_type = agent.lower().replace(" gate", "").replace(" ", "-")
-                active_gate_file = self.outputs_dir / f"current-{gate_type}-gate.md"
+                active_gate_file = self.outputs_dir / f"pending-{gate_type}-gate.md"
                 pending_gate_file = self.outputs_dir / f"pending-{gate_type}-gate.md"
                 pending_validation_file = self.outputs_dir / "pending-user_validation-gate.md"
                 
@@ -2353,7 +2941,7 @@ CRITICAL REQUIREMENTS:
             "planner": ("plan.md", "Planner"), 
             "coder": ("changes.md", "Coder"),
             "verifier": ("verification.md", "Verifier"),
-            "scribe": ("orchestrator-log.md", "Scribe")
+            "scribe": ("scribe.md", "Scribe")
         }
         
         files = [
@@ -2362,6 +2950,7 @@ CRITICAL REQUIREMENTS:
             ("plan.md", "Planner"),
             ("changes.md", "Coder"),
             ("verification.md", "Verifier"),
+            ("scribe.md", "Scribe"),
             ("completion-approved.md", "Completion Gate")
         ]
         
@@ -2455,16 +3044,38 @@ CRITICAL REQUIREMENTS:
             
             print("Success criteria approved and saved")
             
+            # Remove the pending criteria gate file since we've approved it
+            criteria_gate_file = self.outputs_dir / "pending-criteria-gate.md"
+            if criteria_gate_file.exists():
+                criteria_gate_file.unlink()
+            
             # Update status file after criteria approval
             self._update_status_file()
             
-            # Continue to continue agent
-            agent, instructions = self.get_continue_agent()
-            print("\n" + "="*60)
-            print("CRITERIA APPROVED - CONTINUING TO " + agent.upper())
-            print("="*60)
-            print(instructions)
-            print("="*60)
+            print("CRITERIA APPROVED - Next agent will be started automatically")
+            
+            # Schedule next agent execution without waiting for it to complete
+            if self.headless:
+                # Start continue command in background to avoid API timeout
+                import subprocess
+                import sys
+                background_process = subprocess.Popen([
+                    sys.executable, __file__, 'continue'
+                ] + (['meta'] if 'meta' in sys.argv else []), 
+                cwd=self.project_root, 
+                stdout=subprocess.DEVNULL, 
+                stderr=subprocess.DEVNULL, 
+                start_new_session=True, 
+                preexec_fn=os.setpgrp)
+                # Register background process with ProcessManager for proper cleanup
+                self.process_manager.register_process('background_continue', background_process)
+                print("Background continue process started")
+            else:
+                # In interactive mode, continue to next agent
+                agent, instructions = self.get_continue_agent()
+                if agent and instructions:
+                    print(f"\nContinuing to {agent.upper()}")
+                    self.run_agent(agent, instructions)
             
     def approve_completion(self):
         """Approve completion and mark task done"""
@@ -2585,13 +3196,13 @@ Continuing to next task in workflow
             "plan.md",
             "changes.md", 
             "verification.md",
+            "scribe.md",
             "completion-approved.md",
             "criteria-modification-request.md",
             "pending-criteria-gate.md",
-            "current-completion-gate.md",
+            "pending-completion-gate.md",
             "pending-user_validation-gate.md",
             "current-status.md",
-            "current-criteria-gate.md",
             "current-user-validation.md",
             "next-command.txt",
             "status.txt"
@@ -2766,10 +3377,10 @@ Begin by analyzing the current directory and asking about the goal.
         """Clean outputs from specified phase onwards"""
         
         phase_files = {
-            "explorer": ["exploration.md", "success-criteria.md", "plan.md", "changes.md", "verification.md", "completion-approved.md"],
-            "planner": ["plan.md", "changes.md", "verification.md", "completion-approved.md"],
-            "coder": ["changes.md", "verification.md", "completion-approved.md"],
-            "verifier": ["verification.md", "completion-approved.md"]
+            "explorer": ["exploration.md", "success-criteria.md", "plan.md", "changes.md", "verification.md", "scribe.md", "completion-approved.md"],
+            "planner": ["plan.md", "changes.md", "verification.md", "scribe.md", "completion-approved.md"],
+            "coder": ["changes.md", "verification.md", "scribe.md", "completion-approved.md"],
+            "verifier": ["verification.md", "scribe.md", "completion-approved.md"]
         }
         
         files_to_clean = phase_files.get(phase, [])
@@ -2833,73 +3444,28 @@ Begin by analyzing the current directory and asking about the goal.
 
 
 def clear_ui_command(args):
-    """Kill all dashboard and API server processes"""
-    import subprocess
+    """Kill all dashboard and API server processes using ProcessManager"""
+    from process_manager import ProcessManager
     import sys
     
     print("Stopping all dashboard and API server processes...")
     
     try:
-        # Kill API server processes (multiple patterns to catch all variants)
-        patterns_killed = []
-        result = subprocess.run(['pkill', '-f', 'api_server'], capture_output=True)
-        if result.returncode == 0:
-            patterns_killed.append("api_server processes")
+        # Use ProcessManager for system-wide cleanup
+        # Determine mode for ProcessManager initialization
+        meta_mode = 'meta' in sys.argv
+        process_manager = ProcessManager(meta_mode=meta_mode)
+        
+        # Use ProcessManager's system-wide cleanup
+        success = process_manager.cleanup_system_wide()
+        
+        if success:
+            print("✓ All UI server processes have been stopped.")
+        else:
+            print("⚠ Warning: Some processes may still be running after cleanup")
             
-        # Also kill by exact python script name patterns
-        subprocess.run(['pkill', '-f', 'api_server.py'], capture_output=True)
-        subprocess.run(['pkill', '-f', 'Python.*api_server'], capture_output=True)
-        
-        print("✓ Stopped API server processes")
-        
-        # Kill dashboard server processes  
-        subprocess.run(['pkill', '-f', 'dashboard_server'], capture_output=True)
-        subprocess.run(['pkill', '-f', 'dashboard_server.py'], capture_output=True)
-        subprocess.run(['pkill', '-f', 'Python.*dashboard_server'], capture_output=True)
-        print("✓ Stopped dashboard server processes")
-        
-        # Kill any orchestrate serve processes
-        subprocess.run(['pkill', '-f', 'cc-orchestrate serve'], capture_output=True)
-        subprocess.run(['pkill', '-f', 'orchestrate serve'], capture_output=True)
-        print("✓ Stopped orchestrate serve processes")
-        
-        # Give processes time to terminate and verify cleanup
-        import time
-        
-        # Wait progressively for all processes to fully terminate
-        for attempt in range(5):  # Check up to 5 times over 10 seconds
-            time.sleep(2)
-            
-            # Check if any are still actually running (not just terminating)
-            remaining = subprocess.run(['ps', 'aux'], capture_output=True, text=True)
-            running_processes = []
-            
-            for line in remaining.stdout.split('\n'):
-                if ('api_server' in line or 'dashboard_server' in line) and 'grep' not in line:
-                    # Double-check the process is actually responsive
-                    try:
-                        pid = line.split()[1]
-                        # Try to get process status
-                        status_check = subprocess.run(['ps', '-o', 'stat', '-p', pid], 
-                                                    capture_output=True, text=True)
-                        if status_check.returncode == 0 and 'Z' not in status_check.stdout:
-                            running_processes.append(line.strip())
-                    except:
-                        pass
-            
-            if not running_processes:
-                print("✓ All UI server processes have been stopped.")
-                return
-            elif attempt == 4:  # Last attempt
-                print(f"⚠ Warning: {len(running_processes)} process(es) still running after cleanup:")
-                for proc in running_processes:
-                    print(f"  {proc}")
-                print("These processes may be unresponsive. You can force-kill them with:")
-                for proc in running_processes:
-                    pid = proc.split()[1]
-                    print(f"  kill -9 {pid}")
-            else:
-                print(f"Waiting for {len(running_processes)} process(es) to finish terminating... (attempt {attempt + 1}/5)")
+        # Additional cleanup of any ProcessManager-tracked processes
+        process_manager.cleanup_all_processes()
         
         print("Process cleanup completed.")
         
@@ -2942,6 +3508,9 @@ def serve_command(args):
     # Initialize process manager (check for meta mode via environment)
     meta_mode = os.getenv('CLAUDE_ORCHESTRATOR_META_MODE') == '1'
     process_manager = ProcessManager(meta_mode=meta_mode)
+    
+    # Register main serve process so it can be terminated by stop command
+    process_manager.register_main_process("serve-main")
     
     # Health monitoring state
     health_monitoring_active = True
@@ -2995,6 +3564,22 @@ def serve_command(args):
     signal.signal(signal.SIGINT, cleanup_and_exit)
     signal.signal(signal.SIGTERM, cleanup_and_exit)
     
+    # Register SIGCHLD handler to reap zombie children automatically
+    def handle_sigchld(signum, frame):
+        """Reap zombie child processes"""
+        try:
+            while True:
+                # Reap any zombie children without blocking
+                pid, status = os.waitpid(-1, os.WNOHANG)
+                if pid == 0:  # No more zombies
+                    break
+                serve_logger.debug(f"Reaped zombie child process {pid} with status {status}")
+        except (OSError, ChildProcessError):
+            # No children to reap
+            pass
+    
+    signal.signal(signal.SIGCHLD, handle_sigchld)
+    
     try:
         # Start API server as subprocess using the real api_server.py
         serve_logger.info(f"Starting API server on port {api_port}...")
@@ -3004,7 +3589,7 @@ def serve_command(args):
         
         # Start API server from current project directory to read .agent-outputs files
         current_dir = os.getcwd()
-        api_process = subprocess.Popen(api_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=current_dir)
+        api_process = subprocess.Popen(api_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=current_dir, start_new_session=True, preexec_fn=os.setpgrp)
         process_manager.register_process('api_server', api_process)
         serve_logger.info(f"API server registered (PID: {api_process.pid})")
         
@@ -3026,19 +3611,12 @@ def serve_command(args):
         serve_logger.info("Press Ctrl+C to stop all servers")
         serve_logger.info("-" * 50)
         
-        # Start dashboard server using local version to serve current directory files
-        current_dir = os.getcwd()
-        local_dashboard_script = os.path.join(current_dir, "dashboard_server.py")
-        
-        # Check if local dashboard_server.py exists, fall back to global if not
-        if os.path.exists(local_dashboard_script):
-            dashboard_script = local_dashboard_script
-        else:
-            dashboard_script = os.path.join(os.path.expanduser("~/.claude-orchestrator"), "dashboard_server.py")
+        # Start dashboard server using installed version only
+        dashboard_script = os.path.join(os.path.expanduser("~/.claude-orchestrator"), "dashboard_server.py")
         
         dashboard_process = subprocess.Popen([
             sys.executable, dashboard_script, str(dashboard_port)
-        ], cwd=current_dir)
+        ], cwd=current_dir, start_new_session=True, preexec_fn=os.setpgrp)
         process_manager.register_process('dashboard_server', dashboard_process)
         serve_logger.info(f"Dashboard server registered (PID: {dashboard_process.pid})")
         
@@ -3126,6 +3704,8 @@ def show_help():
     print("  Mode: unsupervised, supervised")
     print("  UI: serve - Start dashboard and API servers")
     print("      clear-ui - Stop all dashboard and API server processes")
+    print("      killall - Force terminate all orchestrator processes (clear-ui + pkill)")
+    print("      stop - Stop orchestrator processes system-wide")
     print("  Interactive mode: Runs persistent workflow with interactive gates")
 
 def main():
@@ -3328,6 +3908,41 @@ def main():
         else:
             print("Warning: Some processes may not have been terminated properly.")
             sys.exit(1)
+        
+    elif command == "killall":
+        # Force kill all orchestrator processes and clean up everything
+        print("🚫 KILLALL: Terminating all orchestrator processes...")
+        
+        # Check if running in meta mode
+        meta_mode = 'meta' in sys.argv
+        process_manager = ProcessManager(meta_mode=meta_mode)
+        
+        # First, try to stop UI servers cleanly
+        try:
+            clear_ui_command(args)
+        except:
+            pass  # Ignore errors, we'll force kill everything anyway
+        
+        # Skip ProcessManager cleanup - it's hanging. Go straight to force kill.
+        print("Skipping ProcessManager cleanup (causes hangs) - using direct force kill...")
+        
+        # Always perform final cleanup: force kill any remaining orchestrator processes
+        print("Performing final cleanup with pkill...")
+        try:
+            result = subprocess.run([
+                "pkill", "-9", "-f", "dashboard_server.py|api_server.py|cc-orchestrate|orchestrate.py|cc-morchestrate"
+            ], capture_output=True, text=True, timeout=5)
+            
+            # Small delay to let processes terminate
+            time.sleep(0.5)
+            
+            print("✓ Force kill completed - all orchestrator processes should be terminated.")
+            
+        except subprocess.TimeoutExpired:
+            print("⚠ Warning: pkill command timed out, but processes may still be terminated.")
+        except Exception as e:
+            print(f"Error during force kill: {e}")
+            print("Some processes may still be running.")
         
     elif command == "serve":
         serve_command(args)

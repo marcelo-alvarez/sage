@@ -12,7 +12,7 @@ const API_CONFIG = {
         status: '/api/status',
         gateDecision: '/api/gate-decision'
     },
-    timeout: 10000 // 10 seconds
+    timeout: 30000 // 30 seconds
 };
 
 // Valid decision types for gate operations
@@ -76,7 +76,7 @@ async function updateStatus(mode = 'regular') {
         // Handle different error types
         if (error.name === 'AbortError') {
             return {
-                error: 'Request timeout - API did not respond within 10 seconds',
+                error: 'Request timeout - API did not respond within 30 seconds',
                 code: 408
             };
         } else if (error.name === 'TypeError' && error.message.includes('fetch')) {
@@ -171,7 +171,7 @@ async function makeDecision(decisionType, options = {}) {
         // Handle different error types
         if (error.name === 'AbortError') {
             return {
-                error: 'Request timeout - API did not respond within 10 seconds',
+                error: 'Request timeout - API did not respond within 30 seconds',
                 code: 408
             };
         } else if (error.name === 'TypeError' && error.message.includes('fetch')) {
