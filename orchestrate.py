@@ -23,6 +23,7 @@ import signal
 import threading
 import urllib.request
 import urllib.error
+from log_streamer import LogStreamer, should_stream_logs
 from workflow_status import StatusReader, get_workflow_status
 from process_manager import ProcessManager
 from orchestrator_logger import OrchestratorLogger
@@ -767,21 +768,14 @@ class AgentExecutor:
         start_log = f"\n## {timestamp} - {agent_type.upper()} Agent Session\n\n"
         task_header = f"---\nTASK: {task_for_header}\n---\n\n"
         
-        # Add session context to help agents avoid redundant work
-        context_hint = self._generate_session_context_hint(agent_type)
-        
         if log_file.exists():
             with open(log_file, 'a') as f:
                 f.write(start_log)
                 f.write(task_header)
-                if context_hint:
-                    f.write(context_hint)
         else:
             with open(log_file, 'w') as f:
                 f.write(start_log)
                 f.write(task_header)
-                if context_hint:
-                    f.write(context_hint)
         
         try:
             result_process = subprocess.run(
@@ -827,11 +821,6 @@ class AgentExecutor:
                     self._append_scribe_to_orchestrator_log()
                     self._append_scribe_to_sage()
                 
-                # Update session context after successful agent completion
-                self._update_session_context(agent_type)
-                
-                # Save session context to persistent file
-                self._save_session_context()
                 
                 # Ensure required report file exists (fallback creation if agent didn't create it)
                 self._ensure_agent_report_file(agent_type)
@@ -1019,91 +1008,9 @@ class AgentExecutor:
         sage_file.write_text(new_sage_content)
         print(f"✓ Scribe discoveries appended to {sage_file.name}")
 
-    def _generate_session_context_hint(self, agent_type):
-        """Generate context hint to help agents avoid redundant work"""
-        context_lines = []
-        
-        if self.orchestrator.session_context["files_read"]:
-            files_list = list(self.orchestrator.session_context["files_read"])[:5]  # Show max 5
-            context_lines.append(f"Already read files: {', '.join(files_list)}")
-        
-        if self.orchestrator.session_context["analysis_done"]:
-            analysis_list = list(self.orchestrator.session_context["analysis_done"])[:3]  # Show max 3
-            context_lines.append(f"Already analyzed: {', '.join(analysis_list)}")
-            
-        if self.orchestrator.session_context["patterns_found"]:
-            patterns_list = list(self.orchestrator.session_context["patterns_found"])[:3]  # Show max 3  
-            context_lines.append(f"Known patterns: {', '.join(patterns_list)}")
-            
-        if self.orchestrator.session_context["failed_approaches"]:
-            failures = self.orchestrator.session_context["failed_approaches"][-3:]  # Show last 3
-            context_lines.append(f"Failed approaches: {', '.join(failures)}")
-        
-        if context_lines:
-            return "SESSION EFFICIENCY HINT: " + "; ".join(context_lines) + "\n\n"
-        return ""
     
-    def _update_session_context(self, agent_type):
-        """Update session context based on agent execution"""
-        # Track that this agent type completed successfully
-        self.orchestrator.session_context["analysis_done"].add(agent_type)
-        
-        # For specific agent types, track their typical work products
-        if agent_type == "explorer":
-            self.orchestrator.session_context["patterns_found"].add("exploration_complete")
-        elif agent_type == "coder":
-            self.orchestrator.session_context["patterns_found"].add("implementation_complete")
-        elif agent_type == "verifier":  
-            self.orchestrator.session_context["patterns_found"].add("verification_complete")
 
-    def _save_session_context(self):
-        """Save session context to persistent file for reuse across runs"""
-        try:
-            context_file = self.orchestrator.claude_dir / "session-context.json"
-            
-            # Convert sets to lists for JSON serialization
-            serializable_context = {
-                "files_read": list(self.orchestrator.session_context["files_read"]),
-                "analysis_done": list(self.orchestrator.session_context["analysis_done"]),
-                "patterns_found": list(self.orchestrator.session_context["patterns_found"]),
-                "failed_approaches": self.orchestrator.session_context["failed_approaches"]  # Already a list
-            }
-            
-            # Ensure the directory exists
-            context_file.parent.mkdir(parents=True, exist_ok=True)
-            
-            # Write context to file
-            with open(context_file, 'w') as f:
-                json.dump(serializable_context, f, indent=2)
-                
-        except Exception as e:
-            # Don't let persistence failures break the agent - just log and continue
-            print(f"Warning: Failed to save session context: {e}")
 
-    def _load_session_context(self):
-        """Load session context from persistent file if it exists"""
-        try:
-            context_file = self.orchestrator.claude_dir / "session-context.json"
-            
-            if context_file.exists():
-                with open(context_file, 'r') as f:
-                    loaded_context = json.load(f)
-                
-                # Convert lists back to sets and merge with existing context
-                self.orchestrator.session_context["files_read"].update(set(loaded_context.get("files_read", [])))
-                self.orchestrator.session_context["analysis_done"].update(set(loaded_context.get("analysis_done", [])))
-                self.orchestrator.session_context["patterns_found"].update(set(loaded_context.get("patterns_found", [])))
-                
-                # Merge failed approaches lists
-                existing_failures = self.orchestrator.session_context["failed_approaches"]
-                loaded_failures = loaded_context.get("failed_approaches", [])
-                self.orchestrator.session_context["failed_approaches"] = existing_failures + [
-                    failure for failure in loaded_failures if failure not in existing_failures
-                ]
-                
-        except Exception as e:
-            # Don't let loading failures break initialization - just log and continue
-            print(f"Warning: Failed to load session context: {e}")
 
     def _ensure_agent_report_file(self, agent_type):
         """Ensure required report file exists for agent, creating fallback if missing"""
@@ -1655,19 +1562,11 @@ class ClaudeCodeOrchestrator:
         # Initialize agent factory with configuration
         self.agent_factory = AgentFactory(self, self.agent_config)
         
-        # Session-based context to avoid redundant work
-        self.session_context = {
-            "files_read": set(),          # Track files already read this session
-            "analysis_done": set(),       # Track analysis already performed
-            "patterns_found": set(),      # Track patterns/solutions discovered
-            "failed_approaches": []       # Track approaches that failed
-        }
+        # Initialize log streaming
+        self.current_log_streamer = None
         
         # Initialize agent executor for headless/interactive mode execution
         self.agent_executor = AgentExecutor(self, headless=self.headless)
-        
-        # Load persistent session context if available
-        self.agent_executor._load_session_context()
         
         # Dashboard is initialized through AgentConfig if enabled
         self.dashboard = self.agent_config.dashboard
@@ -1690,6 +1589,9 @@ class ClaudeCodeOrchestrator:
         """Install signal handlers for clean shutdown"""
         def signal_handler(sig, frame):
             print(f"\nReceived signal {sig}. Cleaning up processes...")
+            # Stop any active log streaming
+            self._stop_log_streaming()
+            # Clean up all processes
             self.process_manager.cleanup_all_processes()
             sys.exit(0)
         
@@ -2309,8 +2211,9 @@ CRITICAL REQUIREMENTS:
             print()
     
     def _show_agent_progress(self, agent_type, status="running"):
-        """Show clean progress indicator for current agent"""
+        """Show clean progress indicator for current agent with optional log streaming"""
         debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+        streaming_enabled = should_stream_logs()
         
         if not debug_mode:
             agent_display = {
@@ -2323,15 +2226,42 @@ CRITICAL REQUIREMENTS:
             
             if agent_type in agent_display:
                 if status == "running":
-                    print(f"{agent_display[agent_type]}...")
+                    if streaming_enabled:
+                        print(f"{agent_display[agent_type]}:")
+                        # Start log streaming for this agent
+                        self._start_log_streaming(agent_type)
+                    else:
+                        print(f"{agent_display[agent_type]}...")
                 elif status == "complete":
+                    # Stop any active log streaming
+                    self._stop_log_streaming()
                     print(f"✓ {agent_display[agent_type]} complete")
                 elif status == "failed":
+                    # Stop any active log streaming
+                    self._stop_log_streaming()
                     print(f"✗ {agent_display[agent_type]} failed")
         
         # Update status file to reflect current agent state
         if status == "running":
             self._update_status_file_with_running_agent(agent_type)
+    
+    def _start_log_streaming(self, agent_type):
+        """Start streaming log entries for the specified agent"""
+        # Stop any existing streaming first
+        self._stop_log_streaming()
+        
+        # Determine log file path
+        log_file_path = self.outputs_dir / f"{agent_type}-log.md"
+        
+        # Create and start new log streamer
+        self.current_log_streamer = LogStreamer(log_file_path, agent_type)
+        self.current_log_streamer.start_streaming()
+    
+    def _stop_log_streaming(self):
+        """Stop any active log streaming"""
+        if self.current_log_streamer and self.current_log_streamer.is_active:
+            self.current_log_streamer.stop_streaming_now()
+            self.current_log_streamer = None
 
     def _show_verification_status(self):
         """Show verification pass/fail status"""
@@ -2911,7 +2841,7 @@ CRITICAL REQUIREMENTS:
         self.tasks_file.write_text('\n'.join(lines))
 
     def status(self):
-        """Show current orchestration status by writing to file and commanding display"""
+        """Show current orchestration status"""
         
         status_info = "# Orchestration Status\n\n"
         
@@ -2937,8 +2867,10 @@ CRITICAL REQUIREMENTS:
         if current_task:
             status_info += "\nCurrent task: " + current_task + "\n"
             
-        # Write and display status
-        self._write_and_display(status_info, "current-status.md", "status")
+        # Write status to file and display directly
+        status_filepath = self.outputs_dir / "current-status.md"
+        status_filepath.write_text(status_info)
+        print(status_info.strip())
 
     def _update_status_file(self):
         """Update current-status.md file immediately without displaying"""

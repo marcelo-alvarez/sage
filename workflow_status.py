@@ -7,7 +7,6 @@ Provides consistent workflow state reading and parsing for both CLI and web UI
 import os
 import re
 import threading
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
@@ -24,18 +23,12 @@ class StatusReader:
         }
         # Use provided project_root or fall back to current working directory
         self.project_root = project_root if project_root is not None else Path(os.getcwd())
-        # Thread pool for file operations
-        self._file_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix='StatusReader')
-        # File lock for thread-safe operations
+        # File lock for thread-safe operations  
         self._file_lock = threading.RLock()
 
     def __del__(self):
-        """Clean up thread pool on destruction"""
-        try:
-            if hasattr(self, '_file_executor'):
-                self._file_executor.shutdown(wait=False)
-        except:
-            pass
+        """Clean up resources on destruction"""
+        pass
 
     def _get_current_mode(self) -> str:
         """Detect current mode by checking for .agent-outputs-meta directory existence"""
@@ -56,24 +49,15 @@ class StatusReader:
 
     def _read_file_safely(self, file_path: Path, encoding='utf-8') -> str:
         """Thread-safe file reading with proper error handling"""
-        def _read_file():
-            with self._file_lock:
-                try:
-                    if not file_path.exists():
-                        return None
-                    with open(file_path, 'r', encoding=encoding) as f:
-                        return f.read()
-                except Exception as e:
-                    print(f"[StatusReader] Error reading file {file_path}: {e}")
-                    return None
-        
-        # Execute file read in thread pool
-        future = self._file_executor.submit(_read_file)
+        # Use direct file read instead of ThreadPoolExecutor to avoid deadlocks
+        # when multiple API servers are competing for resources
         try:
-            # Timeout after 10 seconds to prevent blocking
-            return future.result(timeout=10.0)
+            if not file_path.exists():
+                return None
+            with open(file_path, 'r', encoding=encoding) as f:
+                return f.read()
         except Exception as e:
-            print(f"[StatusReader] Thread pool read timeout for {file_path}: {e}")
+            print(f"[StatusReader] Error reading file {file_path}: {e}")
             return None
         
     def read_status(self, mode=None):
@@ -330,6 +314,7 @@ class StatusReader:
             "changes.md": (outputs_dir / "changes.md").exists(),
             "orchestrator-log.md": (outputs_dir / "orchestrator-log.md").exists(),
             "verification.md": (outputs_dir / "verification.md").exists(),
+            "scribe.md": (outputs_dir / "scribe.md").exists(),
             "completion-approved.md": (outputs_dir / "completion-approved.md").exists()
         }
     
