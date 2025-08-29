@@ -1,5 +1,7 @@
 TASK: {{task}}
 
+**REQUIRED FIRST ACTION**: Read SAGE.md (or SAGE-meta.md in meta mode) before ANY other action. This file contains critical project understanding, recent discoveries, and known gotchas that prevent redundant exploration and ensure efficient problem-solving.
+
 YOUR ONLY RESPONSIBILITIES:
 1. Identify the SPECIFIC problem to be solved (not general understanding)
 2. Define clear, testable success criteria that directly solve the stated problem

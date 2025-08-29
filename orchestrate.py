@@ -25,57 +25,7 @@ import urllib.request
 import urllib.error
 from workflow_status import StatusReader, get_workflow_status
 from process_manager import ProcessManager
-
-
-class OrchestratorLogger:
-    """Unified logging system for all orchestrator components"""
-    
-    def __init__(self, component_name: str, log_dir: Path = None):
-        self.component_name = component_name
-        self.log_dir = log_dir or Path.cwd()
-        self.log_file = self.log_dir / f"{component_name}.log"
-        
-        # Ensure log directory exists
-        self.log_dir.mkdir(exist_ok=True)
-        
-        # Initialize log file with startup message
-        self._write_log(f"=== {component_name.upper()} STARTED ===")
-    
-    def _write_log(self, message: str, level: str = "INFO"):
-        """Write message to log file with timestamp"""
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        log_entry = f"[{timestamp}] [{level}] {message}\n"
-        
-        try:
-            with open(self.log_file, 'a', encoding='utf-8') as f:
-                f.write(log_entry)
-        except Exception as e:
-            # Fallback to stderr if log file writing fails
-            print(f"Log write failed: {e}", file=sys.stderr)
-    
-    def info(self, message: str):
-        """Log info message"""
-        self._write_log(message, "INFO")
-        print(f"[{self.component_name}] {message}")
-    
-    def error(self, message: str):
-        """Log error message"""
-        self._write_log(message, "ERROR")
-        print(f"[{self.component_name}] ERROR: {message}", file=sys.stderr)
-    
-    def warning(self, message: str):
-        """Log warning message"""
-        self._write_log(message, "WARNING")
-        print(f"[{self.component_name}] WARNING: {message}")
-    
-    def debug(self, message: str):
-        """Log debug message"""
-        self._write_log(message, "DEBUG")
-        print(f"[{self.component_name}] DEBUG: {message}")
-    
-    def shutdown(self):
-        """Log shutdown message"""
-        self._write_log(f"=== {self.component_name.upper()} SHUTDOWN ===")
+from orchestrator_logger import OrchestratorLogger
 
 
 def find_available_port(start_port: int, max_attempts: int = 20) -> int:
@@ -817,14 +767,21 @@ class AgentExecutor:
         start_log = f"\n## {timestamp} - {agent_type.upper()} Agent Session\n\n"
         task_header = f"---\nTASK: {task_for_header}\n---\n\n"
         
+        # Add session context to help agents avoid redundant work
+        context_hint = self._generate_session_context_hint(agent_type)
+        
         if log_file.exists():
             with open(log_file, 'a') as f:
                 f.write(start_log)
                 f.write(task_header)
+                if context_hint:
+                    f.write(context_hint)
         else:
             with open(log_file, 'w') as f:
                 f.write(start_log)
                 f.write(task_header)
+                if context_hint:
+                    f.write(context_hint)
         
         try:
             result_process = subprocess.run(
@@ -865,9 +822,16 @@ class AgentExecutor:
                 # Update status file immediately when agent completes
                 self.orchestrator._update_status_file()
                 
-                # Special handling for Scribe: append scribe.md to orchestrator-log.md
+                # Special handling for Scribe: append scribe.md to orchestrator-log.md and SAGE files
                 if agent_type == "scribe":
                     self._append_scribe_to_orchestrator_log()
+                    self._append_scribe_to_sage()
+                
+                # Update session context after successful agent completion
+                self._update_session_context(agent_type)
+                
+                # Save session context to persistent file
+                self._save_session_context()
                 
                 return f"✅ {agent_type.upper()} completed successfully"
             else:
@@ -947,6 +911,196 @@ class AgentExecutor:
                 f.write(scribe_content)
                 
             print(f"✓ Scribe content appended to {orchestrator_log.name}")
+
+    def _append_scribe_to_sage(self):
+        """Append scribe discoveries to SAGE.md or SAGE-meta.md with timestamp and entry management"""
+        scribe_file = self.outputs_dir / "scribe.md"
+        
+        # Determine which SAGE file to use based on meta mode
+        sage_filename = "SAGE-meta.md" if 'meta' in sys.argv else "SAGE.md"
+        sage_file = Path(sage_filename)  # Root project directory
+        
+        if not scribe_file.exists():
+            return
+        
+        scribe_content = scribe_file.read_text()
+        
+        # Extract discovery entries from scribe content
+        # Look for lines that start with "Discovery:" 
+        discovery_lines = []
+        for line in scribe_content.splitlines():
+            line = line.strip()
+            if line.startswith("Discovery:"):
+                discovery_lines.append(line)
+        
+        if not discovery_lines:
+            return
+        
+        # Read current SAGE file or create default if doesn't exist
+        if sage_file.exists():
+            sage_content = sage_file.read_text()
+        else:
+            # Create minimal SAGE structure if file doesn't exist
+            mode_suffix = " (Meta Mode)" if 'meta' in sys.argv else ""
+            sage_content = f"""# SAGE{"-META" if 'meta' in sys.argv else ""} - Project Understanding Memory{mode_suffix}
+
+## Recent Discoveries
+
+*Last 20 timestamped discoveries about the system (most recent first):*
+
+"""
+        
+        # Find Recent Discoveries section
+        lines = sage_content.split('\n')
+        discoveries_start = -1
+        discoveries_end = len(lines)
+        
+        for i, line in enumerate(lines):
+            if "## Recent Discoveries" in line:
+                discoveries_start = i
+                # Find the end of discoveries section (next ## header or end of file)
+                for j in range(i + 1, len(lines)):
+                    if lines[j].startswith("## ") and "Recent Discoveries" not in lines[j]:
+                        discoveries_end = j
+                        break
+                break
+        
+        if discoveries_start == -1:
+            # If no Recent Discoveries section found, add it at the end
+            sage_content += "\n## Recent Discoveries\n\n*Last 20 timestamped discoveries about the system (most recent first):*\n\n"
+            discoveries_start = len(sage_content.split('\n')) - 3
+            discoveries_end = len(sage_content.split('\n'))
+            lines = sage_content.split('\n')
+        
+        # Extract existing discovery entries (numbered entries starting with digit and period)
+        existing_entries = []
+        for i in range(discoveries_start + 1, discoveries_end):
+            if i < len(lines):
+                line = lines[i].strip()
+                if re.match(r'^\d+\.\s+\*\*\[', line):  # Matches format: "1. **[timestamp]** content"
+                    existing_entries.append(line)
+        
+        # Create new timestamped entries
+        current_time = datetime.now()
+        timestamp_str = current_time.strftime("%Y-%m-%d %H:%M")
+        
+        new_entries = []
+        for discovery in discovery_lines:
+            # Remove "Discovery:" prefix and clean up
+            discovery_text = discovery.replace("Discovery:", "").strip()
+            formatted_entry = f"**[{timestamp_str}]** {discovery_text}"
+            new_entries.append(formatted_entry)
+        
+        # Combine new and existing entries, with new ones first
+        all_entries = new_entries + existing_entries
+        
+        # Limit to 20 entries
+        all_entries = all_entries[:20]
+        
+        # Rebuild the discoveries section
+        new_discoveries_section = [
+            "## Recent Discoveries",
+            "",
+            "*Last 20 timestamped discoveries about the system (most recent first):*",
+            ""
+        ]
+        
+        for i, entry in enumerate(all_entries, 1):
+            new_discoveries_section.append(f"{i}. {entry}")
+        
+        # Reconstruct the SAGE file
+        new_lines = lines[:discoveries_start] + new_discoveries_section + lines[discoveries_end:]
+        new_sage_content = '\n'.join(new_lines)
+        
+        # Write back to SAGE file
+        sage_file.write_text(new_sage_content)
+        print(f"✓ Scribe discoveries appended to {sage_file.name}")
+
+    def _generate_session_context_hint(self, agent_type):
+        """Generate context hint to help agents avoid redundant work"""
+        context_lines = []
+        
+        if self.orchestrator.session_context["files_read"]:
+            files_list = list(self.orchestrator.session_context["files_read"])[:5]  # Show max 5
+            context_lines.append(f"Already read files: {', '.join(files_list)}")
+        
+        if self.orchestrator.session_context["analysis_done"]:
+            analysis_list = list(self.orchestrator.session_context["analysis_done"])[:3]  # Show max 3
+            context_lines.append(f"Already analyzed: {', '.join(analysis_list)}")
+            
+        if self.orchestrator.session_context["patterns_found"]:
+            patterns_list = list(self.orchestrator.session_context["patterns_found"])[:3]  # Show max 3  
+            context_lines.append(f"Known patterns: {', '.join(patterns_list)}")
+            
+        if self.orchestrator.session_context["failed_approaches"]:
+            failures = self.orchestrator.session_context["failed_approaches"][-3:]  # Show last 3
+            context_lines.append(f"Failed approaches: {', '.join(failures)}")
+        
+        if context_lines:
+            return "SESSION EFFICIENCY HINT: " + "; ".join(context_lines) + "\n\n"
+        return ""
+    
+    def _update_session_context(self, agent_type):
+        """Update session context based on agent execution"""
+        # Track that this agent type completed successfully
+        self.orchestrator.session_context["analysis_done"].add(agent_type)
+        
+        # For specific agent types, track their typical work products
+        if agent_type == "explorer":
+            self.orchestrator.session_context["patterns_found"].add("exploration_complete")
+        elif agent_type == "coder":
+            self.orchestrator.session_context["patterns_found"].add("implementation_complete")
+        elif agent_type == "verifier":  
+            self.orchestrator.session_context["patterns_found"].add("verification_complete")
+
+    def _save_session_context(self):
+        """Save session context to persistent file for reuse across runs"""
+        try:
+            context_file = self.orchestrator.claude_dir / "session-context.json"
+            
+            # Convert sets to lists for JSON serialization
+            serializable_context = {
+                "files_read": list(self.orchestrator.session_context["files_read"]),
+                "analysis_done": list(self.orchestrator.session_context["analysis_done"]),
+                "patterns_found": list(self.orchestrator.session_context["patterns_found"]),
+                "failed_approaches": self.orchestrator.session_context["failed_approaches"]  # Already a list
+            }
+            
+            # Ensure the directory exists
+            context_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Write context to file
+            with open(context_file, 'w') as f:
+                json.dump(serializable_context, f, indent=2)
+                
+        except Exception as e:
+            # Don't let persistence failures break the agent - just log and continue
+            print(f"Warning: Failed to save session context: {e}")
+
+    def _load_session_context(self):
+        """Load session context from persistent file if it exists"""
+        try:
+            context_file = self.orchestrator.claude_dir / "session-context.json"
+            
+            if context_file.exists():
+                with open(context_file, 'r') as f:
+                    loaded_context = json.load(f)
+                
+                # Convert lists back to sets and merge with existing context
+                self.orchestrator.session_context["files_read"].update(set(loaded_context.get("files_read", [])))
+                self.orchestrator.session_context["analysis_done"].update(set(loaded_context.get("analysis_done", [])))
+                self.orchestrator.session_context["patterns_found"].update(set(loaded_context.get("patterns_found", [])))
+                
+                # Merge failed approaches lists
+                existing_failures = self.orchestrator.session_context["failed_approaches"]
+                loaded_failures = loaded_context.get("failed_approaches", [])
+                self.orchestrator.session_context["failed_approaches"] = existing_failures + [
+                    failure for failure in loaded_failures if failure not in existing_failures
+                ]
+                
+        except Exception as e:
+            # Don't let loading failures break initialization - just log and continue
+            print(f"Warning: Failed to load session context: {e}")
 
     def _execute_via_interactive(self, agent_type, instructions):
         """Legacy interactive mode - return instructions unchanged for Claude to execute"""
@@ -1208,8 +1362,19 @@ class ClaudeCodeOrchestrator:
         # Initialize agent factory with configuration
         self.agent_factory = AgentFactory(self, self.agent_config)
         
+        # Session-based context to avoid redundant work
+        self.session_context = {
+            "files_read": set(),          # Track files already read this session
+            "analysis_done": set(),       # Track analysis already performed
+            "patterns_found": set(),      # Track patterns/solutions discovered
+            "failed_approaches": []       # Track approaches that failed
+        }
+        
         # Initialize agent executor for headless/interactive mode execution
         self.agent_executor = AgentExecutor(self, headless=self.headless)
+        
+        # Load persistent session context if available
+        self.agent_executor._load_session_context()
         
         # Dashboard is initialized through AgentConfig if enabled
         self.dashboard = self.agent_config.dashboard
@@ -1294,6 +1459,189 @@ class ClaudeCodeOrchestrator:
         # Generate workflow configuration  
         if not self.workflow_config.config_path.exists():
             self.workflow_config.save_config()
+            
+        # Generate SAGE project understanding files if they don't exist
+        self._ensure_sage_files()
+
+    def _ensure_sage_files(self):
+        """Generate SAGE project understanding files if they don't exist"""
+        # Determine which SAGE file to create based on mode
+        if self.meta_mode:
+            sage_filename = "SAGE-meta.md"
+            sage_template_content = self._get_sage_meta_template()
+        else:
+            sage_filename = "SAGE.md"
+            sage_template_content = self._get_sage_template()
+            
+        # Create SAGE file at project root if it doesn't exist
+        sage_file_path = Path.cwd() / sage_filename
+        if not sage_file_path.exists():
+            sage_file_path.write_text(sage_template_content)
+
+    def _get_sage_template(self):
+        """Get template content for SAGE.md file"""
+        return '''# SAGE - Project Understanding Memory
+
+This file serves as SAGE's persistent working memory for the claude-orchestrator project, containing architectural insights, recent discoveries, and known pitfalls to prevent redundant exploration.
+
+## Architecture Quick Reference
+
+### Core Components
+- **orchestrate.py**: Main orchestrator class (ClaudeCodeOrchestrator) with workflow management, process management, and agent execution
+- **process_manager.py**: ProcessManager class handles system-wide process tracking and cleanup
+- **workflow_status.py**: WorkflowStatus class manages task states and workflow progression
+- **orchestrator_logger.py**: OrchestratorLogger provides consistent logging across all components
+
+### Key Directories
+- **templates/agents/**: Agent-specific templates (explorer, planner, coder, verifier, scribe)
+- **templates/bootstrap/**: Bootstrap templates for project initialization
+- **.claude/**: Working directory with tasks, status, and logs (regular mode)
+- **.claude-meta/**: Working directory for meta mode operations
+- **dashboard/**: Web interface for workflow monitoring and control
+
+### Agent System
+- **Explorer**: Identifies problems and defines success criteria
+- **Planner**: Creates implementation plans based on success criteria
+- **Coder**: Implements changes according to plans
+- **Verifier**: Validates implementations meet success criteria
+- **Scribe**: Updates documentation and knowledge files
+
+### Critical Files
+- **orchestrate.py:2723**: bootstrap_tasks method for project initialization
+- **orchestrate.py:565**: ClaudeCodeOrchestrator session context management
+- **api_server.py**: REST API for dashboard integration (port 8000)
+- **dashboard_server.py**: Web server for dashboard interface (port 5678)
+
+## Recent Discoveries
+
+*Last 20 timestamped discoveries about the system (most recent first):*
+
+1. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+2. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+3. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+4. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+5. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+6. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+7. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+8. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+9. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+10. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+11. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+12. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+13. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+14. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+15. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+16. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+17. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+18. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+19. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+20. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+
+## Known Gotchas
+
+### Critical Rules
+- **NEVER modify files in ~/.claude-orchestrator/** - Changes get overwritten on reinstall
+- **Always use project directory paths** - Avoid installed version references
+- **Meta mode detection**: Use `'meta' in sys.argv` for consistency across all contexts
+- **Process registration**: All background processes must register with ProcessManager
+
+### Common Pitfalls
+- **File path confusion**: Project files vs installed files - always use project directory
+- **Mode inconsistency**: Meta mode detection must be identical in registration and cleanup
+- **Bootstrap timing**: SAGE file creation must happen after .claude directory structure
+- **Template updates**: Explorer template modifications require careful formatting preservation
+- **Success criteria**: Must be objectively testable and directly solve stated problems
+
+### Testing Considerations
+- **Process cleanup**: Verify all processes terminate with 'cc-orchestrate stop'
+- **Mode switching**: Test both regular and meta mode operations separately
+- **Dashboard integration**: Validate status consistency between CLI and web interface
+- **Agent handoffs**: Ensure context preservation between agent executions
+- **Bootstrap flow**: Test project initialization with missing SAGE files
+'''
+
+    def _get_sage_meta_template(self):
+        """Get template content for SAGE-meta.md file"""
+        return '''# SAGE-META - Project Understanding Memory (Meta Mode)
+
+This file serves as SAGE's persistent working memory for meta mode operations in the claude-orchestrator project, containing architectural insights, recent discoveries, and known pitfalls to prevent redundant exploration.
+
+## Architecture Quick Reference
+
+### Core Components
+- **orchestrate.py**: Main orchestrator class (ClaudeCodeOrchestrator) with workflow management, process management, and agent execution
+- **process_manager.py**: ProcessManager class handles system-wide process tracking and cleanup
+- **workflow_status.py**: WorkflowStatus class manages task states and workflow progression
+- **orchestrator_logger.py**: OrchestratorLogger provides consistent logging across all components
+
+### Key Directories
+- **templates/agents/**: Agent-specific templates (explorer, planner, coder, verifier, scribe)
+- **templates/bootstrap/**: Bootstrap templates for project initialization
+- **.claude/**: Working directory with tasks, status, and logs (regular mode)
+- **.claude-meta/**: Working directory for meta mode operations
+- **dashboard/**: Web interface for workflow monitoring and control
+
+### Agent System (Meta Mode Context)
+- **Explorer**: Identifies problems and defines success criteria for meta operations
+- **Planner**: Creates implementation plans for meta-level improvements
+- **Coder**: Implements meta-level changes to orchestrator system
+- **Verifier**: Validates meta-level implementations meet success criteria
+- **Scribe**: Updates documentation and knowledge files for meta operations
+
+### Critical Files
+- **orchestrate.py:2723**: bootstrap_tasks method for project initialization
+- **orchestrate.py:565**: ClaudeCodeOrchestrator session context management
+- **api_server.py**: REST API for dashboard integration (port 8000)
+- **dashboard_server.py**: Web server for dashboard interface (port 5678)
+
+## Recent Discoveries
+
+*Last 20 timestamped discoveries about meta mode operations (most recent first):*
+
+1. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+2. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+3. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+4. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+5. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+6. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+7. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+8. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+9. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+10. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+11. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+12. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+13. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+14. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+15. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+16. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+17. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+18. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+19. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+20. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent meta discovery entry format
+
+## Known Gotchas
+
+### Critical Rules (Meta Mode Specific)
+- **NEVER modify files in ~/.claude-orchestrator/** - Changes get overwritten on reinstall
+- **Always use project directory paths** - Avoid installed version references in meta operations
+- **Meta mode detection**: Use `'meta' in sys.argv` for consistency across all contexts
+- **Meta mode isolation**: Use .claude-meta/ directory for all meta mode working files
+- **Process registration**: Meta processes must register with ProcessManager using meta_mode=True
+
+### Common Pitfalls (Meta Operations)
+- **File path confusion**: Meta mode must use .claude-meta/ not .claude/ directories
+- **Mode detection timing**: Meta mode flag must be available at ProcessManager initialization
+- **Bootstrap isolation**: Meta mode bootstrap creates .claude-meta structure separately
+- **Template context**: Meta mode templates operate on orchestrator system itself
+- **Success criteria**: Meta operations must not break regular mode functionality
+
+### Testing Considerations (Meta Mode)
+- **Process cleanup**: Meta mode processes must terminate with 'cc-orchestrate stop meta'
+- **Mode isolation**: Meta operations must not interfere with regular mode workflows
+- **Dashboard integration**: Meta mode dashboard operations require separate validation
+- **Agent handoffs**: Meta mode context preservation between agent executions
+- **Bootstrap flow**: Meta mode project initialization with missing SAGE-meta files
+'''
 
     def _display_file_contents(self, filepath, description="file"):
         """Helper method to display file contents without truncation"""
@@ -2486,7 +2834,7 @@ CRITICAL REQUIREMENTS:
                 # Start continue command in background to avoid API timeout
                 import subprocess
                 import sys
-                subprocess.Popen([
+                background_process = subprocess.Popen([
                     sys.executable, __file__, 'continue'
                 ] + (['meta'] if 'meta' in sys.argv else []), 
                 cwd=self.project_root, 
@@ -2494,6 +2842,8 @@ CRITICAL REQUIREMENTS:
                 stderr=subprocess.DEVNULL, 
                 start_new_session=True, 
                 preexec_fn=os.setpgrp)
+                # Register background process with ProcessManager for proper cleanup
+                self.process_manager.register_process('background_continue', background_process)
                 print("Background continue process started")
             else:
                 # In interactive mode, continue to next agent

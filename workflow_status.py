@@ -137,22 +137,31 @@ class StatusReader:
                 if line.startswith(emoji):
                     agent_name = line.replace(emoji, '').strip()
                     
+                    # Clean up agent name by removing status info and file sizes
+                    # Format: "Explorer        complete (2727 bytes)" -> "Explorer"
+                    if ' complete (' in agent_name:
+                        agent_name = agent_name.split(' complete (')[0].strip()
+                    elif ' pending' in agent_name:
+                        agent_name = agent_name.split(' pending')[0].strip()
+                    elif ' running' in agent_name:
+                        agent_name = agent_name.split(' running')[0].strip()
+                    elif ' active' in agent_name:
+                        agent_name = agent_name.split(' active')[0].strip()
+                    
                     # Determine agent type
                     agent_type = 'gate' if 'gate' in agent_name.lower() else 'agent'
                     
                     # Special logic for Completion Gate: check if it should be active
-                    if agent_name == "Completion Gate pending" and status == 'pending':
+                    if agent_name == "Completion Gate" and status == 'pending':
                         # Check if all previous steps are complete
                         if self._is_completion_gate_active(workflow):
                             status = 'in-progress'  # Change to active
-                            agent_name = agent_name.replace(' pending', ' active')
                     
                     # Special logic for Criteria Gate: if User Validation Gate exists or all agents are complete, Criteria Gate should not be active
-                    if agent_name == "Criteria Gate   active":
+                    if agent_name == "Criteria Gate" and status == 'in-progress':
                         if self._has_user_validation_gate(mode):
                             # User Validation supersedes Criteria Gate activity
                             status = 'completed'
-                            agent_name = agent_name.replace(' active', ' complete')
                         else:
                             # Check if all required agents are complete by looking at the original file content
                             required_agents = ['Explorer', 'Planner', 'Coder', 'Verifier']
@@ -173,7 +182,6 @@ class StatusReader:
                             if all_agents_complete:
                                 # If all agents are complete, Criteria Gate should be complete and Completion Gate should be active
                                 status = 'completed'
-                                agent_name = agent_name.replace(' active', ' complete')
                     
                     # Add to workflow
                     workflow_item = {

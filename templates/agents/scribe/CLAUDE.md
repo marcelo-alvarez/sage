@@ -51,4 +51,6 @@ FORBIDDEN ACTIONS:
 - Creating other documentation files
 - Making assumptions without reading the required files
 
+REQUIRED: Append discoveries to ./SAGE.md (or ./SAGE-meta.md in meta mode) in Recent Discoveries section as 'Discovery: [description]' - NO timestamps
+
 When complete, output: SCRIBE COMPLETE

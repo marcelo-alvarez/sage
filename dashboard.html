@@ -23,14 +23,6 @@
             --icon-color: rgba(255, 255, 255, 0.8);
         }
         
-        /* Cyber Techno font declaration */
-        @font-face {
-            font-family: 'CyberTechno';
-            src: url('./fonts/cyber-techno.otf') format('opentype');
-            font-weight: normal;
-            font-style: normal;
-            font-display: swap;
-        }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/markdown-it/dist/markdown-it.min.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/github-markdown-css@5.0.0/github-markdown-light.css">
@@ -2045,91 +2037,9 @@
 
 
     <script>
-        // Mock data structures matching .agent-outputs/ file formats
-        const mockStatusData = {
-            regular: {
-                currentTask: "Create dashboard HTML interface implementing the visual workflow progress design",
-                workflow: [
-                    { name: "Explorer", status: "completed", type: "agent", icon: "search" },
-                    { name: "Criteria Gate", status: "completed", type: "gate", icon: "diamond" },
-                    { name: "Planner", status: "completed", type: "agent", icon: "clipboard" },
-                    { name: "Coder", status: "in-progress", type: "agent", icon: "code" },
-                    { name: "Verifier", status: "pending", type: "agent", icon: "check-circle" },
-                    { name: "Scribe", status: "pending", type: "agent", icon: "file-text" },
-                    { name: "Completion Gate", status: "pending", type: "gate", icon: "octagon" }
-                ],
-                agents: [
-                    {
-                        name: "Explorer",
-                        status: "completed",
-                        description: "Analyzed task requirements and identified patterns, dependencies, and constraints for the dashboard implementation."
-                    },
-                    {
-                        name: "Planner",
-                        status: "completed",
-                        description: "Created detailed implementation plan with step-by-step approach and success criteria."
-                    },
-                    {
-                        name: "Coder",
-                        status: "in-progress",
-                        description: "Currently implementing the dashboard HTML interface with embedded CSS and JavaScript."
-                    },
-                    {
-                        name: "Verifier",
-                        status: "pending",
-                        description: "Will test the dashboard functionality and verify all success criteria are met."
-                    },
-                    {
-                        name: "Scribe",
-                        status: "pending",
-                        description: "Will document the implementation and create usage instructions."
-                    }
-                ]
-            },
-            meta: {
-                currentTask: "Meta-mode: Create dashboard HTML interface implementing the visual workflow progress design",
-                workflow: [
-                    { name: "Explorer", status: "completed", type: "agent", icon: "search" },
-                    { name: "Criteria Gate", status: "completed", type: "gate", icon: "diamond" },
-                    { name: "Planner", status: "completed", type: "agent", icon: "clipboard" },
-                    { name: "Coder", status: "in-progress", type: "agent", icon: "code" },
-                    { name: "Verifier", status: "pending", type: "agent", icon: "check-circle" },
-                    { name: "Scribe", status: "pending", type: "agent", icon: "file-text" },
-                    { name: "Completion Gate", status: "pending", type: "gate", icon: "octagon" }
-                ],
-                agents: [
-                    {
-                        name: "Explorer",
-                        status: "completed",
-                        description: "Analyzed task requirements and identified patterns, dependencies, and constraints for the dashboard implementation in meta mode."
-                    },
-                    {
-                        name: "Planner",
-                        status: "completed",
-                        description: "Created detailed implementation plan with step-by-step approach and success criteria in meta mode."
-                    },
-                    {
-                        name: "Coder",
-                        status: "in-progress",
-                        description: "Currently implementing the dashboard HTML interface with embedded CSS and JavaScript in meta mode."
-                    },
-                    {
-                        name: "Verifier",
-                        status: "pending",
-                        description: "Will test the dashboard functionality and verify all success criteria are met in meta mode."
-                    },
-                    {
-                        name: "Scribe",
-                        status: "pending",
-                        description: "Will document the implementation and create usage instructions in meta mode."
-                    }
-                ]
-            }
-        };
 
         let currentMode = checkMetaModeParameter() ? 'meta' : 'regular';
         let unsupervisedMode = false; // Will be loaded from backend
-        let simulationStep = 0;
         let realTimeData = null;
         let useRealAPI = true;
         let currentGateState = null;
@@ -2175,15 +2085,12 @@
                     const ageMinutes = (now - cacheTime) / (1000 * 60);
                     
                     if (ageMinutes < CACHE_EXPIRY_MINUTES) {
-                        console.log(`Using cached API port: ${data.port}`);
                         return data.port;
                     } else {
                         localStorage.removeItem('orchestrator_api_port');
-                        console.log('Cached port expired, will rediscover');
                     }
                 }
             } catch (e) {
-                console.log('Error reading cached port:', e.message);
             }
             return null;
         }
@@ -2196,7 +2103,6 @@
                     timestamp: new Date().toISOString()
                 };
                 localStorage.setItem('orchestrator_api_port', JSON.stringify(data));
-                console.log(`Cached API port: ${port}`);
             } catch (e) {
                 console.log('Error caching port:', e.message);
             }
@@ -2314,23 +2220,16 @@
             // Step 1: Check URL parameter for mock mode
             if (checkMockParameter()) {
                 console.log('Mock mode requested via URL parameter');
-                skipAPIDiscovery();
+                showNoAPIState();
                 // File viewer removed - using log modals instead
                 return;
             }
             
-            // Step 2: Check if API is available
-            if (forceMockMode) {
-                console.log('API unavailable, showing no API state');
-                showNoAPIState();
-                return;
-            }
-            
-            // Step 3: Clear cache and force fresh discovery to ensure we try 8000 first
+            // Step 2: Clear cache and force fresh discovery to ensure we try 8000 first
             clearCachedPort(); // Always start fresh
             console.log('Cleared cache, will discover API server starting with port 8000');
             
-            // Step 4: Test cached/existing port
+            // Step 3: Test cached/existing port
             if (discoveredAPIPort) {
                 try {
                     const response = await fetch(`http://localhost:${discoveredAPIPort}/api/status`, {
@@ -2353,7 +2252,7 @@
                 }
             }
             
-            // Step 5: Only discover as last resort
+            // Step 4: Only discover as last resort
             try {
                 discoveredAPIPort = await discoverAPIPort();
                 console.log(`Using discovered API server on port ${discoveredAPIPort}`);
@@ -2445,9 +2344,6 @@
             
             // Check for workflow completion
             if (realTimeData.workflowComplete) {
-                console.log('[DEBUG] Workflow completion detected!', realTimeData);
-                console.log('[DEBUG] Mode:', currentMode);
-                console.log('[DEBUG] Checklist should be complete:', realTimeData.workflowComplete);
                 // Temporarily disabled: showWorkflowCompletion();
             }
         }
@@ -2672,7 +2568,6 @@
         
         // Execute command with debouncing and state management
         async function executeCommand(command) {
-            console.log(`[DEBUG] executeCommand called with: ${command}`);
             
             // Reset exit flag when continue is executed
             if (command === 'continue') {
@@ -2682,30 +2577,24 @@
             // Debounce rapid clicks
             const now = Date.now();
             if (buttonDebounce[command] && now - buttonDebounce[command] < 1000) {
-                console.log(`[DEBUG] Debounced rapid click for ${command}`);
                 return;
             }
             buttonDebounce[command] = now;
             
             // Don't allow concurrent operations except status
             if (currentOperation && currentOperation !== 'idle' && command !== 'status') {
-                console.log(`[DEBUG] Operation in progress: ${currentOperation}, blocking ${command}`);
                 showCommandStatus(`Operation in progress: ${currentOperation}`, 'error');
                 return;
             }
             
             try {
-                console.log(`[DEBUG] Setting operation state for: ${command}`);
                 // Update UI state
                 setOperationState(command);
                 
-                console.log(`[DEBUG] About to call callExecuteAPI for: ${command}`);
                 // Execute the command via API
                 const result = await callExecuteAPI(command);
-                console.log(`[DEBUG] callExecuteAPI returned:`, result);
                 
                 if (result.success) {
-                    console.log(`[DEBUG] Command ${command} succeeded`);
                     showCommandStatus(result.message || `${command} completed successfully`, 'success');
                     
                     // Update workflow state if provided
@@ -2726,11 +2615,10 @@
                 }
                 
             } catch (error) {
-                console.error(`[DEBUG] Error executing ${command}:`, error);
+                console.error(`Error executing ${command}:`, error);
                 showCommandStatus(`Error: ${error.message}`, 'error');
                 throw error;
             } finally {
-                console.log(`[DEBUG] executeCommand finally block for: ${command}`);
                 // Reset operation state after completion (except for long-running operations)
                 if (command === 'status') {
                     clearOperationState();
@@ -2745,18 +2633,15 @@
         
         // Call the execute API endpoint
         async function callExecuteAPI(command) {
-            console.log(`[DEBUG] callExecuteAPI called with command: ${command}`);
-            console.log(`[DEBUG] forceMockMode: ${forceMockMode}, useRealAPI: ${useRealAPI}, discoveredAPIPort: ${discoveredAPIPort}`);
             
             if (forceMockMode || !useRealAPI || !discoveredAPIPort) {
-                console.log(`[DEBUG] Using mock mode`);
                 // Mock implementation for testing
                 return {
                     success: true,
                     message: `Mock: ${command} executed`,
                     command: command,
                     mode: currentMode,
-                    workflow_state: mockStatusData[currentMode]
+                    workflow_state: null
                 };
             }
             
@@ -2766,8 +2651,6 @@
                 mode: currentMode
             };
             
-            console.log(`[DEBUG] Making POST request to: ${apiUrl}`);
-            console.log(`[DEBUG] Request body:`, requestBody);
             
             const response = await fetch(apiUrl, {
                 method: 'POST',
@@ -2778,16 +2661,13 @@
                 signal: AbortSignal.timeout(30000) // 30 second timeout
             });
             
-            console.log(`[DEBUG] Response received - status: ${response.status}, ok: ${response.ok}`);
             
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));
-                console.log(`[DEBUG] Error response:`, errorData);
                 throw new Error(errorData.error || `API responded with status ${response.status}`);
             }
             
             const result = await response.json();
-            console.log(`[DEBUG] Success response:`, result);
             return result;
         }
         
@@ -3138,7 +3018,15 @@
         // Render workflow timeline
         function renderWorkflowTimeline(workflowData) {
             const timeline = document.getElementById('workflowTimeline');
-            const workflow = workflowData || mockStatusData[currentMode].workflow;
+            const workflow = workflowData || [
+                { name: "Explorer", status: "pending", type: "agent", icon: "search" },
+                { name: "Criteria Gate", status: "pending", type: "gate", icon: "diamond" },
+                { name: "Planner", status: "pending", type: "agent", icon: "clipboard" },
+                { name: "Coder", status: "pending", type: "agent", icon: "code" },
+                { name: "Verifier", status: "pending", type: "agent", icon: "check-circle" },
+                { name: "Scribe", status: "pending", type: "agent", icon: "file-text" },
+                { name: "Completion Gate", status: "pending", type: "gate", icon: "octagon" }
+            ];
             
             // Fix icons in the workflow data
             if (workflow) {
@@ -3296,7 +3184,7 @@
         let fullTaskText = '';
         
         function updateCurrentTask(taskText) {
-            const currentTask = taskText || (useRealAPI ? 'No current task available' : mockStatusData[currentMode].currentTask);
+            const currentTask = taskText || 'No current task available';
             fullTaskText = currentTask; // Store the full text
             
             // Debug: Always log full task text to verify what we're receiving
@@ -3367,36 +3255,6 @@
             await refreshStatus();
         }
 
-        // Simulate progress for demonstration
-        function simulateProgress() {
-            const workflow = mockStatusData[currentMode].workflow;
-            const agents = mockStatusData[currentMode].agents;
-            
-            // Find first non-completed item and advance it
-            for (let i = 0; i < workflow.length; i++) {
-                if (workflow[i].status === 'pending') {
-                    workflow[i].status = 'in-progress';
-                    break;
-                } else if (workflow[i].status === 'in-progress') {
-                    workflow[i].status = 'completed';
-                    // Start next item if it exists and is an agent
-                    if (i + 1 < workflow.length && workflow[i + 1].type === 'agent') {
-                        workflow[i + 1].status = 'in-progress';
-                    }
-                    break;
-                }
-            }
-            
-            // Update corresponding agent status
-            for (let agent of agents) {
-                const workflowItem = workflow.find(w => w.name === agent.name);
-                if (workflowItem) {
-                    agent.status = workflowItem.status;
-                }
-            }
-            
-            initDashboard();
-        }
 
         // Smart auto-refresh (every 30 seconds, but only if connection is healthy)
         setInterval(() => {
@@ -3412,7 +3270,15 @@
 
         // Render gate decision controls
         function renderGateControls(workflowData) {
-            const workflow = workflowData || mockStatusData[currentMode].workflow;
+            const workflow = workflowData || [
+                { name: "Explorer", status: "pending", type: "agent", icon: "search" },
+                { name: "Criteria Gate", status: "pending", type: "gate", icon: "diamond" },
+                { name: "Planner", status: "pending", type: "agent", icon: "clipboard" },
+                { name: "Coder", status: "pending", type: "agent", icon: "code" },
+                { name: "Verifier", status: "pending", type: "agent", icon: "check-circle" },
+                { name: "Scribe", status: "pending", type: "agent", icon: "file-text" },
+                { name: "Completion Gate", status: "pending", type: "gate", icon: "octagon" }
+            ];
             const gateControls = document.getElementById('gateControls');
             const gateTitle = document.getElementById('gateTitle');
             const gateContent = document.getElementById('gateContent');
