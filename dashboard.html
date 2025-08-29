@@ -2036,6 +2036,7 @@
 
 
 
+
     <script>
 
         let currentMode = checkMetaModeParameter() ? 'meta' : 'regular';
@@ -2210,9 +2211,6 @@
                 modeToggle.checked = (currentMode === 'meta');
             }
             
-            // Initialize unsupervised mode
-            await initializeUnsupervisedMode();
-            
             // Initialize meta mode styling
             updateMetaModeStyle();
             clearOperationState();
@@ -2240,6 +2238,8 @@
                         console.log(`Using cached/existing API port: ${discoveredAPIPort}`);
                         useRealAPI = true;
                         await fetchRealStatus();
+                        // Initialize unsupervised mode after successful API connection
+                        await initializeUnsupervisedMode();
                         // File viewer removed - using log modals instead
                         return;
                     } else {
@@ -2258,6 +2258,8 @@
                 console.log(`Using discovered API server on port ${discoveredAPIPort}`);
                 useRealAPI = true;
                 await fetchRealStatus();
+                // Initialize unsupervised mode after successful API connection
+                await initializeUnsupervisedMode();
             } catch (error) {
                 console.warn('API server discovery failed:', error.message);
                 console.log('Dashboard requires API connection');
@@ -2519,23 +2521,32 @@
 
         // Initialize unsupervised mode state
         async function initializeUnsupervisedMode() {
+            // Dashboard always starts with auto-approve OFF - set UI state first
+            unsupervisedMode = false;
+            const unsupervisedToggle = document.getElementById('unsupervisedToggle');
+            if (unsupervisedToggle) {
+                unsupervisedToggle.checked = false;
+            }
+            console.log(`Initialized unsupervised mode: OFF (default) for ${currentMode} mode`);
+            
             if (useRealAPI && discoveredAPIPort) {
                 try {
                     const response = await fetch(`${getAPIBaseURL()}/api/unsupervised-mode?mode=${currentMode}`);
                     if (response.ok) {
                         const data = await response.json();
-                        unsupervisedMode = data.enabled;
-                        const unsupervisedToggle = document.getElementById('unsupervisedToggle');
-                        if (unsupervisedToggle) {
-                            unsupervisedToggle.checked = unsupervisedMode;
+                        // Clean up any existing state via API
+                        if (data.enabled) {
+                            console.log(`Cleaning up existing unsupervised mode for ${currentMode} mode via API - dashboard starts with auto-approve OFF`);
+                            await setUnsupervisedMode(false);
                         }
-                        console.log(`Initialized unsupervised mode: ${unsupervisedMode} for ${currentMode} mode`);
                     } else {
                         console.warn('Failed to get unsupervised mode status');
                     }
                 } catch (error) {
                     console.warn('Error getting unsupervised mode status:', error);
                 }
+            } else {
+                console.log('API not available - unsupervised mode cleanup will rely on manual file removal');
             }
         }
 
@@ -3222,6 +3233,8 @@
                     discoveredAPIPort = await discoverAPIPort();
                     console.log(`Reconnected to API server on port ${discoveredAPIPort}`);
                     useRealAPI = true;
+                    // Initialize unsupervised mode after reconnection
+                    await initializeUnsupervisedMode();
                 } catch (error) {
                     console.log('Still no API server available, using mock data');
                     useRealAPI = false;
@@ -3984,6 +3997,7 @@
             const modal = document.getElementById('agentOptionsModal');
             modal.classList.remove('active');
         }
+
         
         // Handle View Report button click
         function viewAgentReport() {
@@ -4002,16 +4016,9 @@
             const cleanName = cleanStepName(stepName);
             console.log('showStepReport called with stepName:', stepName, 'cleanName:', cleanName);
             
-            // Handle special cases
-            if (cleanName.toLowerCase().includes('criteria gate') || cleanName.toLowerCase().includes('criteria')) {
-                // Show success-criteria.md for criteria gate
-                console.log('Showing criteria report for:', cleanName);
-                await showCriteriaReport();
-            } else {
-                // Show regular agent report for all other steps
-                console.log('Showing regular report for:', cleanName);
-                await showReportModal(stepName);
-            }
+            // Show regular agent report for all steps
+            console.log('Showing regular report for:', cleanName);
+            await showReportModal(stepName);
         }
         
         // Show criteria gate report (success-criteria.md or exploration.md fallback)
@@ -4071,6 +4078,18 @@
                     const agentNameSpan = document.getElementById('reportModalTitleText');
                     const titleIcon = document.getElementById('reportModalIcon');
                     
+                    console.log('Modal elements check:', { 
+                        modal: !!modal, 
+                        reportContent: !!reportContent, 
+                        agentNameSpan: !!agentNameSpan, 
+                        titleIcon: !!titleIcon 
+                    });
+                    
+                    if (!modal) {
+                        console.error('reportModal element not found!');
+                        return;
+                    }
+                    
                     agentNameSpan.textContent = title;
                     if (titleIcon) {
                         titleIcon.setAttribute('data-lucide', 'check-circle');
@@ -4085,12 +4104,15 @@
                         reportContent.textContent = reportText;
                     }
                     
+                    console.log('About to show modal...');
                     modal.classList.add('active');
+                    console.log('Modal classList after add:', modal.classList.toString());
                     
                     // Initialize lucide icons
                     if (window.lucide) {
                         window.lucide.createIcons();
                     }
+                    console.log('Modal should now be visible');
                 } else {
                     console.log('No criteria content found in either file');
                     alert('Success criteria not available yet.');
@@ -4211,7 +4233,8 @@
                 'planner': 'plan.md', 
                 'coder': 'changes.md',
                 'scribe': 'scribe.md',
-                'verifier': 'verification.md'
+                'verifier': 'verification.md',
+                'criteria': 'success-criteria.md'
             };
             
             return agentReportMap[cleanName] || `${cleanName}.md`;
@@ -4655,7 +4678,7 @@
             }
             
             // Show modal immediately
-            modal.classList.add('active');
+            modal.style.display = 'block';
             
             // Show loading state
             if (tasksetLoading) tasksetLoading.style.display = 'block';
@@ -4740,6 +4763,10 @@
         left: 0;
         top: 0;
         width: 100%;
+    }
+    
+    .modal.active {
+        display: block;
         height: 100%;
         overflow: auto;
         background-color: rgba(0, 0, 0, 0.8);
