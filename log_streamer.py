@@ -50,16 +50,12 @@ class LogStreamer:
             return []
     
     def _format_log_line(self, line: str) -> str:
-        """Format log line for terminal display - strip markdown, preserve structure"""
+        """Format log line for terminal display - show all content as-is"""
         line = line.rstrip('\n')
         
-        # Skip empty lines and markdown headers
-        if not line.strip() or line.startswith('##') or line.startswith('---'):
+        # Skip only empty lines
+        if not line.strip():
             return None
-        
-        # Clean up common markdown formatting
-        if line.startswith('# '):
-            line = line[2:]  # Remove header markdown
         
         return line
     

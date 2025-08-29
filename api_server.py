@@ -1190,7 +1190,7 @@ class StatusHandler(BaseHTTPRequestHandler):
             self._log_request(request_id, f"Unsupervised mode status request: {parsed_url.query}")
             
             # Parse query parameters
-            query_params = urllib.parse.parse_qs(parsed_url.query)
+            query_params = parse_qs(parsed_url.query)
             mode = query_params.get('mode', ['regular'])[0]
             
             self._log_request(request_id, f"Checking unsupervised mode for {mode} mode")

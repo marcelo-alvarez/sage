@@ -1677,82 +1677,30 @@ class ClaudeCodeOrchestrator:
         """Get template content for SAGE.md file"""
         return '''# SAGE - Project Understanding Memory
 
-This file serves as SAGE's persistent working memory for the claude-orchestrator project, containing architectural insights, recent discoveries, and known pitfalls to prevent redundant exploration.
+This file serves as SAGE's persistent working memory for this project, containing architectural insights, recent discoveries, and known pitfalls to prevent redundant exploration.
 
 ## Architecture Quick Reference
 
 ### Core Components
-- **orchestrate.py**: Main orchestrator class (ClaudeCodeOrchestrator) with workflow management, process management, and agent execution
-- **process_manager.py**: ProcessManager class handles system-wide process tracking and cleanup
-- **workflow_status.py**: WorkflowStatus class manages task states and workflow progression
-- **orchestrator_logger.py**: OrchestratorLogger provides consistent logging across all components
+*Key classes, modules, and files will be documented here after exploration*
 
 ### Key Directories
-- **templates/agents/**: Agent-specific templates (explorer, planner, coder, verifier, scribe)
-- **templates/bootstrap/**: Bootstrap templates for project initialization
-- **.claude/**: Working directory with tasks, status, and logs (regular mode)
-- **.claude-meta/**: Working directory for meta mode operations
-- **dashboard/**: Web interface for workflow monitoring and control
+*Important project directories and their purposes will be documented here*
 
-### Agent System
-- **Explorer**: Identifies problems and defines success criteria
-- **Planner**: Creates implementation plans based on success criteria
-- **Coder**: Implements changes according to plans
-- **Verifier**: Validates implementations meet success criteria
-- **Scribe**: Updates documentation and knowledge files
-
-### Critical Files
-- **orchestrate.py:2723**: bootstrap_tasks method for project initialization
-- **orchestrate.py:565**: ClaudeCodeOrchestrator session context management
-- **api_server.py**: REST API for dashboard integration (port 8000)
-- **dashboard_server.py**: Web server for dashboard interface (port 5678)
+### Critical Dependencies
+*External libraries, frameworks, and tools that are essential to understand*
 
 ## Recent Discoveries
 
 *Last 20 timestamped discoveries about the system (most recent first):*
 
-1. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
-2. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
-3. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
-4. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
-5. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
-6. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
-7. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
-8. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
-9. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
-10. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
-11. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
-12. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
-13. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
-14. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
-15. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
-16. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
-17. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
-18. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
-19. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
-20. **[YYYY-MM-DD HH:MM:SS]** Placeholder - Recent discovery entry format
+## Known Gotchas & Pitfalls
 
-## Known Gotchas
+*Common mistakes, edge cases, and critical rules to avoid repeated issues*
 
-### Critical Rules
-- **NEVER modify files in ~/.claude-orchestrator/** - Changes get overwritten on reinstall
-- **Always use project directory paths** - Avoid installed version references
-- **Meta mode detection**: Use `'meta' in sys.argv` for consistency across all contexts
-- **Process registration**: All background processes must register with ProcessManager
+## Implementation Patterns
 
-### Common Pitfalls
-- **File path confusion**: Project files vs installed files - always use project directory
-- **Mode inconsistency**: Meta mode detection must be identical in registration and cleanup
-- **Bootstrap timing**: SAGE file creation must happen after .claude directory structure
-- **Template updates**: Explorer template modifications require careful formatting preservation
-- **Success criteria**: Must be objectively testable and directly solve stated problems
-
-### Testing Considerations
-- **Process cleanup**: Verify all processes terminate with 'cc-orchestrate stop'
-- **Mode switching**: Test both regular and meta mode operations separately
-- **Dashboard integration**: Validate status consistency between CLI and web interface
-- **Agent handoffs**: Ensure context preservation between agent executions
-- **Bootstrap flow**: Test project initialization with missing SAGE files
+*Recurring patterns, conventions, and architectural decisions used in this project*
 '''
 
     def _get_sage_meta_template(self):
@@ -2043,6 +1991,13 @@ CRITICAL REQUIREMENTS:
                                 gate_state_file = self.outputs_dir / f"pending-{gate_type}-gate.md"
                                 if gate_state_file.exists():
                                     gate_state_file.unlink()
+                                
+                                # Clean the workflow state for the new task (like CLI does)
+                                self.clean_outputs()
+                                
+                                # Update orchestrator status to reflect the clean state
+                                self._update_status_file()
+                                
                                 return "new_task_created", f"Created fix task: {fix_task}"
                             else:
                                 print("Failed to insert new task. Please try again.")
@@ -3236,7 +3191,10 @@ Continuing to next task in workflow
     def bootstrap_tasks(self):
         """Interactive bootstrap to help users generate initial tasks"""
         
-        bootstrap_instructions = """
+        # Determine the correct directory path based on mode
+        claude_dir_name = self.claude_dir.name  # Will be '.claude' or '.claude-meta'
+        
+        bootstrap_instructions = f"""
 BOOTSTRAP MODE: Generate human-in-the-loop task structure for the project
 
 CRITICAL REQUIREMENTS:
@@ -3249,7 +3207,7 @@ CRITICAL REQUIREMENTS:
 
 FILE STRUCTURE TO CREATE:
 
-## .claude/concept.md
+## {claude_dir_name}/concept.md
 High-level design document that:
 - Describes the overall goal and architecture
 - Defines success criteria for the entire taskset
@@ -3257,7 +3215,7 @@ High-level design document that:
 - Provides context for all tasks
 - Self-contained reference (doesn't reference other files)
 
-## .claude/tasks.md
+## {claude_dir_name}/tasks.md
 Detailed task descriptions where:
 - Each task is a comprehensive single paragraph
 - Tasks frequently reference concept.md for design rationale
@@ -3265,11 +3223,11 @@ Detailed task descriptions where:
 - USER tasks specify exact commands/tests to run
 - Each task ~500-1000 characters for adequate detail
 
-## .claude/tasks-checklist.md
+## {claude_dir_name}/tasks-checklist.md
 Actionable checklist where:
-- Each line is one task (matching tasks.md)
-- Tasks reference both tasks.md and concept.md
-- Format: - [ ] Brief description referencing details in tasks.md and concept in concept.md
+- Each line is one task (matching {claude_dir_name}/tasks.md)
+- Tasks reference both {claude_dir_name}/tasks.md and {claude_dir_name}/concept.md
+- Format: - [ ] Brief description referencing details in {claude_dir_name}/tasks.md and concept in {claude_dir_name}/concept.md
 - USER tasks clearly start with "USER" keyword
 
 TASK STRUCTURE PATTERN:
