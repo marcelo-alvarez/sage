@@ -14,7 +14,13 @@ class OrchestratorLogger:
     
     def __init__(self, component_name: str, log_dir: Path = None):
         self.component_name = component_name
-        self.log_dir = log_dir or Path.cwd()
+        # Default to .sage/ directory in current working directory
+        if log_dir is None:
+            sage_dir = Path.cwd() / ".sage"
+            sage_dir.mkdir(exist_ok=True)
+            self.log_dir = sage_dir
+        else:
+            self.log_dir = log_dir
         self.log_file = self.log_dir / f"{component_name}.log"
         
         # Ensure log directory exists

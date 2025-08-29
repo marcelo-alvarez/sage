@@ -215,6 +215,10 @@ install_orchestrator_runtime() {
         cp "$TEMP_DIR/orchestrator_logger.py" "$runtime_dir/orchestrator_logger.py"
     fi
     
+    if [ -f "$TEMP_DIR/log_streamer.py" ]; then
+        cp "$TEMP_DIR/log_streamer.py" "$runtime_dir/log_streamer.py"
+    fi
+    
     # Copy dashboard server files if they exist
     if [ -f "$TEMP_DIR/dashboard_server.py" ]; then
         cp "$TEMP_DIR/dashboard_server.py" "$runtime_dir/dashboard_server.py"
@@ -314,7 +318,48 @@ install_slash_command() {
     # Build command files from template
     print_info "Building slash command files from template..."
     cd "$TEMP_DIR"
-    ./build-commands.sh
+    
+    # Inline build-commands.sh functionality
+    TEMPLATE_FILE="$TEMP_DIR/orchestrator-commands/orchestrate.md.template"
+    OUTPUT_DIR="$TEMP_DIR/orchestrator-commands"
+    
+    # Check if template exists
+    if [ ! -f "$TEMPLATE_FILE" ]; then
+        print_error "Template file not found: $TEMPLATE_FILE"
+        exit 1
+    fi
+    
+    # Generate orchestrate.md
+    echo "  Generating orchestrate.md..."
+    sed \
+        -e 's/{{COMMAND_NAME_TITLE}}/Orchestrate/g' \
+        -e 's/{{COMMAND_DESCRIPTION}}/Manage the orchestration workflow for tasks with human-in-the-loop gates./g' \
+        -e 's/{{MODE_SUFFIX}}//g' \
+        -e 's/{{MODE_OUTPUTS}}/ outputs/g' \
+        -e 's/{{MODE_SECTION}}//g' \
+        -e 's/{{MODE_ADJECTIVE}}//g' \
+        -e 's/{{META_COMMENT}}//g' \
+        -e 's/{{META_FLAG}}//g' \
+        -e 's/{{COMMAND_NAME}}/orchestrate/g' \
+        "$TEMPLATE_FILE" > "$OUTPUT_DIR/orchestrate.md"
+    
+    # Generate morchestrate.md
+    echo "  Generating morchestrate.md..."
+    sed \
+        -e 's/{{COMMAND_NAME_TITLE}}/Meta-Orchestrate/g' \
+        -e 's/{{COMMAND_DESCRIPTION}}/Manage orchestration workflows in meta mode (isolated from main orchestration sessions)./g' \
+        -e 's/{{MODE_SUFFIX}}/ in meta mode/g' \
+        -e 's/{{MODE_OUTPUTS}}/ meta mode outputs/g' \
+        -e 's|{{MODE_SECTION}}|## Purpose\nThe `/morchestrate` command is identical to `/orchestrate` but runs in "meta mode":\n- Uses `.agent-outputs-meta/` instead of `.agent-outputs/` \n- Uses `.claude-meta/` instead of `.claude/`\n- All continuation commands automatically include "meta" flag\n- Prevents interference with main orchestration workflows\n\nThis is essential when developing the orchestrator itself, as it prevents test runs from interfering with the main development workflow.\n\n|g' \
+        -e 's/{{MODE_ADJECTIVE}}/meta-/g' \
+        -e 's/{{META_COMMENT}}/ in meta mode/g' \
+        -e 's/{{META_FLAG}}/ meta/g' \
+        -e 's/{{COMMAND_NAME}}/morchestrate/g' \
+        "$TEMPLATE_FILE" > "$OUTPUT_DIR/morchestrate.md"
+    
+    echo "✅ Successfully generated command files:"
+    echo "   - $OUTPUT_DIR/orchestrate.md"
+    echo "   - $OUTPUT_DIR/morchestrate.md"
     
     # Copy generated slash commands
     cp "$TEMP_DIR/orchestrator-commands/orchestrate.md"  "$commands_dir/orchestrate.md"
