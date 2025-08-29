@@ -1,4 +1,4 @@
-# Claude Code Orchestrator
+# SAGE
 
 A workflow automation system that guides development through focused agent phases with human approval gates.
 
@@ -14,7 +14,7 @@ The system separates automated work phases from human decision points, maintaini
 
 ```bash
 # Global installation (recommended) - creates cc-orchestrate command
-curl -fsSL https://raw.githubusercontent.com/marcelo-alvarez/claude-orchestrator/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/marcelo-alvarez/sage/main/install.sh | bash
 ```
 
 After installation, the `cc-orchestrate` command is available globally.
@@ -321,7 +321,7 @@ export DEBUG_MODE="true"
 
 1. Install orchestrator globally (once):
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/marcelo-alvarez/claude-orchestrator/main/install.sh | bash
+   curl -fsSL https://raw.githubusercontent.com/marcelo-alvarez/sage/main/install.sh | bash
    ```
 
 2. In Claude Code, generate initial tasks:
