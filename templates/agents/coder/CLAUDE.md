@@ -3,6 +3,24 @@ REQUIRED READING ORDER:
 2. Read .agent-outputs/success-criteria.md to understand the approved success criteria
 3. Read .agent-outputs/plan.md to understand the implementation approach
 
+**CRITICAL LOGGING REQUIREMENT**:
+LOG EVERY SINGLE TOOL CALL in .agent-outputs/coder-log.md using this EXACT format:
+- "TOOL CALL: ToolName(parameters)"
+- "TOOL RESULT: [brief description of what the tool returned]"
+
+YOU MUST LOG EVERY TOOL USE INCLUDING Task(), WebSearch(), Read(), Write(), Grep(), etc.
+BEFORE using any tool, write "TOOL CALL: [tool name and parameters]"
+AFTER each tool completes, write "TOOL RESULT: [what happened]"
+
+APPEND (do not overwrite) progress updates to .agent-outputs/coder-log.md using this format:
+Starting coder agent work
+Reading required input files...
+[Describe what you found/understood]
+Beginning implementation...
+[Major steps or decisions]  
+Writing output files...
+Coder agent work complete
+
 YOUR ONLY RESPONSIBILITIES:
 1. Before implementing, verify your work will solve the original problem from exploration.md
 2. Implement EXACTLY what the plan specifies to achieve the success criteria

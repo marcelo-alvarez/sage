@@ -3365,18 +3365,33 @@ Begin by analyzing the current directory and asking about the goal.
         
         for i, line in enumerate(lines):
             # More robust task matching - check if the line contains the task start and is unchecked
-            if '- [ ]' in line and (task[:50] in line or task.split(':')[0] in line):
-                if completed:
-                    # Extract existing task text and add completion timestamp
-                    existing_task = re.sub(r'^\s*-\s*\[\s*\]\s*', '', line)
-                    existing_task = re.sub(r'\s*\(.*\)\s*$', '', existing_task).strip()
-                    lines[i] = f"- [x] {existing_task} (Completed: {timestamp})"
-                else:
-                    existing_task = re.sub(r'^\s*-\s*\[\s*\]\s*', '', line)
-                    existing_task = re.sub(r'\s*\(.*\)\s*$', '', existing_task).strip()
-                    lines[i] = f"- [ ] {existing_task} (Attempted: {timestamp})"
-                task_found = True
-                break
+            if '- [ ]' in line:
+                # Extract clean task text from the checklist line
+                line_task = re.sub(r'^\s*-\s*\[\s*\]\s*', '', line).strip()
+                line_task = re.sub(r'\s*\(.*\)\s*$', '', line_task).strip()
+                
+                # Use precise matching: exact match OR substring match with minimum length requirement
+                task_matches = (task == line_task or 
+                              (task in line_task and len(task) > 30) or 
+                              (line_task in task and len(line_task) > 30))
+                
+                if task_matches:
+                    # Debug logging for task completion tracking
+                    if completed:
+                        print(f"[DEBUG] Marking task complete: '{task}'")
+                        print(f"[DEBUG] Matched checklist line: '{line.strip()}'")
+                    
+                    if completed:
+                        # Extract existing task text and add completion timestamp
+                        existing_task = re.sub(r'^\s*-\s*\[\s*\]\s*', '', line)
+                        existing_task = re.sub(r'\s*\(.*\)\s*$', '', existing_task).strip()
+                        lines[i] = f"- [x] {existing_task} (Completed: {timestamp})"
+                    else:
+                        existing_task = re.sub(r'^\s*-\s*\[\s*\]\s*', '', line)
+                        existing_task = re.sub(r'\s*\(.*\)\s*$', '', existing_task).strip()
+                        lines[i] = f"- [ ] {existing_task} (Attempted: {timestamp})"
+                    task_found = True
+                    break
                 
         if not task_found and completed:
             lines.append("- [x] " + task + " (Completed: " + timestamp + ")")

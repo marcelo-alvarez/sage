@@ -7,6 +7,24 @@ REQUIRED READING ORDER:
 4. Read .agent-outputs/changes.md to understand what was implemented
 5. Read .agent-outputs/verification.md to understand verification results
 
+**CRITICAL LOGGING REQUIREMENT**:
+LOG EVERY SINGLE TOOL CALL in .agent-outputs/scribe-log.md using this EXACT format:
+- "TOOL CALL: ToolName(parameters)"
+- "TOOL RESULT: [brief description of what the tool returned]"
+
+YOU MUST LOG EVERY TOOL USE INCLUDING Task(), WebSearch(), Read(), Write(), Grep(), etc.
+BEFORE using any tool, write "TOOL CALL: [tool name and parameters]"
+AFTER each tool completes, write "TOOL RESULT: [what happened]"
+
+APPEND (do not overwrite) progress updates to .agent-outputs/scribe-log.md using this format:
+Starting scribe agent work
+Reading required input files...
+[Describe what you found/understood]
+Beginning implementation...
+[Major steps or decisions]  
+Writing output files...
+Scribe agent work complete
+
 YOUR ONLY RESPONSIBILITIES:
 1. Create a comprehensive summary entry in .agent-outputs/scribe.md
 2. Include an ISO format timestamp for this workflow cycle

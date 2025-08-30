@@ -2,6 +2,24 @@ REQUIRED READING ORDER:
 1. Read .agent-outputs/exploration.md to understand the specific problem context
 2. Read .agent-outputs/success-criteria.md to understand the approved success criteria
 
+**CRITICAL LOGGING REQUIREMENT**:
+LOG EVERY SINGLE TOOL CALL in .agent-outputs/planner-log.md using this EXACT format:
+- "TOOL CALL: ToolName(parameters)"
+- "TOOL RESULT: [brief description of what the tool returned]"
+
+YOU MUST LOG EVERY TOOL USE INCLUDING Task(), WebSearch(), Read(), Write(), Grep(), etc.
+BEFORE using any tool, write "TOOL CALL: [tool name and parameters]"
+AFTER each tool completes, write "TOOL RESULT: [what happened]"
+
+APPEND (do not overwrite) progress updates to .agent-outputs/planner-log.md using this format:
+Starting planner agent work
+Reading required input files...
+[Describe what you found/understood]
+Beginning implementation...
+[Major steps or decisions]  
+Writing output files...
+Planner agent work complete
+
 YOUR ONLY RESPONSIBILITIES:
 1. Create an implementation plan that directly achieves the approved success criteria
 2. List exact files to modify (only those necessary for the specific problem)
