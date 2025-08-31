@@ -1536,8 +1536,7 @@ class ClaudeCodeOrchestrator:
         self.agents_dir = Path.home() / ".claude-orchestrator" / "agents"
         
         # Task tracking files in .claude directory
-        self.tasks_file = self.claude_dir / "tasks.md"
-        self.checklist_file = self.claude_dir / "tasks-checklist.md"
+        self.checklist_file = self.claude_dir / "task-checklist.md"
         
         # Dashboard configuration
         self.enable_dashboard = enable_dashboard
@@ -2679,24 +2678,7 @@ CRITICAL REQUIREMENTS:
         # Write back to checklist
         self.checklist_file.write_text('\n'.join(lines))
         
-        # Also add to tasks.md if it exists
-        if self.tasks_file.exists():
-            tasks_content = self.tasks_file.read_text()
-            new_task_entry = f"\n## {new_task_description}\n[Added to fix validation failure]\n"
-            
-            # Find a good place to insert in tasks.md - before USER validation section
-            if f"USER {user_task.split()[1]}" in tasks_content:
-                # Insert before the USER validation section
-                insertion_point = tasks_content.find(f"## USER {user_task.split()[1]}")
-                if insertion_point != -1:
-                    tasks_content = tasks_content[:insertion_point] + new_task_entry + tasks_content[insertion_point:]
-                    self.tasks_file.write_text(tasks_content)
-                else:
-                    # Append at end if can't find specific section
-                    self.tasks_file.write_text(tasks_content + new_task_entry)
-            else:
-                # Append at end
-                self.tasks_file.write_text(tasks_content + new_task_entry)
+        # Task added to checklist only - no separate tasks.md file needed
         
         print(f"✅ Inserted new task: {new_task_description}")
         print(f"📍 Positioned before: {user_task}")
@@ -2780,36 +2762,7 @@ CRITICAL REQUIREMENTS:
                     return True
         return False
         
-    def _update_task_status(self, task, status):
-        """Update task status in tasks.md"""
-        
-        if not task:
-            return
-            
-        if not self.tasks_file.exists():
-            self.tasks_file.write_text("# Tasks\n\n- [ ] " + task + " - " + status + "\n")
-            return
-            
-        content = self.tasks_file.read_text()
-        lines = content.split('\n')
-        
-        task_updated = False
-        for i, line in enumerate(lines):
-            if task[:30] in line:
-                if '- [ ]' in line:
-                    lines[i] = "- [ ] " + task + " - " + status
-                elif '- [x]' in line:
-                    if status == "COMPLETE":
-                        lines[i] = "- [x] " + task + " - " + status
-                    else:
-                        lines[i] = "- [ ] " + task + " - " + status
-                task_updated = True
-                break
-                
-        if not task_updated:
-            lines.append("- [ ] " + task + " - " + status)
-            
-        self.tasks_file.write_text('\n'.join(lines))
+    # Task status is managed in task-checklist.md only
 
     def status(self):
         """Show current orchestration status"""
@@ -3065,7 +3018,7 @@ CRITICAL REQUIREMENTS:
             print("TASK COMPLETED SUCCESSFULLY!")
             print("="*60)
             print("Task marked complete: " + task)
-            print("Updated tasks.md and tasks-checklist.md")
+            print("Updated task-checklist.md")
             print(f"Check {self.outputs_dir}/verification.md for final results")
             
             # Check for unsupervised mode and auto-continue
@@ -3214,7 +3167,7 @@ Continuing to next task in workflow
 BOOTSTRAP MODE: Generate human-in-the-loop task structure for the project
 
 CRITICAL REQUIREMENTS:
-1. Generate THREE files: tasks-checklist.md, tasks.md, and concept.md
+1. Generate TWO files: task-checklist.md and guide.md
 2. Each task must be ONE PARAGRAPH on a SINGLE LINE (no line breaks within tasks)
 3. Create 10-15 tasks MAXIMUM per taskset
 4. Balance tasks for roughly equal complexity and likelihood of success
@@ -3223,27 +3176,20 @@ CRITICAL REQUIREMENTS:
 
 FILE STRUCTURE TO CREATE:
 
-## {claude_dir_name}/concept.md
-High-level design document that:
+## {claude_dir_name}/guide.md
+Comprehensive implementation guide that:
 - Describes the overall goal and architecture
 - Defines success criteria for the entire taskset
 - Explains key design decisions and trade-offs
-- Provides context for all tasks
-- Self-contained reference (doesn't reference other files)
+- Provides detailed implementation patterns and best practices
+- Includes architectural guidance to prevent common coding errors
+- Self-contained reference with both conceptual and technical guidance
 
-## {claude_dir_name}/tasks.md
-Detailed task descriptions where:
-- Each task is a comprehensive single paragraph
-- Tasks frequently reference concept.md for design rationale
-- USER tasks are clearly marked and detailed
-- USER tasks specify exact commands/tests to run
-- Each task ~500-1000 characters for adequate detail
-
-## {claude_dir_name}/tasks-checklist.md
+## {claude_dir_name}/task-checklist.md
 Actionable checklist where:
-- Each line is one task (matching {claude_dir_name}/tasks.md)
-- Tasks reference both {claude_dir_name}/tasks.md and {claude_dir_name}/concept.md
-- Format: - [ ] Brief description referencing details in {claude_dir_name}/tasks.md and concept in {claude_dir_name}/concept.md
+- Each line is one task with comprehensive description
+- Tasks reference {claude_dir_name}/guide.md sections for implementation details
+- Format: - [ ] Brief description implementing the [aspect] design from {claude_dir_name}/guide.md section [X]
 - USER tasks clearly start with "USER" keyword
 
 TASK STRUCTURE PATTERN:
@@ -3305,10 +3251,9 @@ Begin by analyzing the current directory and asking about the goal.
         print("\n" + "="*60)
         print("HUMAN-IN-THE-LOOP BOOTSTRAP MODE")
         print("="*60)
-        print("This will generate three files with embedded validation:")
-        print("1. concept.md - Overall design and architecture")
-        print("2. tasks.md - Detailed task descriptions") 
-        print("3. tasks-checklist.md - Actionable checklist")
+        print("This will generate two files with embedded validation:")
+        print("1. guide.md - Overall design, architecture, and implementation guidance")
+        print("2. task-checklist.md - Actionable checklist")
         print()
         print("USER tasks (starting with 'USER') will halt the orchestrator")
         print("for manual validation/testing before continuing.")

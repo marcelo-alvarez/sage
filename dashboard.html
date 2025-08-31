@@ -4559,6 +4559,94 @@
             }
         }
 
+        // ============ TERMINAL FUNCTIONALITY ============
+
+        let terminal = null;
+        let terminalSocket = null;
+
+        // Initialize terminal section
+        function initTerminal() {
+            const terminalContainer = document.getElementById('terminal-container');
+            if (!terminalContainer) {
+                console.error('Terminal container not found');
+                return;
+            }
+
+            // Initialize Terminal instance with dark theme
+            terminal = new Terminal({
+                theme: {
+                    background: '#1e1e1e'
+                }
+            });
+
+            // Attach terminal to container
+            terminal.open(terminalContainer);
+
+            // Set up WebSocket connection
+            setupTerminalWebSocket();
+
+            // Set up terminal resize handler
+            terminal.onResize((size) => {
+                if (terminalSocket && terminalSocket.readyState === WebSocket.OPEN) {
+                    terminalSocket.send(JSON.stringify({
+                        type: 'resize',
+                        cols: size.cols,
+                        rows: size.rows
+                    }));
+                }
+            });
+
+            // Set up keyboard input handler
+            terminal.onKey((event) => {
+                if (terminalSocket && terminalSocket.readyState === WebSocket.OPEN) {
+                    terminalSocket.send(JSON.stringify({
+                        type: 'input',
+                        data: event.key
+                    }));
+                }
+            });
+        }
+
+        // Set up WebSocket connection for terminal
+        function setupTerminalWebSocket() {
+            try {
+                terminalSocket = new WebSocket('ws://localhost:5678');
+
+                terminalSocket.onopen = () => {
+                    console.log('Terminal WebSocket connected');
+                    if (terminal) {
+                        terminal.write('Terminal connected to SAGE...\r\n');
+                    }
+                };
+
+                terminalSocket.onmessage = (event) => {
+                    if (terminal) {
+                        terminal.write(event.data);
+                    }
+                };
+
+                terminalSocket.onclose = (event) => {
+                    console.log('Terminal WebSocket disconnected:', event.code, event.reason);
+                    if (terminal) {
+                        terminal.write('\r\n\x1b[31mTerminal connection closed\x1b[0m\r\n');
+                    }
+                };
+
+                terminalSocket.onerror = (error) => {
+                    console.error('Terminal WebSocket error:', error);
+                    if (terminal) {
+                        terminal.write('\r\n\x1b[31mTerminal connection error\x1b[0m\r\n');
+                    }
+                };
+
+            } catch (error) {
+                console.error('Failed to create WebSocket connection:', error);
+                if (terminal) {
+                    terminal.write('\r\n\x1b[31mFailed to connect to terminal server\x1b[0m\r\n');
+                }
+            }
+        }
+
         // ============ AGENT LOGS FUNCTIONALITY ============
 
         let currentAgentLogFile = 'explorer';
@@ -4698,10 +4786,10 @@
             if (tasksetError) tasksetError.style.display = 'none';
             
             try {
-                // Load the correct tasks-checklist.md based on mode
-                // In meta mode, it should load from .claude-meta/tasks-checklist.md (which is a symlink to webui-refactor)
-                // In regular mode, it should load from .claude/tasks-checklist.md (if it exists)
-                const filename = 'tasks-checklist.md';
+                // Load the correct task-checklist.md based on mode
+                // In meta mode, it should load from .claude-meta/task-checklist.md (which is a symlink to webui-refactor)
+                // In regular mode, it should load from .claude/task-checklist.md (if it exists)
+                const filename = 'task-checklist.md';
                 const apiUrl = `${getAPIBaseURL()}/api/outputs/${filename}?mode=${currentMode}`;
                 
                 console.log(`Loading taskset for mode: ${currentMode}, URL: ${apiUrl}`);
@@ -4759,6 +4847,7 @@
             initDashboard();
             initServerLogs();
             initAgentLogs();
+            initTerminal();
             // Initialize Lucide icons
             if (typeof lucide !== 'undefined') {
                 lucide.createIcons();

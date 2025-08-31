@@ -714,7 +714,7 @@ class StatusHandler(BaseHTTPRequestHandler):
             
             # Check if file exists in outputs directory, if not try claude directory for checklist files
             if not file_path.exists():
-                if filename == 'tasks-checklist.md':
+                if filename == 'task-checklist.md':
                     # Try .claude or .claude-meta directory for checklist files
                     claude_dir = self.status_reader._get_claude_dir(mode)
                     claude_file_path = claude_dir / filename
@@ -785,7 +785,7 @@ class StatusHandler(BaseHTTPRequestHandler):
             'orchestrator-log.md',
             'success-criteria.md',
             'pending-user_validation-gate.md',
-            'tasks-checklist.md'
+            'task-checklist.md'
         }
         
         # Check if file is in allowlist
