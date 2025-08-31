@@ -2145,21 +2145,13 @@ CRITICAL REQUIREMENTS:
         # Update status to reflect current workflow state
         self._update_status_file()
         
-        # In headless mode, use workflow loop for automation
-        if self.headless:
-            # Show workflow header only once at the start of headless execution
-            debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
-            if not debug_mode and not hasattr(self, '_header_shown'):
-                self._show_workflow_header()
-                self._header_shown = True
-            return self._execute_headless_workflow_loop()
-        
-        # Interactive mode: single agent execution
-        agent_type, instructions = self._prepare_work_agent(next_agent)
-        if agent_type in ["complete", "error"]:
-            return agent_type, instructions
-        result = self.agent_executor.execute_agent(agent_type, instructions)
-        return agent_type, result
+        # Use workflow loop for automation (both headless and interactive modes should auto-continue)
+        # The difference is that interactive mode stops at gates, while headless may auto-approve them
+        debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+        if self.headless and not debug_mode and not hasattr(self, '_header_shown'):
+            self._show_workflow_header()
+            self._header_shown = True
+        return self._execute_headless_workflow_loop()
 
     def _show_workflow_header(self):
         """Show clean workflow header with task description"""
@@ -3021,23 +3013,40 @@ CRITICAL REQUIREMENTS:
             print("Updated task-checklist.md")
             print(f"Check {self.outputs_dir}/verification.md for final results")
             
-            # Check for unsupervised mode and auto-continue
-            unsupervised_file = self.claude_dir / "unsupervised"
-            if unsupervised_file.exists():
-                print("Unsupervised mode detected - auto-continuing workflow")
-                self.clean_outputs()
-                
-                # Show workflow header with next task
-                self._show_workflow_header()
-                
-                agent, instructions = self.get_continue_agent()
+            # Auto-continue workflow after task completion (both supervised and unsupervised)
+            print("Auto-continuing to next task workflow...")
+            self.clean_outputs()
+            
+            # Show workflow header with next task
+            self._show_workflow_header()
+            
+            # Start the next workflow automatically using headless execution
+            if self.headless:
+                # Already in headless mode, trigger headless workflow loop
+                # The loop will handle supervised vs unsupervised gate behavior
+                result_type, result = self._execute_headless_workflow_loop()
                 print("\n" + "="*60)
-                print("AUTO-STARTING - AGENT: " + agent.upper())
+                print(f"WORKFLOW RESULT: {result_type.upper()}")
                 print("="*60)
-                print(instructions)
+                print(result)
                 print("="*60)
             else:
-                print("Execute the slash-command `/orchestrate clean` to prepare for continue task")
+                # Start continue command in background to avoid API timeout
+                import subprocess
+                import sys
+                background_process = subprocess.Popen([
+                    sys.executable, __file__, 'continue'
+                ] + (['meta'] if 'meta' in sys.argv else []), 
+                cwd=self.project_root, 
+                stdout=subprocess.DEVNULL, 
+                stderr=subprocess.DEVNULL, 
+                start_new_session=True, 
+                preexec_fn=os.setpgrp)
+                # Register background process with ProcessManager for proper cleanup
+                self.process_manager.register_process('background_continue', background_process)
+                print("\n" + "="*60)
+                print("AUTO-CONTINUING - Background process started")
+                print(f"Process PID: {background_process.pid}")
                 print("="*60)
         
     def approve_user_validation(self):
