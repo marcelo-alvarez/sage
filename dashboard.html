@@ -2003,7 +2003,7 @@
                     <i data-lucide="list-checks" class="modal-icon"></i>
                     <span>Full Taskset</span>
                 </h2>
-                <span class="close" onclick="hideTasksetModal()">×</span>
+                <span class="close" onclick="hideTasksetModal(); event.stopPropagation();">×</span>
             </div>
             <div class="modal-body" style="flex: 1; overflow-y: auto;">
                 <div class="log-content" id="tasksetContent" style="flex: 1; overflow-y: auto;">
@@ -4838,7 +4838,9 @@
         // Hide taskset modal
         function hideTasksetModal() {
             const modal = document.getElementById('tasksetModal');
-            modal.classList.remove('active');
+            if (modal) {
+                modal.style.display = 'none';
+            }
         }
 
         // Initialize dashboard on page load
@@ -4848,6 +4850,17 @@
             initServerLogs();
             initAgentLogs();
             initTerminal();
+            
+            // Add backup event listener for taskset modal close button
+            const tasksetCloseBtn = document.querySelector('#tasksetModal .close');
+            if (tasksetCloseBtn) {
+                tasksetCloseBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    hideTasksetModal();
+                });
+            }
+            
             // Initialize Lucide icons
             if (typeof lucide !== 'undefined') {
                 lucide.createIcons();
@@ -5181,12 +5194,16 @@
     window.addEventListener('click', function(event) {
         const reportModal = document.getElementById('reportModal');
         const logModal = document.getElementById('logModal');
+        const tasksetModal = document.getElementById('tasksetModal');
         
         if (event.target === reportModal) {
             reportModal.style.display = 'none';
         }
         if (event.target === logModal) {
             logModal.style.display = 'none';
+        }
+        if (event.target === tasksetModal) {
+            tasksetModal.style.display = 'none';
         }
     });
 
@@ -5195,6 +5212,7 @@
         if (event.key === 'Escape') {
             closeReportModal();
             closeLogModal();
+            hideTasksetModal();
         }
     });
 </script>
