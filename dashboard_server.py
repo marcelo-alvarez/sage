@@ -13,9 +13,108 @@ import sys
 import json
 import socket
 import time
+import threading
+import hashlib
+import base64
+import struct
 from pathlib import Path
 from datetime import datetime
 from orchestrator_logger import OrchestratorLogger
+from ptyprocess import PtyProcessUnicode
+
+
+class WebSocketTerminalSession:
+    """Manages a terminal session over WebSocket connection"""
+    
+    def __init__(self, connection):
+        self.connection = connection
+        self.pty_process = None
+        self.output_thread = None
+        self.running = False
+        
+    def start(self):
+        """Start terminal session and PTY process"""
+        try:
+            # Spawn Claude CLI process
+            self.pty_process = PtyProcessUnicode.spawn(['claude'])
+            self.running = True
+            
+            # Start output thread for non-blocking I/O
+            self.output_thread = threading.Thread(target=self._read_pty_output)
+            self.output_thread.daemon = True
+            self.output_thread.start()
+            
+        except Exception as e:
+            error_msg = f"Failed to spawn Claude CLI process: {str(e)}"
+            print(f"[Dashboard] {error_msg}")
+            self._send_websocket_message(error_msg)
+            raise
+    
+    def send_to_terminal(self, data):
+        """Send data to the terminal process"""
+        if self.pty_process and self.running:
+            try:
+                self.pty_process.write(data)
+            except Exception as e:
+                print(f"[Dashboard] Error writing to terminal: {e}")
+    
+    def _read_pty_output(self):
+        """Read output from PTY process and send to WebSocket"""
+        while self.running and self.pty_process:
+            try:
+                output = self.pty_process.read(timeout=0.1)
+                if output:
+                    self._send_websocket_message(output)
+            except Exception as e:
+                if self.running:  # Only log if not shutting down
+                    print(f"[Dashboard] Error reading PTY output: {e}")
+                break
+    
+    def _send_websocket_message(self, message):
+        """Send message to WebSocket client"""
+        if self.connection:
+            try:
+                frame = self._create_websocket_frame(message)
+                self.connection.send(frame)
+            except Exception as e:
+                print(f"[Dashboard] Error sending WebSocket message: {e}")
+    
+    def _create_websocket_frame(self, message):
+        """Create outgoing WebSocket frame for text message"""
+        message_bytes = message.encode('utf-8')
+        length = len(message_bytes)
+        
+        frame = bytearray()
+        frame.append(0x81)  # FIN=1, opcode=1 (text)
+        
+        if length <= 125:
+            frame.append(length)
+        elif length <= 65535:
+            frame.append(126)
+            frame.extend(struct.pack('>H', length))
+        else:
+            frame.append(127)
+            frame.extend(struct.pack('>Q', length))
+        
+        frame.extend(message_bytes)
+        return bytes(frame)
+    
+    def cleanup(self):
+        """Clean up terminal session and PTY process"""
+        self.running = False
+        
+        if self.pty_process:
+            try:
+                self.pty_process.terminate()
+                self.pty_process = None
+            except Exception as e:
+                print(f"[Dashboard] Error terminating PTY process: {e}")
+        
+        if self.output_thread and self.output_thread.is_alive():
+            try:
+                self.output_thread.join(timeout=1.0)
+            except Exception as e:
+                print(f"[Dashboard] Error joining output thread: {e}")
 
 
 class DashboardHandler(http.server.SimpleHTTPRequestHandler):
@@ -28,6 +127,12 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         """Handle GET requests with custom routing for dashboard"""
         try:
+            # Check for WebSocket upgrade request
+            if self._is_websocket_request():
+                if self._websocket_handshake():
+                    self._handle_websocket_connection()
+                return
+            
             if self.path == '/health':
                 # Health check endpoint
                 self.send_response(200)
@@ -185,6 +290,115 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, format, *args):
         """Log requests with timestamp"""
         print(f"[{self.log_date_time_string()}] {format % args}")
+    
+    def _is_websocket_request(self):
+        """Check if the request is a WebSocket upgrade request"""
+        return (self.headers.get('Upgrade', '').lower() == 'websocket' and
+                self.headers.get('Connection', '').lower() == 'upgrade' and
+                'Sec-WebSocket-Key' in self.headers)
+    
+    def _websocket_handshake(self):
+        """Perform WebSocket handshake according to RFC 6455"""
+        try:
+            websocket_key = self.headers.get('Sec-WebSocket-Key')
+            if not websocket_key:
+                return False
+            
+            # Calculate Sec-WebSocket-Accept
+            magic_string = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+            accept_key = base64.b64encode(
+                hashlib.sha1((websocket_key + magic_string).encode()).digest()
+            ).decode()
+            
+            # Send upgrade response
+            self.send_response(101, 'Switching Protocols')
+            self.send_header('Upgrade', 'websocket')
+            self.send_header('Connection', 'Upgrade')
+            self.send_header('Sec-WebSocket-Accept', accept_key)
+            self.end_headers()
+            
+            return True
+        except Exception as e:
+            print(f"[Dashboard] WebSocket handshake failed: {e}")
+            return False
+    
+    def _parse_websocket_frame(self, data):
+        """Parse incoming WebSocket frame according to RFC 6455"""
+        if len(data) < 2:
+            return None
+        
+        byte1 = data[0]
+        byte2 = data[1]
+        
+        fin = (byte1 >> 7) & 1
+        opcode = byte1 & 0x0f
+        masked = (byte2 >> 7) & 1
+        payload_length = byte2 & 0x7f
+        
+        if opcode == 8:  # Close frame
+            return {'type': 'close'}
+        
+        if opcode != 1:  # Only handle text frames
+            return None
+        
+        offset = 2
+        if payload_length == 126:
+            payload_length = struct.unpack('>H', data[offset:offset+2])[0]
+            offset += 2
+        elif payload_length == 127:
+            payload_length = struct.unpack('>Q', data[offset:offset+8])[0]
+            offset += 8
+        
+        if masked:
+            mask = data[offset:offset+4]
+            offset += 4
+            payload = bytearray(data[offset:offset+payload_length])
+            for i in range(payload_length):
+                payload[i] ^= mask[i % 4]
+        else:
+            payload = data[offset:offset+payload_length]
+        
+        try:
+            message = payload.decode('utf-8')
+            return {'type': 'message', 'data': message}
+        except UnicodeDecodeError:
+            return None
+    
+    def _handle_websocket_connection(self):
+        """Handle WebSocket connection with terminal session"""
+        terminal_session = None
+        try:
+            # Create terminal session
+            terminal_session = WebSocketTerminalSession(self.connection)
+            terminal_session.start()
+            
+            # Handle incoming messages
+            while True:
+                try:
+                    data = self.connection.recv(4096)
+                    if not data:
+                        break
+                    
+                    frame = self._parse_websocket_frame(data)
+                    if not frame:
+                        continue
+                    
+                    if frame['type'] == 'close':
+                        break
+                    elif frame['type'] == 'message':
+                        terminal_session.send_to_terminal(frame['data'])
+                        
+                except ConnectionResetError:
+                    break
+                except Exception as e:
+                    print(f"[Dashboard] WebSocket message handling error: {e}")
+                    break
+                    
+        except Exception as e:
+            print(f"[Dashboard] WebSocket connection error: {e}")
+        finally:
+            if terminal_session:
+                terminal_session.cleanup()
 
 
 def find_available_port(start_port, max_attempts=20):
