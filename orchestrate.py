@@ -3345,6 +3345,18 @@ Begin by analyzing the current directory and asking about the goal.
             lines.append("- [ ] " + task + " (Attempted: " + timestamp + ")")
             
         self.checklist_file.write_text('\n'.join(lines))
+
+    def _update_task_status(self, task, status):
+        """Update task status - currently just updates the checklist with status information"""
+        # For now, this method serves as a placeholder since the actual task status tracking
+        # is handled by _update_checklist. This prevents AttributeError crashes.
+        # The status information could be expanded in the future if needed.
+        if status == "COMPLETE":
+            self._update_checklist(task, completed=True)
+        else:
+            # For other statuses like "MODIFYING CRITERIA", "NEEDS REVIEW", etc.
+            # we don't mark as completed but could log or track differently in the future
+            pass
     
     def enable_unsupervised_mode(self):
         """Enable unsupervised mode by creating .claude/unsupervised file"""
