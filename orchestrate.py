@@ -382,9 +382,12 @@ class AgentConfig:
             
             # Start dashboard server as subprocess using installed version
             dashboard_script = os.path.join(orchestrator_dir, "dashboard_server.py")
+            # Set environment variable to ensure consistent ProcessManager mode
+            dashboard_env = os.environ.copy()
+            dashboard_env['CLAUDE_META_MODE'] = 'true' if self.meta_mode else 'false'
             self.dashboard_process = subprocess.Popen([
                 sys.executable, dashboard_script, str(self.dashboard_port)
-            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=self.project_root, start_new_session=True, preexec_fn=os.setpgrp)
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=self.project_root, start_new_session=True, preexec_fn=os.setpgrp, env=dashboard_env)
             
             # Register dashboard process with ProcessManager if available
             if self.process_manager:
@@ -684,10 +687,17 @@ class AgentExecutor:
         
     def execute_agent(self, agent_type, instructions):
         """Routes to appropriate execution method"""
+        debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+        if debug_mode:
+            print(f"[DEBUG] execute_agent called: agent_type={agent_type}, interactive_mode={self.use_interactive_mode}")
         try:
             if self.use_interactive_mode:
+                if debug_mode:
+                    print(f"[DEBUG] Using interactive mode for {agent_type}")
                 return self._execute_via_interactive(agent_type, instructions)
             else:
+                if debug_mode:
+                    print(f"[DEBUG] Using headless mode for {agent_type}")
                 return self._execute_headless(agent_type, instructions)
         except FileNotFoundError:
             print("Claude CLI not found, falling back to interactive mode")
@@ -699,6 +709,9 @@ class AgentExecutor:
         """Execute agent using claude -p with headless automation and enhanced diagnostics"""
         timeout_seconds = 300
         debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+        
+        # Unconditional debug to see if method is called
+        print(f"[TRACE] _execute_headless called for {agent_type}, debug_mode={debug_mode}")
         
         if debug_mode:
             print(f"[DEBUG] Starting headless execution for {agent_type}")
@@ -716,21 +729,46 @@ class AgentExecutor:
         # Validate Claude CLI availability
         claude_binary = 'claude'
         try:
+            # Debug: Log current PATH and environment
+            current_path = os.environ.get('PATH', '')
+            if debug_mode:
+                print(f"[DEBUG] Current PATH: {current_path}")
+                print(f"[DEBUG] Current working directory: {os.getcwd()}")
+                print(f"[DEBUG] Attempting to find claude command...")
+            
             # Test if claude command is available
             claude_test = subprocess.run(['which', claude_binary], capture_output=True, text=True)
+            if debug_mode:
+                print(f"[DEBUG] 'which claude' exit code: {claude_test.returncode}")
+                print(f"[DEBUG] 'which claude' stdout: {claude_test.stdout.strip()}")
+                print(f"[DEBUG] 'which claude' stderr: {claude_test.stderr.strip()}")
+            
             if claude_test.returncode != 0:
                 # Try alternative paths
                 alternative_paths = ['/usr/local/bin/claude', '/opt/homebrew/bin/claude', '~/.local/bin/claude']
                 claude_found = False
+                if debug_mode:
+                    print(f"[DEBUG] 'which' command failed, trying alternative paths...")
                 for alt_path in alternative_paths:
                     expanded_path = os.path.expanduser(alt_path)
-                    if os.path.exists(expanded_path) and os.access(expanded_path, os.X_OK):
+                    exists = os.path.exists(expanded_path)
+                    executable = os.access(expanded_path, os.X_OK) if exists else False
+                    if debug_mode:
+                        print(f"[DEBUG] Checking {alt_path} -> {expanded_path}: exists={exists}, executable={executable}")
+                    if exists and executable:
                         claude_binary = expanded_path
                         claude_found = True
+                        if debug_mode:
+                            print(f"[DEBUG] Found claude at: {claude_binary}")
                         break
                 if not claude_found:
-                    raise FileNotFoundError("Claude CLI not found. Please install Claude CLI or add it to PATH. Checked locations: /usr/local/bin/claude, /opt/homebrew/bin/claude, ~/.local/bin/claude")
+                    error_msg = f"Claude CLI not found. PATH={current_path}. Checked locations: /usr/local/bin/claude, /opt/homebrew/bin/claude, ~/.local/bin/claude"
+                    if debug_mode:
+                        print(f"[DEBUG] {error_msg}")
+                    raise FileNotFoundError(error_msg)
             else:
+                if debug_mode:
+                    print(f"[DEBUG] Found claude via 'which': {claude_test.stdout.strip()}")
                 pass
         except FileNotFoundError:
             # Let FileNotFoundError propagate to parent method
@@ -753,6 +791,8 @@ class AgentExecutor:
         # Create subprocess environment without CLAUDE_ORCHESTRATOR_MODE
         subprocess_env = dict(os.environ)
         subprocess_env.pop('CLAUDE_ORCHESTRATOR_MODE', None)
+        # Disable auto-updates in subprocess environment to prevent exit code 127
+        subprocess_env['CLAUDE_DISABLE_AUTO_UPDATE'] = '1'
         
         # Add deterministic start timestamp to agent log file
         from datetime import datetime
@@ -778,6 +818,12 @@ class AgentExecutor:
                 f.write(task_header)
         
         try:
+            if debug_mode:
+                print(f"[DEBUG] About to execute command: {' '.join(cmd)}")
+                print(f"[DEBUG] Working directory: {self.orchestrator.project_root}")
+                print(f"[DEBUG] Environment PATH: {subprocess_env.get('PATH', 'NOT SET')}")
+                print(f"[DEBUG] Claude binary path: {claude_binary}")
+            
             result_process = subprocess.run(
                 cmd,
                 capture_output=True,
@@ -789,6 +835,11 @@ class AgentExecutor:
             
             exit_code = result_process.returncode
             stdout_output = result_process.stdout
+            
+            if debug_mode:
+                print(f"[DEBUG] Command completed with exit code: {exit_code}")
+                print(f"[DEBUG] Stdout length: {len(stdout_output)} chars")
+                print(f"[DEBUG] Stderr length: {len(result_process.stderr)} chars")
             stderr_output = result_process.stderr
             
             # Show captured output only in debug mode
@@ -800,6 +851,12 @@ class AgentExecutor:
             
             if debug_mode:
                 print(f"[DEBUG] Process completed with exit code: {exit_code}")
+                if exit_code == 127:
+                    print(f"[DEBUG] EXIT CODE 127 DETECTED - Command not found!")
+                    print(f"[DEBUG] This usually means the command '{claude_binary}' cannot be executed")
+                    print(f"[DEBUG] Full command that failed: {' '.join(cmd)}")
+                    print(f"[DEBUG] Working directory: {self.orchestrator.project_root}")
+                    print(f"[DEBUG] PATH in subprocess: {subprocess_env.get('PATH', 'NOT SET')}")
                 if stderr_output and exit_code != 0:
                     print(f"[DEBUG] Error output: {stderr_output[:200]}...")
             
@@ -1536,8 +1593,7 @@ class ClaudeCodeOrchestrator:
         self.agents_dir = Path.home() / ".claude-orchestrator" / "agents"
         
         # Task tracking files in .claude directory
-        self.tasks_file = self.claude_dir / "tasks.md"
-        self.checklist_file = self.claude_dir / "tasks-checklist.md"
+        self.checklist_file = self.claude_dir / "task-checklist.md"
         
         # Dashboard configuration
         self.enable_dashboard = enable_dashboard
@@ -1598,6 +1654,10 @@ class ClaudeCodeOrchestrator:
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
 
+    def is_unsupervised(self):
+        """Check if running in unsupervised automation mode"""
+        unsupervised_file = self.claude_dir / "unsupervised"
+        return unsupervised_file.exists()
 
     def _test_api_endpoint(self):
         """Test if API server HTTP endpoint is responding"""
@@ -2142,21 +2202,13 @@ CRITICAL REQUIREMENTS:
         # Update status to reflect current workflow state
         self._update_status_file()
         
-        # In headless mode, use workflow loop for automation
-        if self.headless:
-            # Show workflow header only once at the start of headless execution
-            debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
-            if not debug_mode and not hasattr(self, '_header_shown'):
-                self._show_workflow_header()
-                self._header_shown = True
-            return self._execute_headless_workflow_loop()
-        
-        # Interactive mode: single agent execution
-        agent_type, instructions = self._prepare_work_agent(next_agent)
-        if agent_type in ["complete", "error"]:
-            return agent_type, instructions
-        result = self.agent_executor.execute_agent(agent_type, instructions)
-        return agent_type, result
+        # Use workflow loop for automation (both headless and interactive modes should auto-continue)
+        # The difference is that interactive mode stops at gates, while headless may auto-approve them
+        debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+        if self.headless and not debug_mode and not hasattr(self, '_header_shown'):
+            self._show_workflow_header()
+            self._header_shown = True
+        return self._execute_headless_workflow_loop()
 
     def _show_workflow_header(self):
         """Show clean workflow header with task description"""
@@ -2261,11 +2313,23 @@ CRITICAL REQUIREMENTS:
             elif 'criteria' in pending_gates:
                 gate_file = self.outputs_dir / "pending-criteria-gate.md"
                 gate_content = gate_file.read_text()
-                return self._handle_interactive_gate("criteria", gate_content)
+                if self.is_unsupervised():
+                    # Auto-approve criteria and continue automation daemon
+                    print("🤖 UNSUPERVISED: Auto-approving criteria gate")
+                    self.approve_criteria()
+                    continue  # Keep daemon alive and continue loop
+                else:
+                    return self._handle_interactive_gate("criteria", gate_content)
             elif 'completion' in pending_gates:
                 gate_file = self.outputs_dir / "pending-completion-gate.md"
                 gate_content = gate_file.read_text()
-                return self._handle_interactive_gate("completion", gate_content)
+                if self.is_unsupervised():
+                    # Auto-approve completion if verification passes
+                    print("🤖 UNSUPERVISED: Auto-approving completion gate")
+                    self.approve_completion()
+                    continue  # Keep daemon alive
+                else:
+                    return self._handle_interactive_gate("completion", gate_content)
             
             # Check what outputs exist to determine next phase - use explicit mode
             current_outputs = self.status_reader.get_current_outputs_status(mode)
@@ -2663,24 +2727,7 @@ CRITICAL REQUIREMENTS:
         # Write back to checklist
         self.checklist_file.write_text('\n'.join(lines))
         
-        # Also add to tasks.md if it exists
-        if self.tasks_file.exists():
-            tasks_content = self.tasks_file.read_text()
-            new_task_entry = f"\n## {new_task_description}\n[Added to fix validation failure]\n"
-            
-            # Find a good place to insert in tasks.md - before USER validation section
-            if f"USER {user_task.split()[1]}" in tasks_content:
-                # Insert before the USER validation section
-                insertion_point = tasks_content.find(f"## USER {user_task.split()[1]}")
-                if insertion_point != -1:
-                    tasks_content = tasks_content[:insertion_point] + new_task_entry + tasks_content[insertion_point:]
-                    self.tasks_file.write_text(tasks_content)
-                else:
-                    # Append at end if can't find specific section
-                    self.tasks_file.write_text(tasks_content + new_task_entry)
-            else:
-                # Append at end
-                self.tasks_file.write_text(tasks_content + new_task_entry)
+        # Task added to checklist only - no separate tasks.md file needed
         
         print(f"✅ Inserted new task: {new_task_description}")
         print(f"📍 Positioned before: {user_task}")
@@ -2764,36 +2811,7 @@ CRITICAL REQUIREMENTS:
                     return True
         return False
         
-    def _update_task_status(self, task, status):
-        """Update task status in tasks.md"""
-        
-        if not task:
-            return
-            
-        if not self.tasks_file.exists():
-            self.tasks_file.write_text("# Tasks\n\n- [ ] " + task + " - " + status + "\n")
-            return
-            
-        content = self.tasks_file.read_text()
-        lines = content.split('\n')
-        
-        task_updated = False
-        for i, line in enumerate(lines):
-            if task[:30] in line:
-                if '- [ ]' in line:
-                    lines[i] = "- [ ] " + task + " - " + status
-                elif '- [x]' in line:
-                    if status == "COMPLETE":
-                        lines[i] = "- [x] " + task + " - " + status
-                    else:
-                        lines[i] = "- [ ] " + task + " - " + status
-                task_updated = True
-                break
-                
-        if not task_updated:
-            lines.append("- [ ] " + task + " - " + status)
-            
-        self.tasks_file.write_text('\n'.join(lines))
+    # Task status is managed in task-checklist.md only
 
     def status(self):
         """Show current orchestration status"""
@@ -3049,26 +3067,43 @@ CRITICAL REQUIREMENTS:
             print("TASK COMPLETED SUCCESSFULLY!")
             print("="*60)
             print("Task marked complete: " + task)
-            print("Updated tasks.md and tasks-checklist.md")
+            print("Updated task-checklist.md")
             print(f"Check {self.outputs_dir}/verification.md for final results")
             
-            # Check for unsupervised mode and auto-continue
-            unsupervised_file = self.claude_dir / "unsupervised"
-            if unsupervised_file.exists():
-                print("Unsupervised mode detected - auto-continuing workflow")
-                self.clean_outputs()
-                
-                # Show workflow header with next task
-                self._show_workflow_header()
-                
-                agent, instructions = self.get_continue_agent()
+            # Auto-continue workflow after task completion (both supervised and unsupervised)
+            print("Auto-continuing to next task workflow...")
+            self.clean_outputs()
+            
+            # Show workflow header with next task
+            self._show_workflow_header()
+            
+            # Start the next workflow automatically using headless execution
+            if self.headless:
+                # Already in headless mode, trigger headless workflow loop
+                # The loop will handle supervised vs unsupervised gate behavior
+                result_type, result = self._execute_headless_workflow_loop()
                 print("\n" + "="*60)
-                print("AUTO-STARTING - AGENT: " + agent.upper())
+                print(f"WORKFLOW RESULT: {result_type.upper()}")
                 print("="*60)
-                print(instructions)
+                print(result)
                 print("="*60)
             else:
-                print("Execute the slash-command `/orchestrate clean` to prepare for continue task")
+                # Start continue command in background to avoid API timeout
+                import subprocess
+                import sys
+                background_process = subprocess.Popen([
+                    sys.executable, __file__, 'continue'
+                ] + (['meta'] if 'meta' in sys.argv else []), 
+                cwd=self.project_root, 
+                stdout=subprocess.DEVNULL, 
+                stderr=subprocess.DEVNULL, 
+                start_new_session=True, 
+                preexec_fn=os.setpgrp)
+                # Register background process with ProcessManager for proper cleanup
+                self.process_manager.register_process('background_continue', background_process)
+                print("\n" + "="*60)
+                print("AUTO-CONTINUING - Background process started")
+                print(f"Process PID: {background_process.pid}")
                 print("="*60)
         
     def approve_user_validation(self):
@@ -3198,7 +3233,7 @@ Continuing to next task in workflow
 BOOTSTRAP MODE: Generate human-in-the-loop task structure for the project
 
 CRITICAL REQUIREMENTS:
-1. Generate THREE files: tasks-checklist.md, tasks.md, and concept.md
+1. Generate TWO files: task-checklist.md and guide.md
 2. Each task must be ONE PARAGRAPH on a SINGLE LINE (no line breaks within tasks)
 3. Create 10-15 tasks MAXIMUM per taskset
 4. Balance tasks for roughly equal complexity and likelihood of success
@@ -3207,27 +3242,20 @@ CRITICAL REQUIREMENTS:
 
 FILE STRUCTURE TO CREATE:
 
-## {claude_dir_name}/concept.md
-High-level design document that:
+## {claude_dir_name}/guide.md
+Comprehensive implementation guide that:
 - Describes the overall goal and architecture
 - Defines success criteria for the entire taskset
 - Explains key design decisions and trade-offs
-- Provides context for all tasks
-- Self-contained reference (doesn't reference other files)
+- Provides detailed implementation patterns and best practices
+- Includes architectural guidance to prevent common coding errors
+- Self-contained reference with both conceptual and technical guidance
 
-## {claude_dir_name}/tasks.md
-Detailed task descriptions where:
-- Each task is a comprehensive single paragraph
-- Tasks frequently reference concept.md for design rationale
-- USER tasks are clearly marked and detailed
-- USER tasks specify exact commands/tests to run
-- Each task ~500-1000 characters for adequate detail
-
-## {claude_dir_name}/tasks-checklist.md
+## {claude_dir_name}/task-checklist.md
 Actionable checklist where:
-- Each line is one task (matching {claude_dir_name}/tasks.md)
-- Tasks reference both {claude_dir_name}/tasks.md and {claude_dir_name}/concept.md
-- Format: - [ ] Brief description referencing details in {claude_dir_name}/tasks.md and concept in {claude_dir_name}/concept.md
+- Each line is one task with comprehensive description
+- Tasks reference {claude_dir_name}/guide.md sections for implementation details
+- Format: - [ ] Brief description implementing the [aspect] design from {claude_dir_name}/guide.md section [X]
 - USER tasks clearly start with "USER" keyword
 
 TASK STRUCTURE PATTERN:
@@ -3289,10 +3317,9 @@ Begin by analyzing the current directory and asking about the goal.
         print("\n" + "="*60)
         print("HUMAN-IN-THE-LOOP BOOTSTRAP MODE")
         print("="*60)
-        print("This will generate three files with embedded validation:")
-        print("1. concept.md - Overall design and architecture")
-        print("2. tasks.md - Detailed task descriptions") 
-        print("3. tasks-checklist.md - Actionable checklist")
+        print("This will generate two files with embedded validation:")
+        print("1. guide.md - Overall design, architecture, and implementation guidance")
+        print("2. task-checklist.md - Actionable checklist")
         print()
         print("USER tasks (starting with 'USER') will halt the orchestrator")
         print("for manual validation/testing before continuing.")
@@ -3384,6 +3411,18 @@ Begin by analyzing the current directory and asking about the goal.
             lines.append("- [ ] " + task + " (Attempted: " + timestamp + ")")
             
         self.checklist_file.write_text('\n'.join(lines))
+
+    def _update_task_status(self, task, status):
+        """Update task status - currently just updates the checklist with status information"""
+        # For now, this method serves as a placeholder since the actual task status tracking
+        # is handled by _update_checklist. This prevents AttributeError crashes.
+        # The status information could be expanded in the future if needed.
+        if status == "COMPLETE":
+            self._update_checklist(task, completed=True)
+        else:
+            # For other statuses like "MODIFYING CRITERIA", "NEEDS REVIEW", etc.
+            # we don't mark as completed but could log or track differently in the future
+            pass
     
     def enable_unsupervised_mode(self):
         """Enable unsupervised mode by creating .claude/unsupervised file"""
@@ -3438,6 +3477,34 @@ def serve_command(args):
     # Initialize logger for serve command
     serve_logger = OrchestratorLogger("orchestrator-serve")
     serve_logger.info("Starting orchestrator serve command")
+    
+    # Dashboard browser opening function - prefers Safari for WebSocket compatibility
+    def open_dashboard_browser(url):
+        """Open dashboard in Safari (preferred) or fallback to default browser"""
+        try:
+            import subprocess
+            import sys
+            
+            # Try Safari first on macOS for best WebSocket compatibility
+            if sys.platform == 'darwin':  # macOS
+                try:
+                    subprocess.Popen(['open', '-a', 'Safari', url], 
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    serve_logger.info("Opened dashboard in Safari (recommended for terminal functionality)")
+                    return True
+                except Exception as safari_error:
+                    serve_logger.warning(f"Could not open Safari: {safari_error}")
+            
+            # Fallback to default browser
+            import webbrowser
+            webbrowser.open(url)
+            serve_logger.info("Opened dashboard in default browser")
+            serve_logger.warning("Note: Terminal functionality works best in Safari/Chrome")
+            return True
+            
+        except Exception as e:
+            serve_logger.error(f"Could not open browser: {e}")
+            return False
     
     # Health check function
     def check_server_health(host, port, endpoint="/", timeout=5):
@@ -3572,9 +3639,12 @@ def serve_command(args):
         # Start dashboard server using installed version only
         dashboard_script = os.path.join(os.path.expanduser("~/.claude-orchestrator"), "dashboard_server.py")
         
+        # Set environment variable to ensure consistent ProcessManager mode
+        dashboard_env = os.environ.copy()
+        dashboard_env['CLAUDE_META_MODE'] = 'true' if process_manager.meta_mode else 'false'
         dashboard_process = subprocess.Popen([
             sys.executable, dashboard_script, str(dashboard_port)
-        ], cwd=current_dir, start_new_session=True, preexec_fn=os.setpgrp)
+        ], cwd=current_dir, start_new_session=True, preexec_fn=os.setpgrp, env=dashboard_env)
         process_manager.register_process('dashboard_server', dashboard_process)
         serve_logger.info(f"Dashboard server registered (PID: {dashboard_process.pid})")
         
@@ -3625,11 +3695,7 @@ def serve_command(args):
         dashboard_url = f"http://localhost:{dashboard_port}"
         if not args.no_browser and dashboard_ready:
             serve_logger.info(f"Opening browser to {dashboard_url}")
-            try:
-                webbrowser.open(dashboard_url)
-                serve_logger.info("Browser opened successfully")
-            except Exception as e:
-                serve_logger.error(f"Could not open browser: {e}")
+            open_dashboard_browser(dashboard_url)
         
         serve_logger.info(f"Dashboard available at: {dashboard_url}")
         serve_logger.info(f"Dashboard UI at: {dashboard_url}/dashboard.html") 

@@ -27,6 +27,8 @@
     <script src="https://cdn.jsdelivr.net/npm/markdown-it/dist/markdown-it.min.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/github-markdown-css@5.0.0/github-markdown-light.css">
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <script src="/dashboard/xterm.js"></script>
+    <link rel="stylesheet" href="/dashboard/xterm.css">
     <style>
         /* Global Styles */
         * {
@@ -1023,6 +1025,119 @@
             font-style: italic;
         }
 
+        /* Terminal Section */
+        .terminal-section {
+            margin: 0 0 30px 0;
+            background: #1a1a1b;
+            padding: 19px 20px;
+            border-radius: 10px;
+            transition: border 0.3s ease;
+        }
+
+        .terminal-section .workflow-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 0 10px 0;
+            margin-bottom: 20px;
+            border-bottom: 1px solid rgba(75, 85, 99, 0.2);
+        }
+
+        .terminal-section .workflow-title {
+            justify-content: flex-start;
+            margin: 0;
+            font-family: var(--font-sans-serif) !important;
+        }
+
+        .terminal-container {
+            height: calc(40vh - 60px);
+            min-height: 300px;
+            max-height: 500px;
+            background: #1a1a1b;
+            overflow: hidden;
+            position: relative;
+            border-radius: 6px;
+            border: 1px solid rgba(75, 85, 99, 0.3);
+        }
+
+        /* Terminal Connection Status */
+        .terminal-connection-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            font-family: var(--font-sans-serif);
+        }
+
+        .connection-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .connection-dot.connected {
+            background: #45c270;
+            box-shadow: 0 0 8px rgba(69, 194, 112, 0.6);
+            animation: pulse-green 2s infinite;
+        }
+
+        .connection-dot.connecting {
+            background: #f2cc60;
+            box-shadow: 0 0 8px rgba(242, 204, 96, 0.6);
+            animation: pulse-yellow 1s infinite;
+        }
+
+        .connection-dot.disconnected {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .connection-dot.error {
+            background: #e74c3c;
+            box-shadow: 0 0 8px rgba(231, 76, 60, 0.6);
+            animation: pulse-red 1.5s infinite;
+        }
+
+        .connection-text {
+            color: rgba(255, 255, 255, 0.8);
+            font-weight: 300;
+        }
+
+        @keyframes pulse-green {
+            0% { opacity: 1; box-shadow: 0 0 8px rgba(69, 194, 112, 0.6); }
+            50% { opacity: 0.7; box-shadow: 0 0 12px rgba(69, 194, 112, 0.8); }
+            100% { opacity: 1; box-shadow: 0 0 8px rgba(69, 194, 112, 0.6); }
+        }
+
+        @keyframes pulse-yellow {
+            0% { opacity: 1; }
+            50% { opacity: 0.6; }
+            100% { opacity: 1; }
+        }
+
+        @keyframes pulse-red {
+            0% { opacity: 1; box-shadow: 0 0 8px rgba(231, 76, 60, 0.6); }
+            50% { opacity: 0.7; box-shadow: 0 0 12px rgba(231, 76, 60, 0.8); }
+            100% { opacity: 1; box-shadow: 0 0 8px rgba(231, 76, 60, 0.6); }
+        }
+
+        /* Ensure xterm.js terminal doesn't overflow its container */
+        .terminal-container .xterm {
+            height: 100% !important;
+            max-height: 100% !important;
+        }
+
+        .terminal-container .xterm-viewport {
+            height: 100% !important;
+            max-height: 100% !important;
+            overflow: hidden !important;
+        }
+
+        .terminal-container .xterm-screen {
+            height: 100% !important;
+            max-height: 100% !important;
+        }
+
         /* Server Logs Section */
         .server-logs-section {
             margin: 0;
@@ -1558,6 +1673,16 @@
                 width: 100%;
                 max-width: 200px;
             }
+
+            .terminal-container {
+                height: calc(30vh - 40px);
+                min-height: 250px;
+                max-height: 350px;
+            }
+
+            .terminal-connection-status {
+                font-size: 12px;
+            }
         }
 
         @media (max-width: 480px) {
@@ -1574,6 +1699,22 @@
                 width: 64.4px; /* 15% bigger than 56px */
                 height: 64.4px; /* 15% bigger than 56px */
                 font-size: 1.71em; /* 15% bigger than 1.49em */
+            }
+
+            .terminal-container {
+                height: calc(25vh - 30px);
+                min-height: 200px;
+                max-height: 300px;
+            }
+
+            .terminal-connection-status {
+                font-size: 11px;
+                gap: 6px;
+            }
+
+            .connection-dot {
+                width: 6px;
+                height: 6px;
             }
         }
 
@@ -1884,6 +2025,21 @@
                 </div>
             </section>
 
+            <!-- Terminal Section -->
+            <section class="terminal-section" id="terminalSection">
+                <div class="workflow-header">
+                    <div class="workflow-title">
+                        <i data-lucide="terminal"></i>
+                        <span>Terminal</span>
+                    </div>
+                    <div class="terminal-connection-status" id="terminalConnectionStatus">
+                        <span class="connection-dot disconnected"></span>
+                        <span class="connection-text">Disconnected</span>
+                    </div>
+                </div>
+                <div class="terminal-container" id="terminal-container"></div>
+            </section>
+
             <!-- Agent Logs Section -->
             <section class="agent-logs-section" id="agentLogsSection">
                 <div class="workflow-header">
@@ -1990,7 +2146,7 @@
                     <i data-lucide="list-checks" class="modal-icon"></i>
                     <span>Full Taskset</span>
                 </h2>
-                <span class="close" onclick="hideTasksetModal()">×</span>
+                <span class="close" onclick="hideTasksetModal(); event.stopPropagation();">×</span>
             </div>
             <div class="modal-body" style="flex: 1; overflow-y: auto;">
                 <div class="log-content" id="tasksetContent" style="flex: 1; overflow-y: auto;">
@@ -2121,21 +2277,25 @@
 
         // Optimized API Port Discovery with retry logic
         async function discoverAPIPort(retryCount = 0) {
+            console.log(`[DEBUG] discoverAPIPort called, retryCount: ${retryCount}`);
             const possiblePorts = [8000, 8001, 8002]; // Reduced from 10 ports to 3
             const maxRetries = 1; // Reduced from 3 to 1
             
             for (const port of possiblePorts) {
                 try {
+                    console.log(`[DEBUG] Trying to discover API on port ${port}`);
                     const response = await fetch(`http://localhost:${port}/api/status`, {
                         method: 'GET',
                         signal: AbortSignal.timeout(1000) // Reduced from 3000ms to 1000ms
                     });
+                    console.log(`[DEBUG] Port ${port} response ok: ${response.ok}, status: ${response.status}`);
                     if (response.ok) {
                         console.log(`API server discovered on port ${port}`);
                         setCachedPort(port); // Cache successful discovery
                         return port;
                     }
                 } catch (e) {
+                    console.log(`[DEBUG] Port ${port} failed: ${e.message}`);
                     // Port not available, continue to next
                 }
             }
@@ -2579,6 +2739,8 @@
         
         // Execute command with debouncing and state management
         async function executeCommand(command) {
+            console.log(`[DEBUG] executeCommand called with: ${command}`);
+            alert(`executeCommand called with: ${command}`);
             
             // Reset exit flag when continue is executed
             if (command === 'continue') {
@@ -2644,8 +2806,11 @@
         
         // Call the execute API endpoint
         async function callExecuteAPI(command) {
+            console.log(`[DEBUG] callExecuteAPI called with command: ${command}`);
+            console.log(`[DEBUG] forceMockMode: ${forceMockMode}, useRealAPI: ${useRealAPI}, discoveredAPIPort: ${discoveredAPIPort}`);
             
             if (forceMockMode || !useRealAPI || !discoveredAPIPort) {
+                console.log(`[DEBUG] Using mock mode - forceMockMode:${forceMockMode} !useRealAPI:${!useRealAPI} !discoveredAPIPort:${!discoveredAPIPort}`);
                 // Mock implementation for testing
                 return {
                     success: true,
@@ -2656,12 +2821,18 @@
                 };
             }
             
+            console.log(`[DEBUG] Using real API mode - making request to port ${discoveredAPIPort}`);
+        
+            
             const apiUrl = `${getAPIBaseURL()}/api/execute?mode=${currentMode}`;
             const requestBody = {
                 command: command,
                 mode: currentMode
             };
             
+            
+            console.log(`[DEBUG] About to make fetch request to: ${apiUrl}`);
+            console.log(`[DEBUG] Request body:`, requestBody);
             
             const response = await fetch(apiUrl, {
                 method: 'POST',
@@ -2672,6 +2843,7 @@
                 signal: AbortSignal.timeout(30000) // 30 second timeout
             });
             
+            console.log(`[DEBUG] Fetch response received, ok: ${response.ok}, status: ${response.status}`);
             
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));
@@ -4468,8 +4640,10 @@
             const logContent = document.getElementById('logContent');
             
             try {
-                // Try to read the log file directly from the filesystem
-                const response = await fetch(`/${logFile}.log`);
+                // Try to read the log file from the dashboard server
+                // Use explicit port 5678 to ensure we hit the dashboard server
+                const logUrl = `http://${window.location.hostname}:5678/${logFile}.log`;
+                const response = await fetch(logUrl);
                 
                 if (response.ok) {
                     const logText = await response.text();
@@ -4544,6 +4718,217 @@
                 clearInterval(serverLogRefreshInterval);
                 serverLogRefreshInterval = null;
             }
+        }
+
+        // ============ TERMINAL FUNCTIONALITY ============
+
+        let terminal = null;
+        let terminalSocket = null;
+        let terminalInitRetries = 0;
+        const maxTerminalInitRetries = 50; // 5 seconds maximum wait time
+        
+        // Terminal update buffering to reduce flicker
+        let terminalUpdateBuffer = '';
+        let terminalUpdateTimeout = null;
+        const TERMINAL_UPDATE_DELAY = 50; // 50ms buffer to batch rapid updates
+
+        // Initialize terminal section
+        function initTerminal() {
+            const terminalContainer = document.getElementById('terminal-container');
+            if (!terminalContainer) {
+                console.error('Terminal container not found');
+                return;
+            }
+
+            // Check if Terminal class is available with retry mechanism
+            if (typeof Terminal === 'undefined') {
+                terminalInitRetries++;
+                if (terminalInitRetries < maxTerminalInitRetries) {
+                    console.log(`Terminal class not yet available, retrying in 100ms... (attempt ${terminalInitRetries}/${maxTerminalInitRetries})`);
+                    setTimeout(initTerminal, 100);
+                    return;
+                } else {
+                    console.error('xterm.js Terminal class not available after max retries - terminal functionality disabled');
+                    terminalContainer.innerHTML = '<div style="color: #ff6b6b; padding: 20px; text-align: center;">Terminal functionality unavailable - xterm.js library not loaded</div>';
+                    return;
+                }
+            }
+
+            console.log('Terminal class available, initializing terminal...');
+
+            // Initialize Terminal instance with SAGE theme and clipboard support
+            terminal = new Terminal({
+                theme: {
+                    background: '#1a1a1b'
+                },
+                allowTransparency: true,
+                rightClickSelectsWord: true,
+                // Enable clipboard integration
+                allowProposedApi: true
+            });
+
+            // Attach terminal to container
+            terminal.open(terminalContainer);
+            
+            // Ensure terminal fits properly within container constraints
+            fitTerminalToContainer();
+
+            // Set up WebSocket connection
+            setupTerminalWebSocket();
+
+            // Set up terminal resize handler
+            terminal.onResize((size) => {
+                if (terminalSocket && terminalSocket.readyState === WebSocket.OPEN) {
+                    terminalSocket.send(JSON.stringify({
+                        type: 'resize',
+                        cols: size.cols,
+                        rows: size.rows
+                    }));
+                }
+            });
+
+            // Handle all input (keyboard + paste) through onData
+            terminal.onData((data) => {
+                if (terminalSocket && terminalSocket.readyState === WebSocket.OPEN) {
+                    terminalSocket.send(JSON.stringify({
+                        type: 'input',
+                        data: data
+                    }));
+                }
+            });
+            
+            // Handle special key combinations that need custom behavior
+            terminal.onKey((event) => {
+                const { domEvent } = event;
+                
+                // Handle Shift+Enter for newlines in Claude CLI
+                if (domEvent.shiftKey && domEvent.key === 'Enter') {
+                    // Send literal newline for multiline input
+                    if (terminalSocket && terminalSocket.readyState === WebSocket.OPEN) {
+                        terminalSocket.send(JSON.stringify({
+                            type: 'input',
+                            data: '\n'
+                        }));
+                    }
+                    // Prevent default Enter behavior
+                    domEvent.preventDefault();
+                    return;
+                }
+            });
+        }
+
+        // Fit terminal to container dimensions
+        function fitTerminalToContainer() {
+            if (!terminal) return;
+            
+            try {
+                const terminalContainer = document.getElementById('terminal-container');
+                if (!terminalContainer) return;
+                
+                // Get container dimensions
+                const containerRect = terminalContainer.getBoundingClientRect();
+                const containerWidth = Math.floor(containerRect.width);
+                const containerHeight = Math.floor(containerRect.height);
+                
+                console.log('Terminal container dimensions:', containerWidth, 'x', containerHeight);
+                
+                // Calculate appropriate terminal dimensions
+                // Estimate character dimensions (typical values for monospace fonts)
+                const charWidth = 9;  // Average character width in pixels
+                const charHeight = 17; // Average character height in pixels
+                
+                const cols = Math.floor((containerWidth - 20) / charWidth); // Leave some padding
+                const rows = Math.floor((containerHeight - 20) / charHeight); // Leave some padding
+                
+                console.log('Calculated terminal size:', cols, 'cols x', rows, 'rows');
+                
+                // Resize terminal to fit container
+                if (cols > 0 && rows > 0) {
+                    terminal.resize(cols, rows);
+                    console.log('Terminal resized to fit container');
+                }
+            } catch (error) {
+                console.warn('Error fitting terminal to container:', error);
+            }
+        }
+
+        // Update terminal connection status indicator
+        function updateTerminalConnectionStatus(status, text) {
+            const statusElement = document.getElementById('terminalConnectionStatus');
+            const dotElement = statusElement.querySelector('.connection-dot');
+            const textElement = statusElement.querySelector('.connection-text');
+            
+            if (dotElement && textElement) {
+                // Remove all status classes
+                dotElement.classList.remove('connected', 'connecting', 'disconnected', 'error');
+                // Add the new status class
+                dotElement.classList.add(status);
+                // Update text
+                textElement.textContent = text;
+            }
+        }
+
+        // Set up WebSocket connection for terminal
+        function setupTerminalWebSocket() {
+            // Update status to connecting
+            updateTerminalConnectionStatus('connecting', 'Connecting...');
+            
+            // Add delay to ensure server is ready for WebSocket connections
+            setTimeout(() => {
+                try {
+                    const wsUrl = `ws://${window.location.hostname}:${window.location.port || 5678}`;
+                    console.log('Attempting WebSocket connection to', wsUrl);
+                    terminalSocket = new WebSocket(wsUrl);
+
+                    terminalSocket.onopen = () => {
+                        console.log('Terminal WebSocket connected successfully');
+                        updateTerminalConnectionStatus('connected', 'Connected');
+                        if (terminal) {
+                            terminal.write('Terminal WebSocket connected...\r\n');
+                        }
+                    };
+
+                    terminalSocket.onmessage = (event) => {
+                        console.log('Received terminal data:', event.data.length, 'chars');
+                        if (terminal) {
+                            // Buffer updates to reduce flicker from rapid Claude status changes
+                            terminalUpdateBuffer += event.data;
+                            
+                            // Clear existing timeout and set new one
+                            clearTimeout(terminalUpdateTimeout);
+                            terminalUpdateTimeout = setTimeout(() => {
+                                if (terminalUpdateBuffer && terminal) {
+                                    terminal.write(terminalUpdateBuffer);
+                                    terminalUpdateBuffer = '';
+                                }
+                            }, TERMINAL_UPDATE_DELAY);
+                        }
+                    };
+
+                    terminalSocket.onclose = (event) => {
+                        console.log('Terminal WebSocket disconnected:', event.code, event.reason);
+                        updateTerminalConnectionStatus('disconnected', 'Disconnected');
+                        if (terminal) {
+                            terminal.write('\r\n\x1b[31mTerminal connection closed\x1b[0m\r\n');
+                        }
+                    };
+
+                    terminalSocket.onerror = (error) => {
+                        console.error('Terminal WebSocket error:', error);
+                        updateTerminalConnectionStatus('error', 'Connection Error');
+                        if (terminal) {
+                            terminal.write('\r\n\x1b[31mTerminal connection error\x1b[0m\r\n');
+                        }
+                    };
+
+                } catch (error) {
+                    console.error('Failed to create WebSocket connection:', error);
+                    updateTerminalConnectionStatus('error', 'Connection Failed');
+                    if (terminal) {
+                        terminal.write('\r\n\x1b[31mFailed to connect to terminal server\x1b[0m\r\n');
+                    }
+                }
+            }, 1000); // Wait 1 second before attempting connection
         }
 
         // ============ AGENT LOGS FUNCTIONALITY ============
@@ -4685,10 +5070,10 @@
             if (tasksetError) tasksetError.style.display = 'none';
             
             try {
-                // Load the correct tasks-checklist.md based on mode
-                // In meta mode, it should load from .claude-meta/tasks-checklist.md (which is a symlink to webui-refactor)
-                // In regular mode, it should load from .claude/tasks-checklist.md (if it exists)
-                const filename = 'tasks-checklist.md';
+                // Load the correct task-checklist.md based on mode
+                // In meta mode, it should load from .claude-meta/task-checklist.md (which is a symlink to webui-refactor)
+                // In regular mode, it should load from .claude/task-checklist.md (if it exists)
+                const filename = 'task-checklist.md';
                 const apiUrl = `${getAPIBaseURL()}/api/outputs/${filename}?mode=${currentMode}`;
                 
                 console.log(`Loading taskset for mode: ${currentMode}, URL: ${apiUrl}`);
@@ -4737,7 +5122,9 @@
         // Hide taskset modal
         function hideTasksetModal() {
             const modal = document.getElementById('tasksetModal');
-            modal.classList.remove('active');
+            if (modal) {
+                modal.style.display = 'none';
+            }
         }
 
         // Initialize dashboard on page load
@@ -4746,6 +5133,28 @@
             initDashboard();
             initServerLogs();
             initAgentLogs();
+            initTerminal();
+            
+            // Add window resize handler to keep terminal properly sized
+            let resizeTimeout;
+            window.addEventListener('resize', () => {
+                // Debounce resize events
+                clearTimeout(resizeTimeout);
+                resizeTimeout = setTimeout(() => {
+                    fitTerminalToContainer();
+                }, 250);
+            });
+            
+            // Add backup event listener for taskset modal close button
+            const tasksetCloseBtn = document.querySelector('#tasksetModal .close');
+            if (tasksetCloseBtn) {
+                tasksetCloseBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    hideTasksetModal();
+                });
+            }
+            
             // Initialize Lucide icons
             if (typeof lucide !== 'undefined') {
                 lucide.createIcons();
@@ -5079,12 +5488,16 @@
     window.addEventListener('click', function(event) {
         const reportModal = document.getElementById('reportModal');
         const logModal = document.getElementById('logModal');
+        const tasksetModal = document.getElementById('tasksetModal');
         
         if (event.target === reportModal) {
             reportModal.style.display = 'none';
         }
         if (event.target === logModal) {
             logModal.style.display = 'none';
+        }
+        if (event.target === tasksetModal) {
+            tasksetModal.style.display = 'none';
         }
     });
 
@@ -5093,6 +5506,7 @@
         if (event.key === 'Escape') {
             closeReportModal();
             closeLogModal();
+            hideTasksetModal();
         }
     });
 </script>

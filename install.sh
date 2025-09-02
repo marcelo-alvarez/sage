@@ -232,6 +232,13 @@ install_orchestrator_runtime() {
         cp "$TEMP_DIR/dashboard.html" "$runtime_dir/dashboard.html"
     fi
     
+    # Copy dashboard static assets if they exist
+    if [ -d "$TEMP_DIR/dashboard" ]; then
+        print_info "Copying dashboard static assets..."
+        cp -r "$TEMP_DIR/dashboard" "$runtime_dir/dashboard"
+        print_success "Dashboard assets copied to runtime directory"
+    fi
+    
     # Copy cc-orchestrate executable if it exists
     if [ -f "$TEMP_DIR/cc-orchestrate" ]; then
         cp "$TEMP_DIR/cc-orchestrate" "$runtime_dir/cc-orchestrate"
@@ -283,12 +290,8 @@ initialize_project() {
     fi
     
     # Copy template task files if they don't exist
-    if [ ! -f ".claude/tasks.md" ] && [ -f "$TEMP_DIR/templates/tasks.md" ]; then
-        cp "$TEMP_DIR/templates/tasks.md" .claude/tasks.md
-    fi
-    
-    if [ ! -f ".claude/tasks-checklist.md" ] && [ -f "$TEMP_DIR/templates/tasks-checklist.md" ]; then
-        cp "$TEMP_DIR/templates/tasks-checklist.md" .claude/tasks-checklist.md
+    if [ ! -f ".claude/task-checklist.md" ] && [ -f "$TEMP_DIR/templates/task-checklist.md" ]; then
+        cp "$TEMP_DIR/templates/task-checklist.md" .claude/task-checklist.md
     fi
     
     # Copy CLAUDE.md template to project root if it doesn't exist
@@ -485,8 +488,7 @@ print_summary() {
     if [ -n "$PROJECT_DIR" ]; then
         echo "📁 Project initialized: $PROJECT_DIR"
         echo "   .claude/"
-        echo "   ├── tasks.md                   # Task tracking"
-        echo "   └── tasks-checklist.md         # Task checklist"
+        echo "   └── task-checklist.md          # Task checklist"
         echo "   .agent-outputs/                # Agent work products"
         echo ""
     fi
@@ -506,9 +508,9 @@ print_summary() {
     echo "   Terminal: cc-orchestrate stop          # Stop all orchestrator processes"
     echo ""
     if [ -n "$PROJECT_DIR" ]; then
-        echo "   Or add tasks manually to: $PROJECT_DIR/.claude/tasks-checklist.md"
+        echo "   Or add tasks manually to: $PROJECT_DIR/.claude/task-checklist.md"
     else
-        echo "   Or navigate to your project and add tasks to .claude/tasks-checklist.md"
+        echo "   Or navigate to your project and add tasks to .claude/task-checklist.md"
     fi
     echo "   Then in Claude Code: /orchestrate start"
     echo ""

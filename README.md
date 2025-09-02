@@ -46,8 +46,7 @@ cc-orchestrate continue    # Run from project root
 ### Required Files
 
 The orchestrator needs task files in your project's `.claude/` directory:
-- `.claude/tasks.md` - Task status tracking
-- `.claude/tasks-checklist.md` - Task list (source of truth)
+- `.claude/task-checklist.md` - Task checklist (source of truth)
 
 These can be created manually or generated using the bootstrap command (see below).
 
@@ -221,8 +220,7 @@ your-project/              # Must be current working directory when running cc-o
 ├── SAGE.md                # SAGE project understanding memory (regular mode)
 ├── SAGE-meta.md          # SAGE project understanding memory (meta mode)
 ├── .claude/
-│   ├── tasks.md            # Task status tracking
-│   ├── tasks-checklist.md  # Task list (edit this to add tasks)
+│   ├── task-checklist.md   # Task checklist (edit this to add tasks)
 │   ├── session-context.json # Persistent session context (prevents redundant work)
 │   └── commands/           # Slash commands (if local install)
 ├── .agent-outputs/         # Agent work products (created in current directory)
@@ -485,6 +483,60 @@ cc-morchestrate stop     # Meta mode
 - Enhanced agent log task headers consistency across all agents
 - Improved workflow sequencing and background process registration
 - Added unsupervised mode toggle for automated gate decisions
+
+## Server Component Architecture
+
+### Required Initialization Patterns
+
+**All SAGE server components MUST use defensive initialization patterns to prevent infrastructure failures from crashing services:**
+
+```python
+# CORRECT: Defensive logger initialization
+class ServerHandler:
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        try:
+            self.logger = OrchestratorLogger("component-name")
+        except Exception as e:
+            print(f"[WARNING] Failed to initialize logger: {e}")
+            self.logger = None
+    
+    def safe_log(self, level, message):
+        """Always use safe logging with fallback"""
+        if hasattr(self, 'logger') and self.logger:
+            getattr(self.logger, level)(message)
+        else:
+            print(f"[{level.upper()}] {message}")
+```
+
+**NEVER assume infrastructure initialization succeeds:**
+
+```python
+# INCORRECT: Fragile initialization
+class BadHandler:
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.logger = OrchestratorLogger("component-name")  # May fail!
+    
+    def handle_request(self):
+        self.logger.info("Request received")  # AttributeError if init failed!
+```
+
+### Mandatory Patterns
+
+1. **Defensive Attribute Checking**: Always verify infrastructure objects exist before use
+2. **Try-Catch Initialization**: Wrap all infrastructure initialization in exception handling  
+3. **Graceful Degradation**: Provide fallback mechanisms when infrastructure fails
+4. **Consistent Error Handling**: Apply same patterns across all server methods
+
+### Common Pitfalls
+
+- **Direct attribute access** without existence checking
+- **Missing fallback mechanisms** when infrastructure initialization fails
+- **Inconsistent error handling** patterns across different methods
+- **Service crashes** due to logging/infrastructure failures
+
+Following these patterns ensures server components remain stable and functional even when supporting infrastructure encounters initialization issues.
 
 ## Requirements
 

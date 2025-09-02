@@ -355,7 +355,7 @@ class StatusReader:
         if mode is None:
             mode = self._get_current_mode()
         claude_dir = self._get_claude_dir(mode)
-        checklist_file = claude_dir / 'tasks-checklist.md'
+        checklist_file = claude_dir / 'task-checklist.md'  # Fixed: removed 's' from tasks
         
         if not checklist_file.exists():
             # If checklist doesn't exist, check for alternative task sources
