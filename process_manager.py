@@ -95,9 +95,22 @@ class ProcessManager:
             pass
     
     def register_process(self, name: str, process: subprocess.Popen):
+        print(f"[ProcessManager] Registering process '{name}' (PID: {process.pid}) to {self.pid_file}")
         self.processes[name] = process
         
-        # Load current PIDs, update with new process, and save
+        # Load current PIDs and clean up stale entries
+        current_pids = {}
+        if self.pid_file.exists():
+            try:
+                with open(self.pid_file, 'r') as f:
+                    current_pids = json.load(f)
+            except (json.JSONDecodeError, FileNotFoundError):
+                current_pids = {}
+        
+        # Clean up stale PIDs first
+        self._cleanup_stale_pids(current_pids)
+        
+        # Reload the cleaned data
         current_pids = {}
         if self.pid_file.exists():
             try:
@@ -117,6 +130,7 @@ class ProcessManager:
             'pgid': pgid
         }
         self._save_pids(current_pids)
+        print(f"[ProcessManager] Successfully registered '{name}' in {self.pid_file}")
     
     def register_main_process(self, name: str, pid: int = None):
         """Register the main process by PID for system-wide tracking"""
@@ -148,7 +162,7 @@ class ProcessManager:
         if name in self.processes:
             del self.processes[name]
         
-        # Load current PIDs, remove the process, and save
+        # Load current PIDs and clean up stale entries
         current_pids = {}
         if self.pid_file.exists():
             try:
@@ -157,6 +171,19 @@ class ProcessManager:
             except (json.JSONDecodeError, FileNotFoundError):
                 current_pids = {}
         
+        # Clean up stale PIDs first
+        self._cleanup_stale_pids(current_pids)
+        
+        # Reload the cleaned data
+        current_pids = {}
+        if self.pid_file.exists():
+            try:
+                with open(self.pid_file, 'r') as f:
+                    current_pids = json.load(f)
+            except (json.JSONDecodeError, FileNotFoundError):
+                current_pids = {}
+        
+        # Remove the specific process
         if name in current_pids:
             del current_pids[name]
         self._save_pids(current_pids)
@@ -166,8 +193,22 @@ class ProcessManager:
             return False
         
         process = self.processes[name]
-        # Check if process is still running
-        if process.poll() is not None:
+        
+        # Handle different process types - PtyProcessUnicode doesn't have poll()
+        try:
+            if hasattr(process, 'poll'):
+                # Standard subprocess - check if process is still running
+                if process.poll() is not None:
+                    return False
+            elif hasattr(process, 'isalive'):
+                # PtyProcessUnicode uses isalive() method instead of poll()
+                if not process.isalive():
+                    return False
+            else:
+                # Fallback - just check PID exists
+                return self._is_process_running(process.pid)
+        except Exception:
+            # If we can't check process status, assume unhealthy
             return False
         
         # Additional health check - verify PID still exists
@@ -335,6 +376,14 @@ class ProcessManager:
             try:
                 with open(self.pid_file, 'r') as f:
                     pids = json.load(f)
+                
+                # Clean up stale PIDs and get fresh data
+                self._cleanup_stale_pids(pids)
+                
+                # Reload the cleaned up data
+                with open(self.pid_file, 'r') as f:
+                    pids = json.load(f)
+                    
                 for name, proc_info in pids.items():
                     # Handle both old format (just PID) and new format (dict with pid/pgid)
                     if isinstance(proc_info, dict):

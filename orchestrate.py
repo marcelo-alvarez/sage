@@ -382,9 +382,12 @@ class AgentConfig:
             
             # Start dashboard server as subprocess using installed version
             dashboard_script = os.path.join(orchestrator_dir, "dashboard_server.py")
+            # Set environment variable to ensure consistent ProcessManager mode
+            dashboard_env = os.environ.copy()
+            dashboard_env['CLAUDE_META_MODE'] = 'true' if self.meta_mode else 'false'
             self.dashboard_process = subprocess.Popen([
                 sys.executable, dashboard_script, str(self.dashboard_port)
-            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=self.project_root, start_new_session=True, preexec_fn=os.setpgrp)
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=self.project_root, start_new_session=True, preexec_fn=os.setpgrp, env=dashboard_env)
             
             # Register dashboard process with ProcessManager if available
             if self.process_manager:
@@ -684,10 +687,17 @@ class AgentExecutor:
         
     def execute_agent(self, agent_type, instructions):
         """Routes to appropriate execution method"""
+        debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+        if debug_mode:
+            print(f"[DEBUG] execute_agent called: agent_type={agent_type}, interactive_mode={self.use_interactive_mode}")
         try:
             if self.use_interactive_mode:
+                if debug_mode:
+                    print(f"[DEBUG] Using interactive mode for {agent_type}")
                 return self._execute_via_interactive(agent_type, instructions)
             else:
+                if debug_mode:
+                    print(f"[DEBUG] Using headless mode for {agent_type}")
                 return self._execute_headless(agent_type, instructions)
         except FileNotFoundError:
             print("Claude CLI not found, falling back to interactive mode")
@@ -699,6 +709,9 @@ class AgentExecutor:
         """Execute agent using claude -p with headless automation and enhanced diagnostics"""
         timeout_seconds = 300
         debug_mode = os.getenv('CLAUDE_ORCHESTRATOR_DEBUG', '').lower() in ('1', 'true', 'yes')
+        
+        # Unconditional debug to see if method is called
+        print(f"[TRACE] _execute_headless called for {agent_type}, debug_mode={debug_mode}")
         
         if debug_mode:
             print(f"[DEBUG] Starting headless execution for {agent_type}")
@@ -716,21 +729,46 @@ class AgentExecutor:
         # Validate Claude CLI availability
         claude_binary = 'claude'
         try:
+            # Debug: Log current PATH and environment
+            current_path = os.environ.get('PATH', '')
+            if debug_mode:
+                print(f"[DEBUG] Current PATH: {current_path}")
+                print(f"[DEBUG] Current working directory: {os.getcwd()}")
+                print(f"[DEBUG] Attempting to find claude command...")
+            
             # Test if claude command is available
             claude_test = subprocess.run(['which', claude_binary], capture_output=True, text=True)
+            if debug_mode:
+                print(f"[DEBUG] 'which claude' exit code: {claude_test.returncode}")
+                print(f"[DEBUG] 'which claude' stdout: {claude_test.stdout.strip()}")
+                print(f"[DEBUG] 'which claude' stderr: {claude_test.stderr.strip()}")
+            
             if claude_test.returncode != 0:
                 # Try alternative paths
                 alternative_paths = ['/usr/local/bin/claude', '/opt/homebrew/bin/claude', '~/.local/bin/claude']
                 claude_found = False
+                if debug_mode:
+                    print(f"[DEBUG] 'which' command failed, trying alternative paths...")
                 for alt_path in alternative_paths:
                     expanded_path = os.path.expanduser(alt_path)
-                    if os.path.exists(expanded_path) and os.access(expanded_path, os.X_OK):
+                    exists = os.path.exists(expanded_path)
+                    executable = os.access(expanded_path, os.X_OK) if exists else False
+                    if debug_mode:
+                        print(f"[DEBUG] Checking {alt_path} -> {expanded_path}: exists={exists}, executable={executable}")
+                    if exists and executable:
                         claude_binary = expanded_path
                         claude_found = True
+                        if debug_mode:
+                            print(f"[DEBUG] Found claude at: {claude_binary}")
                         break
                 if not claude_found:
-                    raise FileNotFoundError("Claude CLI not found. Please install Claude CLI or add it to PATH. Checked locations: /usr/local/bin/claude, /opt/homebrew/bin/claude, ~/.local/bin/claude")
+                    error_msg = f"Claude CLI not found. PATH={current_path}. Checked locations: /usr/local/bin/claude, /opt/homebrew/bin/claude, ~/.local/bin/claude"
+                    if debug_mode:
+                        print(f"[DEBUG] {error_msg}")
+                    raise FileNotFoundError(error_msg)
             else:
+                if debug_mode:
+                    print(f"[DEBUG] Found claude via 'which': {claude_test.stdout.strip()}")
                 pass
         except FileNotFoundError:
             # Let FileNotFoundError propagate to parent method
@@ -753,6 +791,8 @@ class AgentExecutor:
         # Create subprocess environment without CLAUDE_ORCHESTRATOR_MODE
         subprocess_env = dict(os.environ)
         subprocess_env.pop('CLAUDE_ORCHESTRATOR_MODE', None)
+        # Disable auto-updates in subprocess environment to prevent exit code 127
+        subprocess_env['CLAUDE_DISABLE_AUTO_UPDATE'] = '1'
         
         # Add deterministic start timestamp to agent log file
         from datetime import datetime
@@ -778,6 +818,12 @@ class AgentExecutor:
                 f.write(task_header)
         
         try:
+            if debug_mode:
+                print(f"[DEBUG] About to execute command: {' '.join(cmd)}")
+                print(f"[DEBUG] Working directory: {self.orchestrator.project_root}")
+                print(f"[DEBUG] Environment PATH: {subprocess_env.get('PATH', 'NOT SET')}")
+                print(f"[DEBUG] Claude binary path: {claude_binary}")
+            
             result_process = subprocess.run(
                 cmd,
                 capture_output=True,
@@ -789,6 +835,11 @@ class AgentExecutor:
             
             exit_code = result_process.returncode
             stdout_output = result_process.stdout
+            
+            if debug_mode:
+                print(f"[DEBUG] Command completed with exit code: {exit_code}")
+                print(f"[DEBUG] Stdout length: {len(stdout_output)} chars")
+                print(f"[DEBUG] Stderr length: {len(result_process.stderr)} chars")
             stderr_output = result_process.stderr
             
             # Show captured output only in debug mode
@@ -800,6 +851,12 @@ class AgentExecutor:
             
             if debug_mode:
                 print(f"[DEBUG] Process completed with exit code: {exit_code}")
+                if exit_code == 127:
+                    print(f"[DEBUG] EXIT CODE 127 DETECTED - Command not found!")
+                    print(f"[DEBUG] This usually means the command '{claude_binary}' cannot be executed")
+                    print(f"[DEBUG] Full command that failed: {' '.join(cmd)}")
+                    print(f"[DEBUG] Working directory: {self.orchestrator.project_root}")
+                    print(f"[DEBUG] PATH in subprocess: {subprocess_env.get('PATH', 'NOT SET')}")
                 if stderr_output and exit_code != 0:
                     print(f"[DEBUG] Error output: {stderr_output[:200]}...")
             
@@ -3421,6 +3478,34 @@ def serve_command(args):
     serve_logger = OrchestratorLogger("orchestrator-serve")
     serve_logger.info("Starting orchestrator serve command")
     
+    # Dashboard browser opening function - prefers Safari for WebSocket compatibility
+    def open_dashboard_browser(url):
+        """Open dashboard in Safari (preferred) or fallback to default browser"""
+        try:
+            import subprocess
+            import sys
+            
+            # Try Safari first on macOS for best WebSocket compatibility
+            if sys.platform == 'darwin':  # macOS
+                try:
+                    subprocess.Popen(['open', '-a', 'Safari', url], 
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    serve_logger.info("Opened dashboard in Safari (recommended for terminal functionality)")
+                    return True
+                except Exception as safari_error:
+                    serve_logger.warning(f"Could not open Safari: {safari_error}")
+            
+            # Fallback to default browser
+            import webbrowser
+            webbrowser.open(url)
+            serve_logger.info("Opened dashboard in default browser")
+            serve_logger.warning("Note: Terminal functionality works best in Safari/Chrome")
+            return True
+            
+        except Exception as e:
+            serve_logger.error(f"Could not open browser: {e}")
+            return False
+    
     # Health check function
     def check_server_health(host, port, endpoint="/", timeout=5):
         try:
@@ -3554,9 +3639,12 @@ def serve_command(args):
         # Start dashboard server using installed version only
         dashboard_script = os.path.join(os.path.expanduser("~/.claude-orchestrator"), "dashboard_server.py")
         
+        # Set environment variable to ensure consistent ProcessManager mode
+        dashboard_env = os.environ.copy()
+        dashboard_env['CLAUDE_META_MODE'] = 'true' if process_manager.meta_mode else 'false'
         dashboard_process = subprocess.Popen([
             sys.executable, dashboard_script, str(dashboard_port)
-        ], cwd=current_dir, start_new_session=True, preexec_fn=os.setpgrp)
+        ], cwd=current_dir, start_new_session=True, preexec_fn=os.setpgrp, env=dashboard_env)
         process_manager.register_process('dashboard_server', dashboard_process)
         serve_logger.info(f"Dashboard server registered (PID: {dashboard_process.pid})")
         
@@ -3607,11 +3695,7 @@ def serve_command(args):
         dashboard_url = f"http://localhost:{dashboard_port}"
         if not args.no_browser and dashboard_ready:
             serve_logger.info(f"Opening browser to {dashboard_url}")
-            try:
-                webbrowser.open(dashboard_url)
-                serve_logger.info("Browser opened successfully")
-            except Exception as e:
-                serve_logger.error(f"Could not open browser: {e}")
+            open_dashboard_browser(dashboard_url)
         
         serve_logger.info(f"Dashboard available at: {dashboard_url}")
         serve_logger.info(f"Dashboard UI at: {dashboard_url}/dashboard.html") 

@@ -232,6 +232,13 @@ install_orchestrator_runtime() {
         cp "$TEMP_DIR/dashboard.html" "$runtime_dir/dashboard.html"
     fi
     
+    # Copy dashboard static assets if they exist
+    if [ -d "$TEMP_DIR/dashboard" ]; then
+        print_info "Copying dashboard static assets..."
+        cp -r "$TEMP_DIR/dashboard" "$runtime_dir/dashboard"
+        print_success "Dashboard assets copied to runtime directory"
+    fi
+    
     # Copy cc-orchestrate executable if it exists
     if [ -f "$TEMP_DIR/cc-orchestrate" ]; then
         cp "$TEMP_DIR/cc-orchestrate" "$runtime_dir/cc-orchestrate"

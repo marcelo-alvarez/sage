@@ -824,6 +824,7 @@ class StatusHandler(BaseHTTPRequestHandler):
     def _handle_execute_request(self, parsed_url, request_id):
         """Handle /api/execute endpoint for command execution with request tracking"""
         try:
+            print(f"[TRACE] _handle_execute_request called with request_id={request_id}")
             self._log_request(request_id, f"Execute request: {parsed_url.path}")
             # Read request body first
             content_length = int(self.headers.get('Content-Length', 0))
@@ -931,13 +932,21 @@ class StatusHandler(BaseHTTPRequestHandler):
                     })
                     
                 elif command == 'continue':
-                    # Run orchestrator continue in separate process
+                    # Run orchestrator continue in separate process using login shell
                     import subprocess
-                    cmd = ['cc-orchestrate', 'continue']
+                    
+                    # Use bash -l -c to ensure proper conda environment loading
+                    base_cmd = 'cc-orchestrate continue'
                     if mode == 'meta':
-                        cmd.append('meta')
+                        base_cmd += ' meta'
+                    
+                    cmd = ['bash', '-l', '-c', base_cmd]
                     
                     try:
+                        print(f"[TRACE] About to execute subprocess: {cmd}")
+                        print(f"[TRACE] Working directory: {self.project_root}")
+                        print(f"[TRACE] Current PATH: {os.environ.get('PATH', 'NOT SET')}")
+                        
                         process = subprocess.Popen(cmd, 
                                                    stdout=subprocess.PIPE, 
                                                    stderr=subprocess.PIPE,
