@@ -29,6 +29,24 @@ from process_manager import ProcessManager
 from orchestrator_logger import OrchestratorLogger
 
 
+def is_vscode_remote_session():
+    """Detect VS Code Remote-SSH session with robust error handling"""
+    try:
+        # Primary detection pattern
+        if os.environ.get('TERM_PROGRAM') == 'vscode':
+            if os.environ.get('SSH_CLIENT') or os.environ.get('SSH_TTY'):
+                return True
+        
+        # Secondary detection pattern  
+        if 'VSCODE_IPC_HOOK_CLI' in os.environ and os.environ.get('SSH_CLIENT'):
+            return True
+        
+        return False
+    except Exception:
+        # Always default to local behavior on errors
+        return False
+
+
 def find_available_port(start_port: int, max_attempts: int = 20) -> int:
     """Find an available port starting from start_port"""
     # Try the requested range first

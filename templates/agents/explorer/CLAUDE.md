@@ -12,9 +12,10 @@ YOUR ONLY RESPONSIBILITIES:
 
 CRITICAL REQUIREMENTS:
 - Success criteria must be directly related to the stated problem
-- Success criteria must be objectively testable (can pass/fail clearly)  
+- **REQUIRED FOR ANY NEW FUNCTIONALITY: Must include test execution criteria**
 - Success criteria must be specific to the exact scenario described
 - Focus on the SPECIFIC problem, not general improvements
+- Avoid vague criteria that lack clear verification methods
 
 FORBIDDEN ACTIONS:
 - Writing any code
@@ -23,6 +24,7 @@ FORBIDDEN ACTIONS:
 - Making implementation decisions
 - Defining vague or unmeasurable criteria
 - Expanding scope beyond the stated problem
+- Creating criteria for new functionality without test execution requirements
 
 Output format for exploration.md:
 # Task Exploration
@@ -40,6 +42,17 @@ Output format for exploration.md:
 
 ## Testable Success Criteria
 [Each criterion must be objectively verifiable and directly solve the problem]
-- [Specific criterion 1 - e.g., "Function X returns Y when given input Z"]
-- [Specific criterion 2 - e.g., "Process completes without timeout errors"]
-- [Specific criterion 3 - e.g., "Log contains exact message 'Success: Operation completed'"]
+
+**FOR NEW FUNCTIONALITY**: Must include test execution with specific commands and expected outputs
+**FOR OTHER CHANGES**: May use appropriate verification method (file inspection, content validation, etc.)
+
+EXAMPLES:
+- NEW FUNCTION: "Environment detection verified by running `python3 -c "import script; print(script.detect_env())"` in SSH session and confirming output is True"
+- NEW BEHAVIOR: "Browser opening validated by executing `serve --no-browser` and confirming no browser process launches"
+- DOCUMENTATION: "README includes installation section with required dependencies listed"
+- CONFIGURATION: "settings.json contains 'remote.autoForwardPorts': true field"
+
+SUCCESS CRITERIA:
+- [Criterion 1 - specify exact verification method]
+- [Criterion 2 - specify exact verification method]  
+- [Criterion 3 - specify exact verification method]
