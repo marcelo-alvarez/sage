@@ -2354,11 +2354,20 @@
             }
         }
 
-        // Get API Base URL
+        // Get API Base URL with VS Code forwarding detection
         function getAPIBaseURL() {
             if (discoveredAPIPort) {
                 return `http://localhost:${discoveredAPIPort}`;
             }
+            
+            // If no discovered port, but we're in VS Code forwarding environment,
+            // try to infer the API port based on dashboard port
+            const currentPort = parseInt(window.location.port);
+            if (currentPort && currentPort > 50000) {
+                console.log(`[DEBUG] No discoveredAPIPort, inferring from dashboard port ${currentPort}`);
+                return `http://localhost:${currentPort - 1}`; // Assume API is one port lower
+            }
+            
             return 'http://localhost:8000'; // fallback
         }
 
