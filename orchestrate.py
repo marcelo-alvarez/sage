@@ -403,9 +403,16 @@ class AgentConfig:
             # Set environment variable to ensure consistent ProcessManager mode
             dashboard_env = os.environ.copy()
             dashboard_env['CLAUDE_META_MODE'] = 'true' if self.meta_mode else 'false'
+            # Safe process group creation - fallback if setpgrp fails
+            def safe_setpgrp():
+                try:
+                    os.setpgrp()
+                except (OSError, PermissionError):
+                    pass  # Continue without process group if not allowed
+            
             self.dashboard_process = subprocess.Popen([
                 sys.executable, dashboard_script, str(self.dashboard_port)
-            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=self.project_root, start_new_session=True, preexec_fn=os.setpgrp, env=dashboard_env)
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=self.project_root, start_new_session=True, preexec_fn=safe_setpgrp, env=dashboard_env)
             
             # Register dashboard process with ProcessManager if available
             if self.process_manager:
@@ -3632,7 +3639,15 @@ def serve_command(args):
         
         # Start API server from current project directory to read .agent-outputs files
         current_dir = os.getcwd()
-        api_process = subprocess.Popen(api_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=current_dir, start_new_session=True, preexec_fn=os.setpgrp)
+        
+        # Safe process group creation - fallback if setpgrp fails
+        def safe_setpgrp():
+            try:
+                os.setpgrp()
+            except (OSError, PermissionError):
+                pass  # Continue without process group if not allowed
+        
+        api_process = subprocess.Popen(api_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=current_dir, start_new_session=True, preexec_fn=safe_setpgrp)
         process_manager.register_process('api_server', api_process)
         serve_logger.info(f"API server registered (PID: {api_process.pid})")
         
@@ -3660,9 +3675,16 @@ def serve_command(args):
         # Set environment variable to ensure consistent ProcessManager mode
         dashboard_env = os.environ.copy()
         dashboard_env['CLAUDE_META_MODE'] = 'true' if process_manager.meta_mode else 'false'
+        # Safe process group creation - fallback if setpgrp fails  
+        def safe_setpgrp_dash():
+            try:
+                os.setpgrp()
+            except (OSError, PermissionError):
+                pass  # Continue without process group if not allowed
+        
         dashboard_process = subprocess.Popen([
             sys.executable, dashboard_script, str(dashboard_port)
-        ], cwd=current_dir, start_new_session=True, preexec_fn=os.setpgrp, env=dashboard_env)
+        ], cwd=current_dir, start_new_session=True, preexec_fn=safe_setpgrp_dash, env=dashboard_env)
         process_manager.register_process('dashboard_server', dashboard_process)
         serve_logger.info(f"Dashboard server registered (PID: {dashboard_process.pid})")
         
