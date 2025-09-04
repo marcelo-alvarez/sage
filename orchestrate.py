@@ -1790,6 +1790,93 @@ class ClaudeCodeOrchestrator:
 
 This file serves as SAGE's persistent working memory for this project, containing architectural insights, recent discoveries, and known pitfalls to prevent redundant exploration.
 
+## Diagnostic-First Principles (CRITICAL)
+
+### Empirical Verification Requirements
+- NEVER trust problem descriptions without reproduction
+- ALWAYS execute failing commands before analyzing code
+- REQUIRE specific reproduction steps for all issues
+- DOCUMENT exact failure points with evidence
+
+### Root Cause Methodology
+- Focus on CAUSES not symptoms
+- Identify precise failure locations (line numbers, system calls)
+- Build evidence chains from observation to conclusion
+- Challenge assumptions through testing
+
+## Critical Anti-Patterns by Task Type
+
+### For Bug Fixes - Symptom Masking (Forbidden)
+❌ Adding timeouts to hanging operations
+❌ Adding retries to failing operations  
+❌ Adding monitoring to broken systems
+❌ Adding error handling to hide failures
+❌ Implementing "better coordination" without fixing coordination bugs
+❌ Trusting problem descriptions without empirical verification
+❌ Implementing solutions before reproducing and diagnosing issues
+
+### For Features - Poor Design (Forbidden)  
+❌ Adding functionality without understanding requirements
+❌ Ignoring existing architectural patterns
+❌ Skipping integration planning
+❌ Implementing without proper testing strategy
+❌ Creating features that don't fit the existing system
+
+### For Enhancements - Unmeasured Changes (Forbidden)
+❌ Making improvements without baseline measurements
+❌ Optimizing without identifying bottlenecks  
+❌ Enhancing without defining success metrics
+❌ Changing functionality without preserving backward compatibility
+
+### For Refactoring - Behavior Changes (Forbidden)
+❌ Changing functionality while refactoring
+❌ Refactoring without comprehensive behavior documentation
+❌ Breaking existing tests during restructuring
+❌ Refactoring without understanding existing behavior
+
+### For All Tasks - General Anti-Patterns (Forbidden)
+❌ Expanding scope beyond stated requirements
+❌ Skipping user validation checkpoints
+❌ Ignoring complexity budget constraints
+❌ Making assumptions without verification
+
+## Correct Patterns by Task Type - ALWAYS DO THESE
+
+### For Bug Fixes - Evidence-Based Problem Solving
+✅ Reproduce issues with exact commands before analysis
+✅ Identify root causes through empirical testing
+✅ Fix actual problems, not symptoms
+✅ Verify fixes by running original failing commands
+✅ Document evidence supporting all conclusions
+
+### For Features - Requirements-Driven Development
+✅ Understand user requirements thoroughly before design
+✅ Design features that integrate well with existing architecture
+✅ Plan comprehensive testing strategy during design phase
+✅ Implement with proper error handling and monitoring
+✅ Validate features meet all stated requirements
+
+### For Enhancements - Measurement-Driven Improvement  
+✅ Establish measurable baselines before making changes
+✅ Identify specific bottlenecks through analysis
+✅ Define clear improvement targets with metrics
+✅ Preserve backward compatibility while enhancing
+✅ Validate improvements achieve stated targets
+
+### For Refactoring - Behavior-Preserving Restructuring
+✅ Document existing behavior comprehensively before changes
+✅ Maintain identical functionality throughout refactoring
+✅ Ensure all existing tests continue to pass
+✅ Improve code quality while preserving behavior
+✅ Validate no regressions were introduced
+
+### For All Tasks - Universal Best Practices
+✅ Follow established architectural patterns and conventions
+✅ Respect complexity budgets and scope boundaries  
+✅ Use appropriate validation checkpoints with users
+✅ Test assumptions through verification when uncertain
+✅ Document decisions and rationale clearly
+
 ## Architecture Quick Reference
 
 ### Core Components
@@ -1809,9 +1896,37 @@ This file serves as SAGE's persistent working memory for this project, containin
 
 *Common mistakes, edge cases, and critical rules to avoid repeated issues*
 
+### Bug Fix Pitfalls
+*Issues caused by skipping empirical verification*
+*Problems from treating symptoms instead of causes*
+*Failures from trusting problem descriptions without testing*
+
+### Feature Development Pitfalls  
+*Issues from inadequate requirements analysis*
+*Problems from ignoring existing architectural patterns*
+*Integration failures from poor planning*
+
+### Enhancement Pitfalls
+*Problems from optimizing without measuring*
+*Issues from changing behavior instead of improving performance*
+*Regressions from insufficient backward compatibility testing*
+
+### Refactoring Pitfalls
+*Behavior changes introduced during code restructuring*
+*Test failures from inadequate behavior documentation*
+*Quality degradation from rushed refactoring*
+
+### Universal Pitfalls
+*Scope creep beyond stated requirements*
+*Complexity budget violations leading to unmaintainable code*
+*Validation checkpoint skipping causing misaligned expectations*
+
 ## Implementation Patterns
 
 *Recurring patterns, conventions, and architectural decisions used in this project*
+
+### Problem Resolution Patterns
+*Effective diagnostic and solution approaches discovered for this project*
 '''
 
     def _get_sage_meta_template(self):
@@ -3281,72 +3396,138 @@ Continuing to next task in workflow
         claude_dir_name = self.claude_dir.name  # Will be '.claude' or '.claude-meta'
         
         bootstrap_instructions = f"""
-BOOTSTRAP MODE: Generate human-in-the-loop task structure for the project
+BOOTSTRAP MODE: Generate task structure appropriate for work type
 
-CRITICAL REQUIREMENTS:
-1. Generate TWO files: task-checklist.md and guide.md
-2. Each task must be ONE PARAGRAPH on a SINGLE LINE (no line breaks within tasks)
-3. Create 10-15 tasks MAXIMUM per taskset
-4. Balance tasks for roughly equal complexity and likelihood of success
-5. Embed USER validation checkpoints directly in the task sequence
-6. USER tasks must start with "USER" (e.g., USER VALIDATION, USER TEST, USER REVIEW)
+TASK TYPE ANALYSIS - First determine what kind of work this is:
+
+FOR BUG FIXES (something is broken):
+- Use diagnostic-first approach: Diagnose → Fix → Validate
+- Require empirical reproduction of failures
+- Focus on root cause elimination
+
+FOR NEW FEATURES (adding functionality):
+- Use design-first approach: Explore → Design → Implement → Test
+- Focus on requirements and integration patterns
+- Ensure proper testing of new capabilities
+
+FOR ENHANCEMENTS (improving existing features):
+- Use analysis-first approach: Analyze → Enhance → Measure
+- Establish current state and improvement targets
+- Validate that improvements are achieved
+
+FOR REFACTORING (restructuring without behavior change):
+- Use preserve-first approach: Document → Refactor → Verify
+- Ensure behavior is preserved during restructuring
+- Focus on code quality improvements
+
+FOR DOCUMENTATION/TESTING:
+- Use coverage-first approach: Identify gaps → Create content → Validate
+
+TASK STRUCTURE PATTERNS:
+
+### Bug Fix Pattern (for broken systems)
+- Task 1: Diagnose [problem] by reproducing with [specific command] 
+- USER VALIDATION A: Confirm root cause identified correctly
+- Task 2: Fix root cause [specific cause from diagnosis]
+- USER TEST B: Verify original failure resolved
+
+### Feature Pattern (for new functionality) 
+- Task 1: Explore [requirements] and design [feature architecture]
+- USER REVIEW A: Approve design and integration approach
+- Task 2: Implement [feature] following approved design
+- Task 3: Test [feature] functionality and integration
+- USER TEST B: Validate feature meets requirements
+
+### Enhancement Pattern (for improvements)
+- Task 1: Analyze current [system] performance/behavior
+- Task 2: Implement [specific improvements] 
+- USER TEST A: Measure and validate improvements achieved
+
+### Refactoring Pattern (for code quality)
+- Task 1: Document current [code area] behavior and identify refactoring scope
+- Task 2: Refactor [code area] maintaining behavior
+- USER VALIDATION A: Verify behavior unchanged after refactoring
 
 FILE STRUCTURE TO CREATE:
 
 ## {claude_dir_name}/guide.md
-Comprehensive implementation guide that:
-- Describes the overall goal and architecture
-- Defines success criteria for the entire taskset
-- Explains key design decisions and trade-offs
-- Provides detailed implementation patterns and best practices
-- Includes architectural guidance to prevent common coding errors
-- Self-contained reference with both conceptual and technical guidance
+Comprehensive implementation guide that adapts to task type:
+- For BUG FIXES: Starts with diagnostic methodology and empirical verification
+- For FEATURES: Focuses on requirements analysis and design patterns
+- For ENHANCEMENTS: Includes current state analysis and improvement metrics
+- For REFACTORING: Documents behavior preservation and quality improvements
+- Always includes appropriate anti-patterns for the task type
+- Provides success criteria templates for different work types
 
-## {claude_dir_name}/task-checklist.md
-Actionable checklist where:
-- Each line is one task with comprehensive description
-- Tasks reference {claude_dir_name}/guide.md sections for implementation details
-- Format: - [ ] Brief description implementing the [aspect] design from {claude_dir_name}/guide.md section [X]
-- USER tasks clearly start with "USER" keyword
+## {claude_dir_name}/task-checklist.md  
+Task-appropriate checklist where:
+- Bug fixes use diagnostic → solution → validation pattern
+- Features use explore → design → implement → test pattern  
+- Enhancements use analyze → improve → measure pattern
+- Refactoring uses document → restructure → verify pattern
+- USER validation points are contextually appropriate
 
-TASK STRUCTURE PATTERN:
-1. Implementation task (agents do work)
-2. USER VALIDATION task (human tests and verifies)
-3. Implementation task (agents continue)
-4. USER TEST task (human tests again)
-[Repeat pattern throughout]
+CONTEXTUAL SECTIONS IN GUIDE.MD:
 
-USER TASK FORMAT:
-"USER [TYPE] [ID]: [Description of what to test] by executing these specific commands: (1) [command], (2) [command], (3) [verification step], checking that [expected outcome], and documenting results in [location] before proceeding - DO NOT CONTINUE if [failure condition]"
+### For Bug Fixes - Diagnostic Methodology
+1. Execute failing commands to reproduce issue
+2. Document actual vs expected behavior  
+3. Identify precise failure point with evidence
+4. Determine root cause through analysis
+5. Never add timeouts/retries - fix the cause
 
-Types can be: VALIDATION, TEST, REVIEW, CHECK, VERIFY, etc.
+### For Features - Design Methodology  
+1. Analyze requirements and user needs
+2. Design architecture and integration approach
+3. Plan implementation with proper testing
+4. Ensure scalability and maintainability
+
+### For Enhancements - Improvement Methodology
+1. Measure current performance/behavior
+2. Define improvement targets with metrics
+3. Implement enhancements systematically
+4. Validate improvements are achieved
+
+### For Refactoring - Preservation Methodology
+1. Document current behavior thoroughly
+2. Identify refactoring scope and goals
+3. Restructure while preserving functionality
+4. Verify no behavior changes occurred
+
+CONTEXTUAL ANTI-PATTERNS:
+
+FOR BUG FIXES:
+❌ Adding timeouts to hanging operations
+❌ Masking symptoms instead of fixing causes
+❌ Assuming problems without empirical verification
+
+FOR ALL TASKS:
+❌ Expanding scope beyond stated requirements
+❌ Skipping user validation points
+❌ Ignoring existing patterns and conventions
 
 ANALYSIS TO PERFORM:
-1. Examine project structure and existing code
-2. Identify the primary objective/problem to solve
-3. Break down into logical implementation chunks
-4. Insert USER checkpoints after each major feature
-5. Ensure each task is independently testable
+1. Ask user to identify the task type (bug fix, feature, enhancement, refactor, other)
+2. For bugs: Ask for failing commands or symptoms
+3. For features: Ask for requirements and success criteria  
+4. For enhancements: Ask for current state and improvement goals
+5. Choose appropriate task structure based on type
+6. Insert relevant USER validation points for the task type
 
 QUESTIONS TO ASK USER:
-1. "What is the primary goal for this taskset?"
-2. "What constitutes success for this work?"
-3. "Are there specific areas that need extra validation?"
-4. "What's your risk tolerance for this implementation?"
-5. "Should this be production-ready or prototype?"
+1. "What type of work is this? (bug fix/feature/enhancement/refactor/documentation/other)"
+2. If bug fix: "What specific commands or operations are failing?"
+3. If feature: "What new functionality should be added and how should it work?"
+4. If enhancement: "What should be improved and how will you measure success?"
+5. If refactor: "What code should be restructured and why?"
+6. "What constitutes success for this work?"
+7. "Are there any specific constraints or requirements?"
 
-TASK BALANCING:
-- Each task should take roughly 1-3 agent cycles
-- USER tasks should take 5-15 minutes of human time
-- Complex features split across multiple tasks with validation between
-- No task should be a single line of code change
-- No task should be a complete rewrite
-
-Begin by analyzing the current directory and asking about the goal.
+Begin by asking the user to identify the task type and provide relevant details.
 """
         
         print("\n" + "="*60)
-        print("BOOTSTRAP MODE: Generating Initial Tasks")
+        print("BOOTSTRAP MODE: Generating Task Structure for Any Work Type")
         print("="*60)
         print(bootstrap_instructions)
         print("="*60)
