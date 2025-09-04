@@ -47,6 +47,23 @@ def is_vscode_remote_session():
         return False
 
 
+def cleanup_vscode_orphaned_ports():
+    """Clean up orphaned processes that may be holding ports in VS Code Remote-SSH"""
+    if not is_vscode_remote_session():
+        return
+    
+    try:
+        # Check for orphaned orchestrator processes
+        import subprocess
+        result = subprocess.run(['pgrep', '-f', 'cc-orchestrate'], capture_output=True, text=True)
+        if result.returncode == 0:
+            pids = result.stdout.strip().split('\n')
+            if len(pids) > 1:  # More than current process
+                print(f"Found {len(pids)} orchestrator processes - consider cleanup")
+    except Exception:
+        pass  # Silent failure for cleanup utilities
+
+
 def find_available_port(start_port: int, max_attempts: int = 20) -> int:
     """Find an available port starting from start_port"""
     # Try the requested range first
@@ -3512,26 +3529,38 @@ def serve_command(args):
     serve_logger = OrchestratorLogger("orchestrator-serve")
     serve_logger.info("Starting orchestrator serve command")
     
-    # Clean up any orphaned processes from previous runs
+    # VS Code Remote-SSH port cleanup
+    cleanup_vscode_orphaned_ports()
+    
+    # Clean up any orphaned processes from previous runs (skip for now to avoid SIGTERM issues)
     serve_logger.info("Checking for orphaned processes from previous runs...")
     process_manager = ProcessManager()
     try:
-        orphaned_cleaned = process_manager.cleanup_system_wide()
-        if orphaned_cleaned:
-            serve_logger.info("Cleaned up orphaned processes, ports should be available")
-            time.sleep(1)  # Brief delay to ensure ports are released
+        # Skip system-wide cleanup during startup to avoid killing current process
+        # Instead, let the port detection handle occupied ports
+        serve_logger.info("Skipping aggressive cleanup to avoid terminating current process")
+        # orphaned_cleaned = process_manager.cleanup_system_wide()
     except Exception as cleanup_error:
         serve_logger.warning(f"Startup cleanup failed: {cleanup_error}")
         # Continue anyway - port detection will handle it
     
-    # Dashboard browser opening function - prefers Safari for WebSocket compatibility
+    # Dashboard browser opening function - optimized for VS Code Remote-SSH
     def open_dashboard_browser(url):
-        """Open dashboard in Safari (preferred) or fallback to default browser"""
+        """Open dashboard in browser, with VS Code Remote-SSH compatibility"""
         try:
             import subprocess
             import sys
+            import webbrowser
             
-            # Try Safari first on macOS for best WebSocket compatibility
+            # VS Code Remote-SSH environments should use webbrowser module first
+            # as it's more likely to be intercepted by VS Code
+            if is_remote:
+                serve_logger.info("Using webbrowser module for VS Code Remote-SSH compatibility")
+                webbrowser.open(url)
+                serve_logger.info("Opened dashboard via webbrowser module (VS Code should handle forwarding)")
+                return True
+            
+            # Local environments: Try Safari first on macOS for best WebSocket compatibility
             if sys.platform == 'darwin':  # macOS
                 try:
                     subprocess.Popen(['open', '-a', 'Safari', url], 
@@ -3541,8 +3570,7 @@ def serve_command(args):
                 except Exception as safari_error:
                     serve_logger.warning(f"Could not open Safari: {safari_error}")
             
-            # Fallback to default browser
-            import webbrowser
+            # Fallback to default browser for local environments
             webbrowser.open(url)
             serve_logger.info("Opened dashboard in default browser")
             serve_logger.warning("Note: Terminal functionality works best in Safari/Chrome")
@@ -3758,7 +3786,8 @@ def serve_command(args):
             serve_logger.warning(f"Dashboard server may not have started properly on port {dashboard_port}")
         
         # Open browser immediately once dashboard is confirmed ready
-        dashboard_url = f"http://localhost:{dashboard_port}"
+        # Use 127.0.0.1 for consistency in VS Code Remote-SSH
+        dashboard_url = f"http://127.0.0.1:{dashboard_port}" if is_vscode_remote_session() else f"http://localhost:{dashboard_port}"
         
         # Check for VS Code remote session
         is_remote = is_vscode_remote_session()
@@ -3766,21 +3795,13 @@ def serve_command(args):
         if not args.no_browser and dashboard_ready:
             if is_remote:
                 serve_logger.info("VS Code Remote-SSH session detected")
-                # VS Code-compatible stdout patterns for automatic port forwarding detection
-                print(f"\n{'='*60}")
-                print(f"🚀 Dashboard ready!")
-                print(f"{'='*60}")
-                print(f"Server listening on http://localhost:{dashboard_port}")
-                print(f"\nAccess your dashboard at: {dashboard_url}")
-                print(f"API endpoint: http://localhost:{api_port}/api/status")
-                print(f"\nVS Code should automatically forward these ports.")
-                print(f"Look for the notification or check Ports panel (Cmd/Ctrl+Shift+P → 'Forward a Port')")
-                print(f"{'='*60}\n")
-                # Maintain existing logger for debugging
-                serve_logger.info("To access the dashboard in VS Code Remote-SSH:")
-                serve_logger.info(f"1. Use VS Code port forwarding for port {dashboard_port}")
-                serve_logger.info(f"2. Open forwarded URL in browser: {dashboard_url}")
-                serve_logger.info("3. VS Code will automatically handle port forwarding")
+                # Simplified output to prevent multiple auto-forwards
+                print(f"\n🚀 Dashboard ready at http://127.0.0.1:{dashboard_port}")
+                print(f"   API endpoint: http://127.0.0.1:{api_port}/api/status")
+                print(f"   Use forwarded ports in VS Code PORTS panel")
+                serve_logger.info("VS Code will handle port forwarding - check PORTS panel for forwarded addresses")
+                # Attempt to open browser on local machine
+                open_dashboard_browser(dashboard_url)
             else:
                 serve_logger.info(f"Opening browser to {dashboard_url}")
                 open_dashboard_browser(dashboard_url)

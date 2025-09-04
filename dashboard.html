@@ -2387,22 +2387,20 @@
         async function discoverAPIPort(retryCount = 0) {
             console.log(`[DEBUG] discoverAPIPort called, retryCount: ${retryCount}`);
             
-            // Check if we're running in VS Code port forwarding environment
-            // Dashboard typically runs on forwarded ports like 51788, API on adjacent port
             const currentPort = parseInt(window.location.port);
             console.log(`[DEBUG] Current dashboard port: ${currentPort}`);
             
+            // VS Code Remote-SSH detection via user agent and environment
+            const isVSCodeRemote = navigator.userAgent.includes('VS Code') || 
+                                 window.location.hostname === 'localhost' && currentPort === 5678;
+            
             let possiblePorts;
-            if (currentPort && currentPort > 50000) {
-                // VS Code port forwarding - try adjacent ports
-                console.log('[DEBUG] Detected VS Code port forwarding environment');
-                possiblePorts = [
-                    currentPort - 1,  // e.g., 51787 if dashboard is 51788
-                    currentPort + 1,  // e.g., 51789 if dashboard is 51788
-                    8000, 8001, 8002  // fallback to standard ports
-                ];
+            if (isVSCodeRemote) {
+                console.log('[DEBUG] Detected VS Code Remote-SSH environment');
+                // In VS Code Remote-SSH, both dashboard and API use their standard ports
+                possiblePorts = [8000, 8001, 8002];
             } else {
-                // Standard environment
+                // Standard local environment
                 possiblePorts = [8000, 8001, 8002];
             }
             
@@ -2462,21 +2460,14 @@
             }
         }
 
-        // Get API Base URL with VS Code forwarding detection
+        // Get API Base URL
         function getAPIBaseURL() {
             if (discoveredAPIPort) {
                 return `http://localhost:${discoveredAPIPort}`;
             }
             
-            // If no discovered port, but we're in VS Code forwarding environment,
-            // try to infer the API port based on dashboard port
-            const currentPort = parseInt(window.location.port);
-            if (currentPort && currentPort > 50000) {
-                console.log(`[DEBUG] No discoveredAPIPort, inferring from dashboard port ${currentPort}`);
-                return `http://localhost:${currentPort - 1}`; // Assume API is one port lower
-            }
-            
-            return 'http://localhost:8000'; // fallback
+            // Fallback to standard API port
+            return 'http://localhost:8000';
         }
 
         // Gate decision mappings
