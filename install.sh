@@ -269,6 +269,18 @@ install_orchestrator_runtime() {
     print_success "Orchestrator runtime installed globally"
 }
 
+# Copy VS Code settings template to project directory
+copy_vscode_template() {
+    # Create .vscode directory if it doesn't exist
+    mkdir -p .vscode
+    
+    # Copy VS Code settings template only if it doesn't exist
+    if [ ! -f ".vscode/settings.json" ] && [ -f "$TEMP_DIR/templates/vscode-settings.json" ]; then
+        cp "$TEMP_DIR/templates/vscode-settings.json" .vscode/settings.json
+        print_info "Created .vscode/settings.json from template for VS Code Remote-SSH support"
+    fi
+}
+
 # Initialize project files
 initialize_project() {
     if [ -n "$PROJECT_DIR" ]; then
@@ -299,6 +311,9 @@ initialize_project() {
         cp "$TEMP_DIR/templates/CLAUDE.md" CLAUDE.md
         print_info "Created CLAUDE.md from template - please customize the PROJECT OVERVIEW section"
     fi
+    
+    # Copy VS Code settings template for Remote-SSH support
+    copy_vscode_template
     
     print_success "Project files initialized"
 }

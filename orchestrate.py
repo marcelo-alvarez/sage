@@ -29,6 +29,24 @@ from process_manager import ProcessManager
 from orchestrator_logger import OrchestratorLogger
 
 
+def is_vscode_remote_session():
+    """Detect VS Code Remote-SSH session with robust error handling"""
+    try:
+        # Primary detection pattern
+        if os.environ.get('TERM_PROGRAM') == 'vscode':
+            if os.environ.get('SSH_CLIENT') or os.environ.get('SSH_TTY'):
+                return True
+        
+        # Secondary detection pattern  
+        if 'VSCODE_IPC_HOOK_CLI' in os.environ and os.environ.get('SSH_CLIENT'):
+            return True
+        
+        return False
+    except Exception:
+        # Always default to local behavior on errors
+        return False
+
+
 def find_available_port(start_port: int, max_attempts: int = 20) -> int:
     """Find an available port starting from start_port"""
     # Try the requested range first
@@ -372,7 +390,8 @@ class AgentConfig:
             api_script = os.path.join(orchestrator_dir, "api_server.py")
             self.api_process = subprocess.Popen([
                 sys.executable, api_script, 
-                '--port', str(self.api_port)
+                '--port', str(self.api_port),
+                '--project-root', str(self.project_root)
             ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=self.project_root, start_new_session=True, preexec_fn=os.setpgrp)
             
             # Register API process with ProcessManager if available
@@ -385,9 +404,16 @@ class AgentConfig:
             # Set environment variable to ensure consistent ProcessManager mode
             dashboard_env = os.environ.copy()
             dashboard_env['CLAUDE_META_MODE'] = 'true' if self.meta_mode else 'false'
+            # Safe process group creation - fallback if setpgrp fails
+            def safe_setpgrp():
+                try:
+                    os.setpgrp()
+                except (OSError, PermissionError):
+                    pass  # Continue without process group if not allowed
+            
             self.dashboard_process = subprocess.Popen([
                 sys.executable, dashboard_script, str(self.dashboard_port)
-            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=self.project_root, start_new_session=True, preexec_fn=os.setpgrp, env=dashboard_env)
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=self.project_root, start_new_session=True, preexec_fn=safe_setpgrp, env=dashboard_env)
             
             # Register dashboard process with ProcessManager if available
             if self.process_manager:
@@ -1095,12 +1121,20 @@ class AgentExecutor:
         log_file = self.orchestrator.outputs_dir / f"{agent_type}-log.md"
         fallback_content = self._generate_fallback_report(agent_type, expected_file, log_file)
         
+        # For scribe agent, write to scribe-fallback.md instead of overwriting scribe.md
+        if agent_type == "scribe":
+            fallback_path = self.orchestrator.outputs_dir / "scribe-fallback.md"
+            fallback_filename = "scribe-fallback.md"
+        else:
+            fallback_path = report_path
+            fallback_filename = expected_file
+        
         try:
-            with open(report_path, 'w') as f:
+            with open(fallback_path, 'w') as f:
                 f.write(fallback_content)
-            print(f"Created fallback {expected_file} based on {agent_type} log")
+            print(f"Created fallback {fallback_filename} based on {agent_type} log")
         except Exception as e:
-            print(f"Error creating fallback {expected_file}: {e}")
+            print(f"Error creating fallback {fallback_filename}: {e}")
 
     def _generate_fallback_report(self, agent_type, report_filename, log_file):
         """Generate fallback report content based on agent type and log"""
@@ -3478,6 +3512,18 @@ def serve_command(args):
     serve_logger = OrchestratorLogger("orchestrator-serve")
     serve_logger.info("Starting orchestrator serve command")
     
+    # Clean up any orphaned processes from previous runs
+    serve_logger.info("Checking for orphaned processes from previous runs...")
+    process_manager = ProcessManager()
+    try:
+        orphaned_cleaned = process_manager.cleanup_system_wide()
+        if orphaned_cleaned:
+            serve_logger.info("Cleaned up orphaned processes, ports should be available")
+            time.sleep(1)  # Brief delay to ensure ports are released
+    except Exception as cleanup_error:
+        serve_logger.warning(f"Startup cleanup failed: {cleanup_error}")
+        # Continue anyway - port detection will handle it
+    
     # Dashboard browser opening function - prefers Safari for WebSocket compatibility
     def open_dashboard_browser(url):
         """Open dashboard in Safari (preferred) or fallback to default browser"""
@@ -3517,22 +3563,27 @@ def serve_command(args):
         except (urllib.error.URLError, urllib.error.HTTPError, OSError):
             return False
     
-    # Find available ports
+    # Find available ports (after cleanup, standard ports should be available)
     dashboard_port = find_available_port(5678, 20)
     if dashboard_port == 5678:
-        serve_logger.info(f"Dashboard server will use port {dashboard_port}")
+        serve_logger.info(f"Dashboard server will use standard port {dashboard_port}")
     else:
-        serve_logger.warning(f"Port 5678 busy, using fallback port {dashboard_port}")
+        serve_logger.warning(f"Dashboard server using fallback port {dashboard_port} (5678 still occupied)")
     
     api_port = find_available_port(8000, 20)
     if api_port == 8000:
-        serve_logger.info(f"API server will use port {api_port}")
+        serve_logger.info(f"API server will use standard port {api_port}")
     else:
-        serve_logger.warning(f"Port 8000 busy, using fallback port {api_port}")
+        serve_logger.warning(f"API server using fallback port {api_port} (8000 still occupied)")
     
     # Initialize process manager (check for meta mode via environment)
     meta_mode = os.getenv('CLAUDE_ORCHESTRATOR_META_MODE') == '1'
-    process_manager = ProcessManager(meta_mode=meta_mode)
+    # Reuse the process_manager from startup cleanup
+    if 'process_manager' not in locals():
+        process_manager = ProcessManager(meta_mode=meta_mode)
+    else:
+        # Update meta mode if needed
+        process_manager.meta_mode = meta_mode
     
     # Register main serve process so it can be terminated by stop command
     process_manager.register_main_process("serve-main")
@@ -3610,11 +3661,19 @@ def serve_command(args):
         serve_logger.info(f"Starting API server on port {api_port}...")
         orchestrator_dir = os.path.expanduser("~/.claude-orchestrator")
         api_script = os.path.join(orchestrator_dir, "api_server.py")
-        api_cmd = [sys.executable, api_script, "--port", str(api_port), "--no-browser"]
         
         # Start API server from current project directory to read .agent-outputs files
         current_dir = os.getcwd()
-        api_process = subprocess.Popen(api_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=current_dir, start_new_session=True, preexec_fn=os.setpgrp)
+        api_cmd = [sys.executable, api_script, "--port", str(api_port), "--no-browser", "--project-root", current_dir]
+        
+        # Safe process group creation - fallback if setpgrp fails
+        def safe_setpgrp():
+            try:
+                os.setpgrp()
+            except (OSError, PermissionError):
+                pass  # Continue without process group if not allowed
+        
+        api_process = subprocess.Popen(api_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=current_dir, start_new_session=True, preexec_fn=safe_setpgrp)
         process_manager.register_process('api_server', api_process)
         serve_logger.info(f"API server registered (PID: {api_process.pid})")
         
@@ -3642,9 +3701,16 @@ def serve_command(args):
         # Set environment variable to ensure consistent ProcessManager mode
         dashboard_env = os.environ.copy()
         dashboard_env['CLAUDE_META_MODE'] = 'true' if process_manager.meta_mode else 'false'
+        # Safe process group creation - fallback if setpgrp fails  
+        def safe_setpgrp_dash():
+            try:
+                os.setpgrp()
+            except (OSError, PermissionError):
+                pass  # Continue without process group if not allowed
+        
         dashboard_process = subprocess.Popen([
             sys.executable, dashboard_script, str(dashboard_port)
-        ], cwd=current_dir, start_new_session=True, preexec_fn=os.setpgrp, env=dashboard_env)
+        ], cwd=current_dir, start_new_session=True, preexec_fn=safe_setpgrp_dash, env=dashboard_env)
         process_manager.register_process('dashboard_server', dashboard_process)
         serve_logger.info(f"Dashboard server registered (PID: {dashboard_process.pid})")
         
@@ -3693,9 +3759,31 @@ def serve_command(args):
         
         # Open browser immediately once dashboard is confirmed ready
         dashboard_url = f"http://localhost:{dashboard_port}"
+        
+        # Check for VS Code remote session
+        is_remote = is_vscode_remote_session()
+        
         if not args.no_browser and dashboard_ready:
-            serve_logger.info(f"Opening browser to {dashboard_url}")
-            open_dashboard_browser(dashboard_url)
+            if is_remote:
+                serve_logger.info("VS Code Remote-SSH session detected")
+                # VS Code-compatible stdout patterns for automatic port forwarding detection
+                print(f"\n{'='*60}")
+                print(f"🚀 Dashboard ready!")
+                print(f"{'='*60}")
+                print(f"Server listening on http://localhost:{dashboard_port}")
+                print(f"\nAccess your dashboard at: {dashboard_url}")
+                print(f"API endpoint: http://localhost:{api_port}/api/status")
+                print(f"\nVS Code should automatically forward these ports.")
+                print(f"Look for the notification or check Ports panel (Cmd/Ctrl+Shift+P → 'Forward a Port')")
+                print(f"{'='*60}\n")
+                # Maintain existing logger for debugging
+                serve_logger.info("To access the dashboard in VS Code Remote-SSH:")
+                serve_logger.info(f"1. Use VS Code port forwarding for port {dashboard_port}")
+                serve_logger.info(f"2. Open forwarded URL in browser: {dashboard_url}")
+                serve_logger.info("3. VS Code will automatically handle port forwarding")
+            else:
+                serve_logger.info(f"Opening browser to {dashboard_url}")
+                open_dashboard_browser(dashboard_url)
         
         serve_logger.info(f"Dashboard available at: {dashboard_url}")
         serve_logger.info(f"Dashboard UI at: {dashboard_url}/dashboard.html") 

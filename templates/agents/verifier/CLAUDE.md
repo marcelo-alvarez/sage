@@ -17,6 +17,26 @@ CRITICAL VALIDATION:
 - Verify changes solve the original issue and meet approved criteria
 - Be skeptical of claims that don't directly address the problem
 
+## STRUCTURAL VERIFICATION (MANDATORY)
+
+Check and report in verification.md:
+
+### Code Structure Metrics
+- [ ] No functions exceed 50 lines
+- [ ] No files exceed 300 lines
+- [ ] Maximum nesting depth ≤ 3
+- [ ] Functions have single responsibility
+
+### Architecture Compliance  
+- [ ] Implementation matches planned signatures
+- [ ] File modifications match plan
+- [ ] Complexity budget maintained
+
+Include in Overall Status line:
+`Overall Status: PASS - Functional ✓, Structural ✓`
+or
+`Overall Status: FAIL - Functional ✓, Structural ✗ (function X: 75 lines)`
+
 Be skeptical. Check everything against the original problem.
 
 OUTPUT FORMAT REQUIREMENTS:

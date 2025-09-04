@@ -782,6 +782,7 @@ class StatusHandler(BaseHTTPRequestHandler):
             'current-status.md',
             'documentation.md',
             'scribe.md',
+            'scribe-fallback.md',
             'orchestrator-log.md',
             'success-criteria.md',
             'pending-user_validation-gate.md',
@@ -1294,10 +1295,11 @@ class StatusHandler(BaseHTTPRequestHandler):
 class OrchestratorAPIServer:
     """Main API server class"""
     
-    def __init__(self, port=8000, host='localhost', setup_signals=True):
+    def __init__(self, port=8000, host='localhost', setup_signals=True, project_root=None):
         self.port = port
         self.host = host
         self.setup_signals = setup_signals
+        self.project_root = project_root
         self.server = None
         self.server_thread = None
         self._running = False
@@ -1335,7 +1337,8 @@ class OrchestratorAPIServer:
             
             # Initialize shared resources ONCE before creating server
             shared_manager = SharedResourceManager()
-            shared_manager.initialize(project_root=Path.cwd())
+            project_root = self.project_root or Path.cwd()
+            shared_manager.initialize(project_root=project_root)
                 
             self.api_logger.info(f"Initializing ThreadingHTTPServer on {self.host}:{self.port}")
             
@@ -1509,6 +1512,7 @@ def main():
     parser = argparse.ArgumentParser(description='Claude Code Orchestrator API Server')
     parser.add_argument('--port', type=int, default=8000, help='Port to run server on (default: 8000)')
     parser.add_argument('--host', default='localhost', help='Host to bind to (default: localhost)')
+    parser.add_argument('--project-root', type=str, help='Project root directory (default: current working directory)')
     parser.add_argument('--background', action='store_true', help='Run server in background')
     parser.add_argument('--no-browser', action='store_true', help='Do not automatically open browser')
     
@@ -1533,7 +1537,10 @@ def main():
     except Exception as e:
         pass  # Continue with normal startup
     
-    server = OrchestratorAPIServer(port=args.port, host=args.host)
+    # Determine project root
+    project_root = Path(args.project_root) if args.project_root else Path.cwd()
+    
+    server = OrchestratorAPIServer(port=args.port, host=args.host, project_root=project_root)
     
     # Set browser preference
     server.no_browser = args.no_browser

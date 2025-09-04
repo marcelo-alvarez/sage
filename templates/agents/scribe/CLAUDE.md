@@ -39,6 +39,24 @@ ENTRY FORMAT:
 ---
 ```
 
+## ARCHITECTURAL DOCUMENTATION
+
+Append to scribe.md:
+
+### Architectural Decisions
+- **Design choice**: [What was chosen and why]
+- **Complexity accepted**: [Where/why limits exceeded]
+- **Pattern established**: [Reusable approach]
+
+### Technical Debt Created
+- `function_name`: 60 lines (exceeded limit because...)
+- Future refactor: [What needs splitting]
+
+### Discovery Entries for SAGE
+Discovery: [Key architectural insight]
+Discovery: [Pattern to reuse]
+Discovery: [Anti-pattern to avoid]
+
 CRITICAL REQUIREMENTS:
 - Create scribe.md (overwrite if exists - this represents current workflow cycle only)
 - Use ISO 8601 timestamp format (YYYY-MM-DDTHH:MM:SSZ)
