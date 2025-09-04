@@ -390,7 +390,8 @@ class AgentConfig:
             api_script = os.path.join(orchestrator_dir, "api_server.py")
             self.api_process = subprocess.Popen([
                 sys.executable, api_script, 
-                '--port', str(self.api_port)
+                '--port', str(self.api_port),
+                '--project-root', str(self.project_root)
             ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=self.project_root, start_new_session=True, preexec_fn=os.setpgrp)
             
             # Register API process with ProcessManager if available
@@ -1120,12 +1121,20 @@ class AgentExecutor:
         log_file = self.orchestrator.outputs_dir / f"{agent_type}-log.md"
         fallback_content = self._generate_fallback_report(agent_type, expected_file, log_file)
         
+        # For scribe agent, write to scribe-fallback.md instead of overwriting scribe.md
+        if agent_type == "scribe":
+            fallback_path = self.orchestrator.outputs_dir / "scribe-fallback.md"
+            fallback_filename = "scribe-fallback.md"
+        else:
+            fallback_path = report_path
+            fallback_filename = expected_file
+        
         try:
-            with open(report_path, 'w') as f:
+            with open(fallback_path, 'w') as f:
                 f.write(fallback_content)
-            print(f"Created fallback {expected_file} based on {agent_type} log")
+            print(f"Created fallback {fallback_filename} based on {agent_type} log")
         except Exception as e:
-            print(f"Error creating fallback {expected_file}: {e}")
+            print(f"Error creating fallback {fallback_filename}: {e}")
 
     def _generate_fallback_report(self, agent_type, report_filename, log_file):
         """Generate fallback report content based on agent type and log"""
@@ -3503,6 +3512,18 @@ def serve_command(args):
     serve_logger = OrchestratorLogger("orchestrator-serve")
     serve_logger.info("Starting orchestrator serve command")
     
+    # Clean up any orphaned processes from previous runs
+    serve_logger.info("Checking for orphaned processes from previous runs...")
+    process_manager = ProcessManager()
+    try:
+        orphaned_cleaned = process_manager.cleanup_system_wide()
+        if orphaned_cleaned:
+            serve_logger.info("Cleaned up orphaned processes, ports should be available")
+            time.sleep(1)  # Brief delay to ensure ports are released
+    except Exception as cleanup_error:
+        serve_logger.warning(f"Startup cleanup failed: {cleanup_error}")
+        # Continue anyway - port detection will handle it
+    
     # Dashboard browser opening function - prefers Safari for WebSocket compatibility
     def open_dashboard_browser(url):
         """Open dashboard in Safari (preferred) or fallback to default browser"""
@@ -3542,22 +3563,27 @@ def serve_command(args):
         except (urllib.error.URLError, urllib.error.HTTPError, OSError):
             return False
     
-    # Find available ports
+    # Find available ports (after cleanup, standard ports should be available)
     dashboard_port = find_available_port(5678, 20)
     if dashboard_port == 5678:
-        serve_logger.info(f"Dashboard server will use port {dashboard_port}")
+        serve_logger.info(f"Dashboard server will use standard port {dashboard_port}")
     else:
-        serve_logger.warning(f"Port 5678 busy, using fallback port {dashboard_port}")
+        serve_logger.warning(f"Dashboard server using fallback port {dashboard_port} (5678 still occupied)")
     
     api_port = find_available_port(8000, 20)
     if api_port == 8000:
-        serve_logger.info(f"API server will use port {api_port}")
+        serve_logger.info(f"API server will use standard port {api_port}")
     else:
-        serve_logger.warning(f"Port 8000 busy, using fallback port {api_port}")
+        serve_logger.warning(f"API server using fallback port {api_port} (8000 still occupied)")
     
     # Initialize process manager (check for meta mode via environment)
     meta_mode = os.getenv('CLAUDE_ORCHESTRATOR_META_MODE') == '1'
-    process_manager = ProcessManager(meta_mode=meta_mode)
+    # Reuse the process_manager from startup cleanup
+    if 'process_manager' not in locals():
+        process_manager = ProcessManager(meta_mode=meta_mode)
+    else:
+        # Update meta mode if needed
+        process_manager.meta_mode = meta_mode
     
     # Register main serve process so it can be terminated by stop command
     process_manager.register_main_process("serve-main")
@@ -3635,10 +3661,10 @@ def serve_command(args):
         serve_logger.info(f"Starting API server on port {api_port}...")
         orchestrator_dir = os.path.expanduser("~/.claude-orchestrator")
         api_script = os.path.join(orchestrator_dir, "api_server.py")
-        api_cmd = [sys.executable, api_script, "--port", str(api_port), "--no-browser"]
         
         # Start API server from current project directory to read .agent-outputs files
         current_dir = os.getcwd()
+        api_cmd = [sys.executable, api_script, "--port", str(api_port), "--no-browser", "--project-root", current_dir]
         
         # Safe process group creation - fallback if setpgrp fails
         def safe_setpgrp():

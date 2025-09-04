@@ -314,7 +314,7 @@ class StatusReader:
             "changes.md": (outputs_dir / "changes.md").exists(),
             "orchestrator-log.md": (outputs_dir / "orchestrator-log.md").exists(),
             "verification.md": (outputs_dir / "verification.md").exists(),
-            "scribe.md": (outputs_dir / "scribe.md").exists(),
+            "scribe.md": (outputs_dir / "scribe.md").exists() or (outputs_dir / "scribe-fallback.md").exists(),
             "completion-approved.md": (outputs_dir / "completion-approved.md").exists()
         }
     

@@ -873,10 +873,11 @@
             border-radius: 13px;
             max-width: 1200px;
             width: 95%;
-            max-height: 90vh;
+            height: 90vh;
             min-height: 600px;
             overflow-y: auto;
             margin: 20px auto;
+            resize: vertical;
             box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
             display: flex;
             flex-direction: column;
@@ -974,9 +975,11 @@
             background: #0d1117;
             border-radius: 6px;
             border: none;
-            max-height: 231px;
-            overflow-y: auto;
+            max-height: none;
+            overflow: auto;
             padding: 16px;
+            resize: vertical !important;
+            min-height: 150px;
         }
 
         #agentLogViewer .log-content {
@@ -1051,13 +1054,100 @@
 
         .terminal-container {
             height: calc(40vh - 60px);
-            min-height: 300px;
-            max-height: 500px;
+            min-height: 200px;
+            max-height: none;
             background: #1a1a1b;
-            overflow: hidden;
+            overflow: auto;
             position: relative;
             border-radius: 6px;
             border: 1px solid rgba(75, 85, 99, 0.3);
+            resize: vertical;
+        }
+
+        /* Enhanced resize handle styling for better visibility and smooth resizing */
+        .terminal-container {
+            resize: vertical !important;
+            overflow: auto !important;
+        }
+
+        .terminal-container::-webkit-resizer {
+            background-color: #6b7280 !important;
+            border-radius: 0 0 6px 0;
+            background-image: 
+                linear-gradient(135deg, transparent 30%, #9ca3af 30%, #9ca3af 45%, transparent 45%),
+                linear-gradient(45deg, transparent 30%, #9ca3af 30%, #9ca3af 45%, transparent 45%);
+            background-size: 6px 6px !important;
+            background-position: bottom right;
+            width: 16px !important;
+            height: 16px !important;
+            cursor: se-resize !important;
+            display: block !important;
+            position: absolute !important;
+            bottom: 0 !important;
+            right: 0 !important;
+        }
+
+        .terminal-container:hover::-webkit-resizer {
+            background-color: #9ca3af !important;
+        }
+
+        /* Enhanced resize handle styling for agent log viewer */
+        #agentLogViewer::-webkit-resizer {
+            background-color: #6b7280 !important;
+            border-radius: 0 0 6px 0;
+            background-image: 
+                linear-gradient(135deg, transparent 30%, #9ca3af 30%, #9ca3af 45%, transparent 45%),
+                linear-gradient(45deg, transparent 30%, #9ca3af 30%, #9ca3af 45%, transparent 45%);
+            background-size: 6px 6px !important;
+            background-position: bottom right;
+            width: 16px !important;
+            height: 16px !important;
+            cursor: se-resize !important;
+            display: block !important;
+            position: absolute !important;
+            bottom: 0 !important;
+            right: 0 !important;
+        }
+
+        #agentLogViewer:hover::-webkit-resizer {
+            background-color: #9ca3af !important;
+        }
+
+        /* Enhanced resize handle styling for server log viewer */
+        .log-viewer::-webkit-resizer {
+            background-color: #6b7280 !important;
+            border-radius: 0 0 6px 0;
+            background-image: 
+                linear-gradient(135deg, transparent 30%, #9ca3af 30%, #9ca3af 45%, transparent 45%),
+                linear-gradient(45deg, transparent 30%, #9ca3af 30%, #9ca3af 45%, transparent 45%);
+            background-size: 6px 6px !important;
+            background-position: bottom right;
+            width: 16px !important;
+            height: 16px !important;
+            cursor: se-resize !important;
+            display: block !important;
+            position: absolute !important;
+            bottom: 0 !important;
+            right: 0 !important;
+        }
+
+        .log-viewer:hover::-webkit-resizer {
+            background-color: #9ca3af !important;
+        }
+
+        /* Enhanced resize handle styling for log modals */
+        .log-modal-dialog::-webkit-resizer {
+            background-color: #4a5568;
+            border-radius: 0 0 13px 0;
+            background-image: 
+                linear-gradient(135deg, transparent 35%, #6b7280 35%, #6b7280 50%, transparent 50%),
+                linear-gradient(45deg, transparent 35%, #6b7280 35%, #6b7280 50%, transparent 50%);
+            background-size: 8px 8px;
+            background-position: bottom right;
+        }
+
+        .log-modal-dialog:hover::-webkit-resizer {
+            background-color: #6b7280;
         }
 
         /* Terminal Connection Status */
@@ -1130,7 +1220,21 @@
         .terminal-container .xterm-viewport {
             height: 100% !important;
             max-height: 100% !important;
-            overflow: hidden !important;
+            overflow-y: auto !important;
+            scrollbar-width: thin;
+        }
+        .terminal-container .xterm-viewport::-webkit-scrollbar {
+            width: 8px;
+        }
+        .terminal-container .xterm-viewport::-webkit-scrollbar-track {
+            background: #000000;
+        }
+        .terminal-container .xterm-viewport::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 4px;
+        }
+        .terminal-container .xterm-viewport::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.5);
         }
 
         .terminal-container .xterm-screen {
@@ -1210,9 +1314,11 @@
             background: #0d1117;
             border-radius: 6px;
             border: none;
-            max-height: 231px;
-            overflow-y: auto;
+            max-height: none;
+            overflow: auto;
             margin: 0;
+            resize: vertical !important;
+            min-height: 150px;
         }
 
         .log-viewer .log-content {
@@ -1676,8 +1782,9 @@
 
             .terminal-container {
                 height: calc(30vh - 40px);
-                min-height: 250px;
-                max-height: 350px;
+                min-height: 150px;
+                max-height: none;
+                resize: vertical !important;
             }
 
             .terminal-connection-status {
@@ -1703,8 +1810,9 @@
 
             .terminal-container {
                 height: calc(25vh - 30px);
-                min-height: 200px;
-                max-height: 300px;
+                min-height: 150px;
+                max-height: none;
+                resize: vertical !important;
             }
 
             .terminal-connection-status {
@@ -2092,7 +2200,7 @@
 
     <!-- User Validation Gate Modal -->
     <div class="log-modal" id="userValidationModal">
-        <div class="log-modal-dialog" style="max-width: 95vw; width: 95vw; max-height: 95vh; height: 90vh;">
+        <div class="log-modal-dialog" style="max-width: 95vw; width: 95vw; height: 90vh; resize: vertical;">
             <div class="modal-header">
                 <h2 class="modal-title" id="modalTitle">
                     <i data-lucide="user-check" class="modal-icon"></i>
@@ -2140,7 +2248,7 @@
 
     <!-- Taskset Modal -->
     <div class="log-modal" id="tasksetModal">
-        <div class="log-modal-dialog" style="max-width: 95vw; width: 95vw; max-height: 95vh; height: 90vh;">
+        <div class="log-modal-dialog" style="max-width: 95vw; width: 95vw; height: 90vh; resize: vertical;">
             <div class="modal-header">
                 <h2 class="modal-title">
                     <i data-lucide="list-checks" class="modal-icon"></i>
@@ -2164,7 +2272,7 @@
 
     <!-- Agent Options Modal -->
     <div class="log-modal" id="agentOptionsModal">
-        <div class="log-modal-dialog" style="max-width: 500px; max-height: 400px;">
+        <div class="log-modal-dialog" style="max-width: 500px; height: 400px; resize: vertical;">
             <div class="modal-header">
                 <h2 class="modal-title" id="agentOptionsTitle">
                     <i data-lucide="user" class="modal-icon" id="agentOptionsIcon"></i>
@@ -2412,11 +2520,15 @@
                 return;
             }
             
-            // Step 2: Clear cache and force fresh discovery to ensure we try 8000 first
-            clearCachedPort(); // Always start fresh
-            console.log('Cleared cache, will discover API server starting with port 8000');
+            // Step 2: Only clear cache if we don't already have a working port
+            if (!discoveredAPIPort) {
+                clearCachedPort(); // Clear cache only if no port is already discovered
+                console.log('No existing port, will discover API server');
+            } else {
+                console.log(`Using existing discovered port: ${discoveredAPIPort}`);
+            }
             
-            // Step 3: Test cached/existing port
+            // Step 3: Test existing discovered port if we have one
             if (discoveredAPIPort) {
                 try {
                     const response = await fetch(`http://localhost:${discoveredAPIPort}/api/status`, {
@@ -2424,7 +2536,7 @@
                         signal: AbortSignal.timeout(1000)
                     });
                     if (response.ok) {
-                        console.log(`Using cached/existing API port: ${discoveredAPIPort}`);
+                        console.log(`Using existing discovered API port: ${discoveredAPIPort}`);
                         useRealAPI = true;
                         await fetchRealStatus();
                         // Initialize unsupervised mode after successful API connection
@@ -2432,12 +2544,39 @@
                         // File viewer removed - using log modals instead
                         return;
                     } else {
-                        console.log('Cached port no longer valid, will rediscover');
+                        console.log('Existing port no longer valid, will rediscover');
                         discoveredAPIPort = null;
                     }
                 } catch (error) {
-                    console.log('Cached port test failed, will rediscover');
+                    console.log('Existing port test failed, will rediscover');
                     discoveredAPIPort = null;
+                }
+            }
+
+            // Step 3b: Try cached port from localStorage
+            const cachedPort = getCachedPort();
+            if (cachedPort && !discoveredAPIPort) {
+                try {
+                    const response = await fetch(`http://localhost:${cachedPort}/api/status`, {
+                        method: 'GET',
+                        signal: AbortSignal.timeout(1000)
+                    });
+                    if (response.ok) {
+                        console.log(`Using cached API port from localStorage: ${cachedPort}`);
+                        discoveredAPIPort = cachedPort;
+                        useRealAPI = true;
+                        await fetchRealStatus();
+                        // Initialize unsupervised mode after successful API connection
+                        await initializeUnsupervisedMode();
+                        // File viewer removed - using log modals instead
+                        return;
+                    } else {
+                        console.log('Cached port no longer valid, clearing cache');
+                        clearCachedPort();
+                    }
+                } catch (error) {
+                    console.log('Cached port test failed, clearing cache');
+                    clearCachedPort();
                 }
             }
             
@@ -2445,6 +2584,7 @@
             try {
                 discoveredAPIPort = await discoverAPIPort();
                 console.log(`Using discovered API server on port ${discoveredAPIPort}`);
+                setCachedPort(discoveredAPIPort); // Cache the discovered port
                 useRealAPI = true;
                 await fetchRealStatus();
                 // Initialize unsupervised mode after successful API connection
@@ -3602,7 +3742,10 @@
                     result = await window.OrchestratorAPI.makeDecision(decisionType, { mode: currentMode });
                 } else {
                     // Fallback to direct API call
-                    const response = await fetch(`${getAPIBaseURL()}/api/gate-decision?mode=${currentMode}`, {
+                    const apiUrl = `${getAPIBaseURL()}/api/gate-decision?mode=${currentMode}`;
+                    console.log(`[DEBUG] makeGateDecision: About to call API at: ${apiUrl}`);
+                    console.log(`[DEBUG] makeGateDecision: discoveredAPIPort = ${discoveredAPIPort}`);
+                    const response = await fetch(apiUrl, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ decision_type: decisionType }),
@@ -4787,7 +4930,7 @@
             // Initialize Terminal instance with SAGE theme and clipboard support
             terminal = new Terminal({
                 theme: {
-                    background: '#1a1a1b'
+                    background: '#000000'
                 },
                 allowTransparency: true,
                 rightClickSelectsWord: true,
@@ -4815,22 +4958,17 @@
                 }
             });
 
-            // Handle all input (keyboard + paste) through onData
-            terminal.onData((data) => {
-                if (terminalSocket && terminalSocket.readyState === WebSocket.OPEN) {
-                    terminalSocket.send(JSON.stringify({
-                        type: 'input',
-                        data: data
-                    }));
-                }
-            });
+            // Track if we're handling a special key to prevent double processing
+            let handlingSpecialKey = false;
             
-            // Handle special key combinations that need custom behavior
+            // Handle special key combinations that need custom behavior BEFORE onData
             terminal.onKey((event) => {
-                const { domEvent } = event;
+                const { key, domEvent } = event;
                 
                 // Handle Shift+Enter for newlines in Claude CLI
                 if (domEvent.shiftKey && domEvent.key === 'Enter') {
+                    handlingSpecialKey = true;
+                    
                     // Send literal newline for multiline input
                     if (terminalSocket && terminalSocket.readyState === WebSocket.OPEN) {
                         terminalSocket.send(JSON.stringify({
@@ -4838,9 +4976,32 @@
                             data: '\n'
                         }));
                     }
-                    // Prevent default Enter behavior
+                    
+                    // Prevent default Enter behavior and stop event propagation
                     domEvent.preventDefault();
+                    domEvent.stopPropagation();
+                    
+                    // Reset flag after a brief delay
+                    setTimeout(() => {
+                        handlingSpecialKey = false;
+                    }, 10);
+                    
+                    return false;
+                }
+            });
+            
+            // Handle all other input (keyboard + paste) through onData
+            terminal.onData((data) => {
+                // Skip processing if we're handling a special key combination
+                if (handlingSpecialKey) {
                     return;
+                }
+                
+                if (terminalSocket && terminalSocket.readyState === WebSocket.OPEN) {
+                    terminalSocket.send(JSON.stringify({
+                        type: 'input',
+                        data: data
+                    }));
                 }
             });
         }
@@ -4860,15 +5021,37 @@
                 
                 console.log('Terminal container dimensions:', containerWidth, 'x', containerHeight);
                 
-                // Calculate appropriate terminal dimensions
-                // Estimate character dimensions (typical values for monospace fonts)
-                const charWidth = 9;  // Average character width in pixels
-                const charHeight = 17; // Average character height in pixels
+                // Use xterm.js built-in fit addon if available, otherwise fallback to manual calculation
+                if (terminal.loadAddon && window.FitAddon) {
+                    try {
+                        const fitAddon = new FitAddon();
+                        terminal.loadAddon(fitAddon);
+                        fitAddon.fit();
+                        console.log('Terminal fitted using FitAddon');
+                        return;
+                    } catch (addonError) {
+                        console.warn('FitAddon not available, using manual calculation:', addonError);
+                    }
+                }
                 
-                const cols = Math.floor((containerWidth - 20) / charWidth); // Leave some padding
-                const rows = Math.floor((containerHeight - 20) / charHeight); // Leave some padding
+                // Calculate appropriate terminal dimensions with dynamic font metrics
+                const testElement = document.createElement('div');
+                testElement.style.position = 'absolute';
+                testElement.style.visibility = 'hidden';
+                testElement.style.fontFamily = 'monospace';
+                testElement.style.fontSize = '14px';
+                testElement.innerHTML = 'M'; // Use 'M' for consistent width measurement
+                document.body.appendChild(testElement);
                 
-                console.log('Calculated terminal size:', cols, 'cols x', rows, 'rows');
+                const charWidth = testElement.offsetWidth;
+                const charHeight = testElement.offsetHeight;
+                document.body.removeChild(testElement);
+                
+                const cols = Math.floor((containerWidth - 20) / charWidth);
+                const rows = Math.floor((containerHeight - 20) / charHeight);
+                
+                console.log('Calculated terminal size with dynamic metrics:', cols, 'cols x', rows, 'rows');
+                console.log('Character dimensions:', charWidth, 'x', charHeight);
                 
                 // Resize terminal to fit container
                 if (cols > 0 && rows > 0) {
@@ -5172,6 +5355,28 @@
                     fitTerminalToContainer();
                 }, 250);
             });
+
+            // Add ResizeObserver for manual container resizing
+            if (window.ResizeObserver) {
+                const terminalContainer = document.getElementById('terminal-container');
+                if (terminalContainer) {
+                    const resizeObserver = new ResizeObserver((entries) => {
+                        clearTimeout(resizeTimeout);
+                        resizeTimeout = setTimeout(() => {
+                            // Force repaint to ensure accurate dimensions
+                            terminalContainer.style.display = 'none';
+                            terminalContainer.offsetHeight; // Trigger reflow
+                            terminalContainer.style.display = '';
+                            
+                            fitTerminalToContainer();
+                            
+                            console.log('Terminal container manually resized via ResizeObserver');
+                        }, 50); // Reduced delay for more responsive resizing
+                    });
+                    resizeObserver.observe(terminalContainer);
+                    console.log('ResizeObserver attached to terminal container');
+                }
+            }
             
             // Add backup event listener for taskset modal close button
             const tasksetCloseBtn = document.querySelector('#tasksetModal .close');
