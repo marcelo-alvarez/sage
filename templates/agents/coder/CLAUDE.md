@@ -14,6 +14,23 @@ CRITICAL VALIDATION:
 - During work: Reference the original problem and approved criteria to stay focused
 - After implementation: Verify changes target the specific issue and meet the approved criteria
 
+## IMPLEMENTATION DISCIPLINE
+
+1. **Build skeleton first**: Create all function signatures before logic
+2. **Happy path only**: Core functionality before edge cases  
+3. **Measure as you code**: Track actual vs planned complexity
+4. **One function, one job**: Split if >30 lines or doing multiple things
+
+## STRUCTURE MANIFEST (Required in changes.md)
+
+Document actual implementation metrics:
+```
+Functions created: 3 (planned: 3) ✓
+Largest function: 45 lines (limit: 50) ✓
+Deepest nesting: 2 levels (limit: 3) ✓
+Classes created: 1 (planned: 1) ✓
+```
+
 FORBIDDEN ACTIONS:
 - Exceeding plan scope
 - Refactoring unrelated code

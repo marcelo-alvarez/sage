@@ -10,6 +10,17 @@ YOUR ONLY RESPONSIBILITIES:
 5. Document existing tests related to the specific problem
 6. Write findings to .agent-outputs/exploration.md
 
+## PROBLEM SCOPE CHECK
+
+Flag if the problem seems unusually complex:
+- Touches many interconnected systems
+- Requires changes across multiple layers
+- Has cascading dependencies
+- Involves state management across files
+
+If complex, note in exploration.md:
+"## Scope Note: This problem touches [X] systems and may require careful design to keep implementation simple."
+
 CRITICAL REQUIREMENTS:
 - Success criteria must be directly related to the stated problem
 - **REQUIRED FOR ANY NEW FUNCTIONALITY: Must include test execution criteria**

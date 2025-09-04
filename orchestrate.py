@@ -3711,9 +3711,31 @@ def serve_command(args):
         
         # Open browser immediately once dashboard is confirmed ready
         dashboard_url = f"http://localhost:{dashboard_port}"
+        
+        # Check for VS Code remote session
+        is_remote = is_vscode_remote_session()
+        
         if not args.no_browser and dashboard_ready:
-            serve_logger.info(f"Opening browser to {dashboard_url}")
-            open_dashboard_browser(dashboard_url)
+            if is_remote:
+                serve_logger.info("VS Code Remote-SSH session detected")
+                # VS Code-compatible stdout patterns for automatic port forwarding detection
+                print(f"\n{'='*60}")
+                print(f"🚀 Dashboard ready!")
+                print(f"{'='*60}")
+                print(f"Server listening on http://localhost:{dashboard_port}")
+                print(f"\nAccess your dashboard at: {dashboard_url}")
+                print(f"API endpoint: http://localhost:{api_port}/api/status")
+                print(f"\nVS Code should automatically forward these ports.")
+                print(f"Look for the notification or check Ports panel (Cmd/Ctrl+Shift+P → 'Forward a Port')")
+                print(f"{'='*60}\n")
+                # Maintain existing logger for debugging
+                serve_logger.info("To access the dashboard in VS Code Remote-SSH:")
+                serve_logger.info(f"1. Use VS Code port forwarding for port {dashboard_port}")
+                serve_logger.info(f"2. Open forwarded URL in browser: {dashboard_url}")
+                serve_logger.info("3. VS Code will automatically handle port forwarding")
+            else:
+                serve_logger.info(f"Opening browser to {dashboard_url}")
+                open_dashboard_browser(dashboard_url)
         
         serve_logger.info(f"Dashboard available at: {dashboard_url}")
         serve_logger.info(f"Dashboard UI at: {dashboard_url}/dashboard.html") 

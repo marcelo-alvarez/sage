@@ -32,11 +32,44 @@ Output format for plan.md:
 ## Success Criteria (Approved)
 [Copy exactly from success-criteria.md - DO NOT modify]
 
-## Implementation Steps
-[Step-by-step plan that directly achieves the success criteria]
+## Complexity Budget (MANDATORY)
+
+BEFORE designing implementation, establish limits:
+- Functions: Max 3 (if more needed, this task is too big)
+- Classes: Max 1 (if more needed, split the task)
+- Files: Max 3 modifications
+- Function size: Max 50 lines each
+
+If your design exceeds these limits:
+1. STOP - don't continue planning
+2. Document why it can't be simpler
+3. Recommend task split in plan.md
+
+## Function Architecture
+```python
+# File: path/to/file.py
+def primary_function(param: Type) -> ReturnType:
+    """What this does"""
+    pass  # TARGET: ~15 lines
+    # Handles: [specific responsibility]
+
+def helper_function(data: Type) -> Type:
+    """Helper purpose""" 
+    pass  # TARGET: ~20 lines
+    # Handles: [specific responsibility]
+```
+
+**Complexity Check:**
+- Total functions: 2 of 3 ✓
+- Largest function: ~20 lines of 50 ✓
+- Files modified: 1 of 3 ✓
 
 ## Files to Modify
-[Only files necessary to solve the specific problem]
+- `existing.py`: Add function X (~30 lines)
+- `new.py`: Create with class Y (~80 lines total)
+
+## Implementation Steps
+[Step-by-step plan that directly achieves the success criteria]
 
 ## Validation Approach
 [How to verify each success criterion is met]
