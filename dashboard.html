@@ -873,8 +873,8 @@
             border-radius: 13px;
             max-width: 1200px;
             width: 95%;
-            height: 90vh;
-            min-height: 600px;
+            height: 50vh;
+            min-height: 400px;
             overflow-y: auto;
             margin: 20px auto;
             resize: vertical;
@@ -1717,7 +1717,7 @@
         @media (max-width: 768px) {
             .modal-dialog {
                 margin: 10px;
-                max-height: 90vh;
+                max-height: 60vh;
             }
 
             .modal-header {
@@ -2133,21 +2133,6 @@
                 </div>
             </section>
 
-            <!-- Terminal Section -->
-            <section class="terminal-section" id="terminalSection">
-                <div class="workflow-header">
-                    <div class="workflow-title">
-                        <i data-lucide="terminal"></i>
-                        <span>Terminal</span>
-                    </div>
-                    <div class="terminal-connection-status" id="terminalConnectionStatus">
-                        <span class="connection-dot disconnected"></span>
-                        <span class="connection-text">Disconnected</span>
-                    </div>
-                </div>
-                <div class="terminal-container" id="terminal-container"></div>
-            </section>
-
             <!-- Agent Logs Section -->
             <section class="agent-logs-section" id="agentLogsSection">
                 <div class="workflow-header">
@@ -2192,6 +2177,21 @@
                 </div>
             </section>
 
+            <!-- Terminal Section -->
+            <section class="terminal-section" id="terminalSection">
+                <div class="workflow-header">
+                    <div class="workflow-title">
+                        <i data-lucide="terminal"></i>
+                        <span>Terminal</span>
+                    </div>
+                    <div class="terminal-connection-status" id="terminalConnectionStatus">
+                        <span class="connection-dot disconnected"></span>
+                        <span class="connection-text">Disconnected</span>
+                    </div>
+                </div>
+                <div class="terminal-container" id="terminal-container"></div>
+            </section>
+
             <div class="last-updated" id="lastUpdated">
                 Last updated: <span id="updateTime"></span>
             </div>
@@ -2200,7 +2200,7 @@
 
     <!-- User Validation Gate Modal -->
     <div class="log-modal" id="userValidationModal">
-        <div class="log-modal-dialog" style="max-width: 95vw; width: 95vw; height: 90vh; resize: vertical;">
+        <div class="log-modal-dialog" style="max-width: 95vw; width: 95vw; height: 50vh; resize: vertical;">
             <div class="modal-header">
                 <h2 class="modal-title" id="modalTitle">
                     <i data-lucide="user-check" class="modal-icon"></i>
@@ -2248,7 +2248,7 @@
 
     <!-- Taskset Modal -->
     <div class="log-modal" id="tasksetModal">
-        <div class="log-modal-dialog" style="max-width: 95vw; width: 95vw; height: 90vh; resize: vertical;">
+        <div class="log-modal-dialog" style="max-width: 95vw; width: 95vw; height: 50vh; resize: vertical;">
             <div class="modal-header">
                 <h2 class="modal-title">
                     <i data-lucide="list-checks" class="modal-icon"></i>
@@ -5413,7 +5413,7 @@
         width: 98%;
         max-width: 1800px;
         min-width: 1000px;
-        max-height: 90vh;
+        max-height: 60vh;
         border-radius: 8px;
         border: 1px solid #333;
         display: flex;
