@@ -29,6 +29,14 @@ from process_manager import ProcessManager
 from orchestrator_logger import OrchestratorLogger
 
 
+def safe_preexec():
+    """Safe preexec function that handles different platforms and permissions"""
+    try:
+        os.setpgrp()
+    except (AttributeError, OSError):
+        # setpgrp might not be available on all platforms or might fail due to permissions
+        pass
+
 def is_vscode_remote_session():
     """Detect VS Code Remote-SSH session with robust error handling"""
     try:
@@ -409,7 +417,7 @@ class AgentConfig:
                 sys.executable, api_script, 
                 '--port', str(self.api_port),
                 '--project-root', str(self.project_root)
-            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=self.project_root, start_new_session=True, preexec_fn=os.setpgrp)
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=self.project_root, start_new_session=True, preexec_fn=safe_preexec)
             
             # Register API process with ProcessManager if available
             if self.process_manager:
@@ -3205,7 +3213,7 @@ CRITICAL REQUIREMENTS:
                 stdout=subprocess.DEVNULL, 
                 stderr=subprocess.DEVNULL, 
                 start_new_session=True, 
-                preexec_fn=os.setpgrp)
+                preexec_fn=safe_preexec)
                 # Register background process with ProcessManager for proper cleanup
                 self.process_manager.register_process('background_continue', background_process)
                 print("Background continue process started")
@@ -3264,7 +3272,7 @@ CRITICAL REQUIREMENTS:
                 stdout=subprocess.DEVNULL, 
                 stderr=subprocess.DEVNULL, 
                 start_new_session=True, 
-                preexec_fn=os.setpgrp)
+                preexec_fn=safe_preexec)
                 # Register background process with ProcessManager for proper cleanup
                 self.process_manager.register_process('background_continue', background_process)
                 print("\n" + "="*60)
