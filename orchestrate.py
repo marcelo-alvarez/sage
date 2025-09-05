@@ -3396,7 +3396,14 @@ Continuing to next task in workflow
         claude_dir_name = self.claude_dir.name  # Will be '.claude' or '.claude-meta'
         
         bootstrap_instructions = f"""
-BOOTSTRAP MODE: Generate task structure appropriate for work type
+BOOTSTRAP MODE: Generate TWO files for task structure - DO NOT EXECUTE ANY WORK
+
+CRITICAL: You must create these two files:
+1. {claude_dir_name}/guide.md - implementation guide
+2. {claude_dir_name}/task-checklist.md - task checklist
+
+DO NOT execute commands, run tests, or start fixing anything.
+ONLY create the files that describe how the work should be done.
 
 TASK TYPE ANALYSIS - First determine what kind of work this is:
 
@@ -3451,21 +3458,22 @@ TASK STRUCTURE PATTERNS:
 FILE STRUCTURE TO CREATE:
 
 ## {claude_dir_name}/guide.md
-Comprehensive implementation guide that adapts to task type:
-- For BUG FIXES: Starts with diagnostic methodology and empirical verification
-- For FEATURES: Focuses on requirements analysis and design patterns
-- For ENHANCEMENTS: Includes current state analysis and improvement metrics
-- For REFACTORING: Documents behavior preservation and quality improvements
-- Always includes appropriate anti-patterns for the task type
-- Provides success criteria templates for different work types
+Comprehensive implementation guide that:
+- Describes the overall goal and architecture
+- Defines success criteria for the entire taskset
+- Explains key design decisions and trade-offs
+- Provides detailed implementation patterns and best practices
+- Includes architectural guidance to prevent common coding errors
+- Self-contained reference with both conceptual and technical guidance
+- Adapts content based on task type (bug fixes, features, enhancements, refactoring)
 
 ## {claude_dir_name}/task-checklist.md  
-Task-appropriate checklist where:
-- Bug fixes use diagnostic → solution → validation pattern
-- Features use explore → design → implement → test pattern  
-- Enhancements use analyze → improve → measure pattern
-- Refactoring uses document → restructure → verify pattern
-- USER validation points are contextually appropriate
+Actionable checklist where:
+- Each line is one task with comprehensive description
+- Tasks reference {claude_dir_name}/guide.md sections for implementation details
+- Format: - [ ] Brief description implementing the [aspect] design from {claude_dir_name}/guide.md section [X]
+- USER tasks clearly start with "USER" keyword
+- Task patterns adapt to work type (diagnostic, design-first, analysis-first, preserve-first)
 
 CONTEXTUAL SECTIONS IN GUIDE.MD:
 
